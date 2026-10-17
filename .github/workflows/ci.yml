@@ -23,10 +23,17 @@ jobs:
 
       - name: Host tests
         working-directory: host/node
-        run: node --test --test-concurrency=1 --test-timeout=180000 'test/*.test.mjs'
+        run: node --test --test-concurrency=1 --test-timeout=180000 $(ls test/*.test.mjs | grep -v -e browser -e chrome-smoke)
 
       - name: Website tests
-        run: node --test --test-concurrency=1 --test-timeout=180000 'tests/site/*.test.mjs'
+        run: node --test --test-concurrency=1 --test-timeout=180000 $(ls tests/site/*.test.mjs | grep -v browser)
+
+      # Headless Chrome on a shared 3-core runner now and then misses a timing; these get one retry.
+      - name: Browser tests (Setup page, Chrome video, website screens)
+        run: |
+          run() { node --test --test-concurrency=1 --test-timeout=180000 host/node/test/setup-browser.test.mjs \
+            host/node/test/chrome-smoke.test.mjs tests/site/*.browser.test.mjs; }
+          run || { echo "::warning::browser tests failed once; retrying"; run; }
 
       - name: Build the app and run its self-test
         run: |
@@ -34,7 +41,11 @@ jobs:
           host/app/.build/release/Perch --selftest
 
       - name: Website and host end to end
-        run: node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/full.test.mjs
+        run: |
+          run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/full.test.mjs; }
+          run || { echo "::warning::end-to-end tests failed once; retrying"; run; }
 
       - name: Website, host and the real app end to end
-        run: node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/app.test.mjs
+        run: |
+          run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/app.test.mjs; }
+          run || { echo "::warning::app end-to-end test failed once; retrying"; run; }

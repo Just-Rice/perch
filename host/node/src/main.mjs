@@ -42,13 +42,27 @@ async function main() {
   process.removeAllListeners('warning');
   process.on('warning', w => log.debug(`node warning: ${w.name}: ${w.message}`));
   process.on('unhandledRejection', e => log.error('unhandled rejection:', e));
-  process.on('uncaughtException', e => log.error('uncaught exception:', e));
+  // A broken pipe means the app is gone: there is nobody left to serve, so stop (the app restarts us if it's still
+  // there). Any other error that keeps repeating is a loop: stop rather than spin, and let the app restart us.
+  let recentErrors = [];
+  process.on('uncaughtException', e => {
+    if (e?.code === 'EPIPE' || e?.code === 'ERR_STREAM_DESTROYED') process.exit(0);
+    log.error('uncaught exception:', e);
+    const now = Date.now();
+    recentErrors = recentErrors.filter(t => now - t < 1000);
+    recentErrors.push(now);
+    if (recentErrors.length > 20) {
+      log.error('too many uncaught exceptions in a second; stopping so the app can restart the host');
+      process.exit(1);
+    }
+  });
 
   log.info(`Perch host ${config.version} starting (node ${process.version}${config.test ? ', TEST MODE' : ''})`);
   const patched = applyWeriftPatches();
   if (!patched.unorderedFlag) log.warn('werift: the data channel ordering fix did not apply (werift changed?)');
 
-  const ipc = new HostIpc({ log: log.child('ipc') });
+  // Reading starts once the handlers below are attached (see HostIpc), so the app's HELLO can't be lost.
+  const ipc = new HostIpc({ log: log.child('ipc'), autoStart: false });
   const firstRun = !existsSync(join(config.home, 'config.json'));
 
   let store;
@@ -58,6 +72,7 @@ async function main() {
     log.error('could not open the store:', e);
     ipc.command('status', { state: 'error', text: 'Perch couldn’t read its settings or the Keychain. Quit and open Perch again.', macName: '', setupUrl: null, settings: {} });
     ipc.on('close', () => process.exit(1));
+    ipc.start();
     return;
   }
   // Sign-in time (authenticator codes, lockouts, link expiry). Tests may move it forward; nothing else can.
@@ -77,6 +92,7 @@ async function main() {
   ipc.on('audio', f => controller.handleAudio(f));
   ipc.on('error', e => { log.error('IPC stream broken:', e.message); quit(1); });
   ipc.on('close', () => { log.info('the app closed our stdin; quitting'); quit(0); });
+  ipc.start();
 
   let lastStatus = '';
   const pushStatus = () => {

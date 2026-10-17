@@ -45,10 +45,17 @@ export function createLog({ home = null, level = 'info', stderr = process.stderr
     }
   }
 
+  // Once the app is gone, writing to its end of stderr fails (EPIPE). Stop writing there for good: an error logged
+  // to a broken stderr would fail again, and through the uncaught-exception handler loop forever at full speed.
+  let stderrOk = true;
+  stderr?.on?.('error', () => { stderrOk = false; });
+
   function write(lvl, tag, parts) {
     if (LEVELS[lvl] < min) return;
     const line = `${new Date().toISOString()} ${lvl.toUpperCase().padEnd(5)} ${tag ? `[${tag}] ` : ''}${format(parts)}\n`;
-    try { stderr.write(line); } catch {}
+    if (stderrOk && !stderr.destroyed && !stderr.writableEnded) {
+      try { stderr.write(line); } catch { stderrOk = false; }
+    }
     toFile(line);
   }
 

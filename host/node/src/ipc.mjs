@@ -118,8 +118,12 @@ export class FrameReader {
 // The host's end of the pipe. Emits: 'hello' (obj), 'video' ({keyframe, ptsUs, data}), 'audio' ({ptsUs, data}),
 // 'event' (obj), 'close' (), and 'error' (Error) for a broken stream. Unknown frame types are ignored so a newer
 // app can talk to an older host.
+//
+// With `autoStart: false` nothing is read until start(): the app sends HELLO the moment it launches the host, and an
+// event emitted before anyone listens is simply lost. main.mjs wires up its handlers first (after opening the store,
+// which reads the Keychain and takes a while), then starts reading; until then the bytes wait in the pipe.
 export class HostIpc extends EventEmitter {
-  constructor({ input = process.stdin, output = process.stdout, log = null } = {}) {
+  constructor({ input = process.stdin, output = process.stdout, log = null, autoStart = true } = {}) {
     super();
     // Not `this.input`: that is the method that sends INPUT frames.
     this.inStream = input;
@@ -127,11 +131,19 @@ export class HostIpc extends EventEmitter {
     this.log = log;
     this.reader = new FrameReader();
     this.closed = false;
+    this.started = false;
+    output.on?.('error', () => this._close());
+    if (autoStart) this.start();
+  }
+
+  start() {
+    if (this.started) return;
+    this.started = true;
+    const input = this.inStream;
     input.on('data', chunk => this._onData(chunk));
     input.on('end', () => this._close());
     input.on('close', () => this._close());
     input.on('error', () => this._close());
-    output.on?.('error', () => this._close());
   }
 
   _onData(chunk) {

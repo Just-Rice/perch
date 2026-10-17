@@ -296,8 +296,10 @@ export async function startHost({
   const app = new FakeApp({ child, home, ownHome, streamAlways, permissions, displays });
   if (streamAlways) app.player.start();
   if (hello) app.hello();
-  // The control channel answers once the host is fully up.
+  // The control channel answers once the host is fully up. HELLO travels on another pipe, so on a slow machine the
+  // first answer can come before the host has read it: wait until the app's displays show up in the state.
   await app.call('state');
+  if (hello) await app.waitFor(async () => (await app.call('state')).displays?.length > 0, { what: 'the host to read HELLO' });
   // Until the host has reached the broker, a viewer's hello would go nowhere (QoS 0 keeps nothing for later).
   if (online) {
     await app.waitFor(async () => (await app.call('state')).rendezvous.some(r => r.connected), { what: 'the host to reach the broker' });

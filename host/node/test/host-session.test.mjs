@@ -174,7 +174,7 @@ test('pairing: nothing is sent and no input reaches the app until the code is ri
   const app = await host(t, { streamAlways: true });
   const firstRun = await app.waitForCommand(c => c.c === 'open-url');
   assert.match(firstRun.url, /^http:\/\/127\.0\.0\.1:\d+\/\?k=/, 'Setup opens on the first run');
-  assert.ok(app.commands.some(c => c.c === 'keep-awake' && c.on === true), 'keep-awake applied after HELLO');
+  assert.ok(await app.waitForCommand(c => c.c === 'keep-awake' && c.on === true), 'keep-awake applied after HELLO');
   assert.ok(app.commands.some(c => c.c === 'login-item' && c.on === true), 'login item applied after HELLO');
 
   await app.setupTotp();

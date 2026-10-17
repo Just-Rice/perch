@@ -1,0 +1,22 @@
+{
+  "name": "perch-host",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Perch's Mac host process: rendezvous, WebRTC, sign-in and the local Setup page.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": { "node": ">=22" },
+  "main": "src/main.mjs",
+  "scripts": {
+    "test": "node --test 'test/*.test.mjs'",
+    "bundle": "node scripts/bundle.mjs"
+  },
+  "dependencies": {
+    "@serenity-kit/opaque": "1.1.0",
+    "@simplewebauthn/server": "14.0.3",
+    "werift": "0.25.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

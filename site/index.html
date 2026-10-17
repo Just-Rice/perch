@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<title>Perch: your Mac, from any browser</title>
+<meta name="description" content="See and use your Mac from any browser, with its sound. Free and open source, no account and no servers in between. Sign in with a passkey and an authenticator code.">
+<meta property="og:title" content="Perch: your Mac, from any browser">
+<meta property="og:description" content="See and use your Mac from any browser. Free, open source, no account, no servers in between.">
+<meta property="og:image" content="https://just-rice.github.io/perch/img/og.png">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/perch.css">
+</head>
+<body>
+<div class="wrap">
+  <header class="site">
+    <a class="brand" href="./">
+      <img src="img/icon.svg" alt="" width="30" height="30">
+      Perch <span class="badge">BETA</span>
+    </a>
+    <nav class="site" aria-label="Main">
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#install">Install</a>
+      <a class="hide-sm" href="#privacy">Privacy</a>
+      <a href="https://github.com/Just-Rice/perch">GitHub</a>
+    </nav>
+  </header>
+
+  <div class="hero">
+    <div>
+      <h1>Your Mac, from any browser.</h1>
+      <p class="lead">See and use your Mac from your phone, a tablet or another computer: the screen, the sound, the
+        mouse and keyboard. Free and open source, with no account and no servers in between.</p>
+      <div class="actions">
+        <a class="btn primary" href="connect.html">Connect to my Mac</a>
+        <a class="btn" href="#install">Install on a Mac</a>
+      </div>
+      <p class="fine">Prefer a tab that doesn't show this address?
+        <button type="button" class="btn quiet" id="openBlank">Open in an about:blank tab</button></p>
+      <p class="fine" id="blankStatus" role="status"></p>
+    </div>
+    <div class="mock" aria-hidden="true">
+      <div class="screen">
+        <div class="bar"><span class="dot"></span>amber-otter-4821 · connected</div>
+        <div class="win w1"></div>
+        <div class="win w2"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<section id="how">
+  <div class="wrap">
+    <h2>How it works</h2>
+    <p class="sub">A small app on your Mac sends its screen and sound straight to this page in your browser, and your
+      clicks and typing go straight back. The two connect directly to each other, encrypted, the same way video calls in
+      a browser do.</p>
+    <div class="cards">
+      <div class="card"><div class="num">1</div><h3>Install Perch on your Mac</h3>
+        <p>One line in Terminal. Perch lives in the menu bar and starts by itself when you log in.</p></div>
+      <div class="card"><div class="num">2</div><h3>Pair your devices once</h3>
+        <p>Perch's Setup shows a code on the Mac. Scan it, approve with Face ID or Touch ID, and add Perch to your
+          authenticator app.</p></div>
+      <div class="card"><div class="num">3</div><h3>Use your Mac from anywhere</h3>
+        <p>Open this site, sign in with your passkey and a 6-digit code, and your Mac is right there. Touch, mouse,
+          keyboard and sound all work.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="narrow">
+    <h2>Install on a Mac</h2>
+    <p class="sub">Open <b>Terminal</b> (in Applications › Utilities), paste this line and press Return:</p>
+    <div class="cmd">
+      <code id="installCmd">curl -fsSL https://just-rice.github.io/perch/install.sh | bash</code>
+      <button type="button" class="btn" id="copyCmd">Copy</button>
+    </div>
+    <p class="fine" id="copyStatus" role="status"></p>
+    <p>It downloads the latest Perch from <a href="https://github.com/Just-Rice/perch/releases">GitHub</a>, checks the
+      download against the checksum published with it, puts Perch in your Applications folder and opens Setup.
+      Setup walks you through the rest: two macOS permissions, your authenticator app and pairing your first device.</p>
+    <details>
+      <summary>Why a Terminal command and not a download button?</summary>
+      <p>Perch is free and isn't registered with Apple's paid developer programme. A Mac blocks unregistered apps that
+        were downloaded in a browser ("Perch can't be opened because Apple cannot check it"). Files fetched by Terminal
+        aren't marked that way, so the app simply opens. You can read exactly what the command does:
+        <a href="install.sh">install.sh</a>.</p>
+      <p>Rather download it yourself? Get <code>Perch.zip</code> from the
+        <a href="https://github.com/Just-Rice/perch/releases/latest">latest release</a>, unzip it, move Perch to
+        Applications and open it. When macOS refuses, open <b>System Settings › Privacy &amp; Security</b>, scroll down
+        and click <b>Open Anyway</b> next to the message about Perch. Or
+        <a href="https://github.com/Just-Rice/perch#building-from-source">build it from the code</a>.</p>
+    </details>
+    <details>
+      <summary>What you need</summary>
+      <ul class="list">
+        <li><b>The Mac:</b> Apple silicon (M1 or later) with macOS 14 Sonoma or later. Intel Macs aren't supported yet.</li>
+        <li><b>The device you view from:</b> a recent Safari, Chrome, Edge or Firefox, on a phone, tablet or computer.</li>
+        <li><b>An authenticator app</b> for the 6-digit codes: Apple Passwords, Google Authenticator, Microsoft
+          Authenticator, 1Password and others all work.</li>
+        <li>The Mac has to be <b>on, awake and logged in</b>. Perch can keep it from going to sleep.</li>
+      </ul>
+    </details>
+    <details>
+      <summary>Uninstall</summary>
+      <p>Open Perch's Setup from the menu bar and choose <b>Uninstall Perch</b>, or run
+        <code>curl -fsSL https://just-rice.github.io/perch/uninstall.sh | bash</code>. Either way Perch stops starting
+        at login, its settings and Keychain entry are deleted and the app goes to the Trash.</p>
+    </details>
+  </div>
+</section>
+
+<section id="privacy">
+  <div class="wrap">
+    <h2>Private by design</h2>
+    <p class="sub">This website is only the keypad. The lock is on your Mac: it checks every sign-in itself.</p>
+    <div class="cards">
+      <div class="card"><h3>Two steps, every time</h3>
+        <p>A passkey (Face ID, Touch ID or your phone), then a code from your authenticator app. Nothing is shown or
+          sent until both pass. Five wrong tries locks sign-in for a while.</p></div>
+      <div class="card"><h3>No servers in between</h3>
+        <p>Your screen goes straight from your Mac to your browser, encrypted. Free public message services only pass
+          along scrambled "here's how to reach me" notes, and can't read them.</p></div>
+      <div class="card"><h3>You always know</h3>
+        <p>The menu bar shows when someone is connected and macOS shows its screen-recording light. Only one device at a
+          time, and you can end it from the Mac.</p></div>
+    </div>
+    <p>No passkey on the device you're using? Use your phone's passkey from it (most browsers offer
+      "use a phone or tablet"), or turn on the optional backup sign-in: your Mac's name, a password and the 6-digit code.
+      More in the <a href="privacy.html">privacy page</a> and the
+      <a href="https://github.com/Just-Rice/perch/blob/main/SECURITY.md">security notes</a>.</p>
+    <div class="note warn"><b>Only pair your own devices.</b> Perch gives full control of a Mac. Nobody genuine will
+      ever ask you to install it or to send them a pairing code; anyone who does is trying to scam you.</div>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="narrow">
+    <h2>Good to know</h2>
+    <ul class="list">
+      <li><b>It's a beta</b>, tested on one Mac so far. Please <a href="https://github.com/Just-Rice/perch/issues">report problems</a>.</li>
+      <li>Very strict networks (some schools, workplaces and mobile carriers) can block direct connections.
+        A relay option may come later.</li>
+      <li>Perch shows one display at a time; with several, you can switch between them.</li>
+      <li>It works inside an <b>about:blank</b> tab too: use the button at the top, or a launcher on this site such as
+        <a href="https://just-rice.github.io/about-blank-lab/">About:Blank Lab</a>. With no address showing, you can't
+        check you're on the real site, so prefer your passkey to the backup password there.</li>
+    </ul>
+  </div>
+</section>
+
+<footer class="site">
+  <div class="wrap links">
+    <span>Perch is free and open source (Apache 2.0).</span>
+    <a href="https://github.com/Just-Rice/perch">Source code</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="https://github.com/Just-Rice/perch/blob/main/SECURITY.md">Security</a>
+    <a href="https://just-rice.github.io/">More projects</a>
+  </div>
+</footer>
+<script type="module" src="js/front.js"></script>
+</body>
+</html>

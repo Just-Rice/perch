@@ -1,0 +1,40 @@
+# Checks every push and pull request: the host's tests, the website's tests and the app's build and self-test.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Install the host's packages
+        working-directory: host/node
+        run: npm ci
+
+      - name: Host tests
+        working-directory: host/node
+        run: node --test --test-concurrency=1 --test-timeout=180000 'test/*.test.mjs'
+
+      - name: Website tests
+        run: node --test --test-concurrency=1 --test-timeout=180000 'tests/site/*.test.mjs'
+
+      - name: Build the app and run its self-test
+        run: |
+          swift build -c release --package-path host/app
+          host/app/.build/release/Perch --selftest
+
+      - name: Website and host end to end
+        run: node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/full.test.mjs
+
+      - name: Website, host and the real app end to end
+        run: node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/app.test.mjs

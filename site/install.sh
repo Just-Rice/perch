@@ -54,11 +54,15 @@ else
     fail "couldn't reach GitHub to find the latest Perch. Check your internet connection and try again."
 fi
 # The release JSON is parsed with plain grep/sed so nothing extra is needed.
+# Downloads must come over https; only a test pointing PERCH_RELEASES_API at a local server may use plain http.
+URL_RE='https:'
+[ -n "${PERCH_RELEASES_API:-}" ] && URL_RE='https?:'
+# `|| true`: a release missing a file must reach the friendly message below, not end the script silently.
 asset_url() {
-  printf '%s' "$RELEASE_JSON" | grep -o '"browser_download_url": *"[^"]*"' | sed 's/.*"\(https:[^"]*\)"/\1/' |
-    grep -E "/$1\$" | head -n 1
+  { printf '%s' "$RELEASE_JSON" | grep -o '"browser_download_url": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/' |
+    grep -E "^${URL_RE}//[^ ]*/$1\$" | head -n 1; } || true
 }
-TAG="$(printf '%s' "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')"
+TAG="$( { printf '%s' "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/'; } || true)"
 ZIP_URL="$(asset_url 'Perch-[0-9][0-9.]*\.zip')"
 SUM_URL="$(asset_url 'Perch-[0-9][0-9.]*\.zip\.sha256')"
 [ -n "$TAG" ] && [ -n "$ZIP_URL" ] && [ -n "$SUM_URL" ] || fail "the latest release doesn't have the files this installer expects."

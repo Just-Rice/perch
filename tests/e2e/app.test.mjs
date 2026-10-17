@@ -16,7 +16,9 @@ import { startStack, openPage, sleep } from '../site/lib/browser.mjs';
 import { fromBase32, totp } from '../../host/node/src/totp.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-const APP = join(ROOT, 'host/app/.build/release/Perch');
+// PERCH_E2E_APP=/path/to/Perch.app tests a packaged app instead: its own bundled Node.js and bundled host.
+const BUNDLE = process.env.PERCH_E2E_APP || null;
+const APP = BUNDLE ? join(BUNDLE, 'Contents/MacOS/Perch') : join(ROOT, 'host/app/.build/release/Perch');
 const HOST = join(ROOT, 'host/node/src/main.mjs');
 
 const freePort = () => new Promise(r => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
@@ -53,7 +55,8 @@ test.before(async () => {
   home = mkdtempSync(join(tmpdir(), 'perch-app-e2e-'));
   setup = { port: await freePort(), key: randomBytes(32).toString('base64url') };
   const node = execFileSync('/bin/sh', ['-c', 'command -v node']).toString().trim();
-  perch = spawn(APP, ['--synthetic', '--echo-input', '--no-ui', '--node', node, '--host', HOST], {
+  const args = ['--synthetic', '--echo-input', '--no-ui', ...(BUNDLE ? [] : ['--node', node, '--host', HOST])];
+  perch = spawn(APP, args, {
     env: {
       PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
       PERCH_TEST: '1', PERCH_HOME: home, PERCH_SECRETS: 'file', PERCH_BROKERS: stack.broker.url, PERCH_ICE: 'none',
@@ -90,7 +93,9 @@ test.after(async () => {
 test('the real app and host: set up, pair from the website, picture and sound from VideoToolbox, input reported', async () => {
   const s0 = await state();
   assert.equal(s0.test, true);
-  assert.equal(s0.permissions.screen, true, 'synthetic mode needs no Screen Recording');
+  // Run from this terminal, the bare binary borrows the terminal's permission; a packaged Perch.app is judged on its
+  // own (and has none yet), which synthetic mode doesn't need.
+  if (!BUNDLE) assert.equal(s0.permissions.screen, true, 'synthetic mode needs no Screen Recording');
   assert.equal(s0.state, 'needs-setup');
   const { result: t } = await api('totpStart', {});
   secret = fromBase32(t.secret);
@@ -112,16 +117,23 @@ test('the real app and host: set up, pair from the website, picture and sound fr
   const audio = await page.waitFor(`(async () => { const pc = window.__perch?.conn?.pc; if (!pc) return 0;
     let n = 0; (await pc.getStats()).forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') n = r.packetsReceived; }); return n > 20 && n; })()`,
     { timeoutMs: 10000, what: 'audio packets' }).catch(() => null);
-  // Clicks in the middle reach the app, which reports them instead of clicking.
+  // Clicks in the middle reach the app, which reports them instead of clicking. Without Accessibility (a packaged
+  // app nobody has allowed yet) the session is view only: the page says so and nothing is forwarded.
   const box = await page.eval(`(() => { const r = document.getElementById('surface').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await page.click(null, box);
+  const canControl = (await state()).permissions.accessibility;
   let echoed = [];
   for (let i = 0; i < 50; i++) {
     echoed = (await api('test/input-echo')).result ?? (await api('test/input-echo'));
-    if (Array.isArray(echoed) && echoed.filter(e => /mouse.*(Down|Up)/i.test(e.type ?? '') || e.t === 'b').length >= 2) break;
+    if (!canControl || (Array.isArray(echoed) && echoed.length >= 2)) break;
     await sleep(100);
   }
-  assert.ok(Array.isArray(echoed) && echoed.length >= 2, `input reached the app: ${JSON.stringify(echoed).slice(0, 300)}`);
+  if (canControl) {
+    assert.ok(Array.isArray(echoed) && echoed.length >= 2, `input reached the app: ${JSON.stringify(echoed).slice(0, 300)}`);
+  } else {
+    await page.waitFor(`!!document.querySelector('#banners [data-id="viewonly"]')`, { what: 'the view-only note' });
+    assert.deepEqual(echoed, [], 'nothing forwarded without Accessibility');
+  }
   const s1 = await state();
   assert.equal(s1.session?.route, 'pair');
   assert.equal(s1.state, 'connected');

@@ -1,0 +1,84 @@
+# Builds Perch.app from the code in this repository and publishes it as a GitHub release, on GitHub's own Mac.
+# Run it by pushing a tag: host/scripts/set-version.sh 0.2.0, commit, `git tag v0.2.0`, `git push origin v0.2.0`.
+#
+# The release holds Perch-<version>.zip and Perch-<version>.zip.sha256, which install.sh downloads and checks.
+# With the PERCH_SIGNING_P12 / PERCH_SIGNING_P12_PASSWORD secrets set, the app is signed with Perch's own
+# long-lived certificate, so macOS keeps its Screen Recording and Accessibility permissions across updates.
+# Without them it is signed ad hoc (it still installs and runs; permissions then reset with each update).
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  NODE_FOR_APP: v24.22.0   # the official Node.js build shipped inside Perch.app
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+
+      - name: Check the tag matches the version in the code
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          PLIST_V="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' host/app/Resources/Info.plist)"
+          NODE_V="$(node -p "require('./host/node/package.json').version")"
+          echo "tag $V, app $PLIST_V, host $NODE_V"
+          [ "$V" = "$PLIST_V" ] && [ "$V" = "$NODE_V" ] || { echo "Run host/scripts/set-version.sh $V first."; exit 1; }
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+
+      - name: Host tests (no browser)
+        working-directory: host/node
+        run: |
+          npm ci
+          node --test --test-concurrency=1 $(ls test/*.test.mjs | grep -v -e browser -e chrome-smoke)
+
+      - name: Bundle the host
+        working-directory: host/node
+        run: node scripts/bundle.mjs
+
+      - name: Build the app and run its self-test
+        run: |
+          swift build -c release --package-path host/app
+          host/app/.build/release/Perch --selftest
+
+      - name: Assemble Perch.app with Node.js
+        run: |
+          NODE_BIN="$(host/app/test/fetch-node.sh "$RUNNER_TEMP/node" "$NODE_FOR_APP")"
+          host/scripts/make-app.sh --skip-build --host-bundle host/node/dist --node "$NODE_BIN" --out "$RUNNER_TEMP/out"
+
+      - name: Sign with Perch's certificate
+        env:
+          P12: ${{ secrets.PERCH_SIGNING_P12 }}
+          P12_PASSWORD: ${{ secrets.PERCH_SIGNING_P12_PASSWORD }}
+        run: |
+          if [ -z "$P12" ]; then echo "No signing secrets: the app stays signed ad hoc."; exit 0; fi
+          printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/perch-signing.p12"
+          host/scripts/sign-with-p12.sh "$RUNNER_TEMP/perch-signing.p12" "$P12_PASSWORD" "$RUNNER_TEMP/out/Perch.app" --options runtime
+          rm -f "$RUNNER_TEMP/perch-signing.p12"
+
+      - name: Zip and checksum
+        run: |
+          cd "$RUNNER_TEMP/out"
+          ditto -c -k --keepParent Perch.app "Perch-$VERSION.zip"
+          shasum -a 256 "Perch-$VERSION.zip" > "Perch-$VERSION.zip.sha256"
+          cat "Perch-$VERSION.zip.sha256"
+          codesign -d -r- Perch.app 2>&1 | grep designated || true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/out"
+          gh release create "$GITHUB_REF_NAME" "Perch-$VERSION.zip" "Perch-$VERSION.zip.sha256" \
+            --repo "$GITHUB_REPOSITORY" --title "Perch $VERSION" --generate-notes \
+            --notes "Install or update: \`curl -fsSL https://just-rice.github.io/perch/install.sh | bash\`"

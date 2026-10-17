@@ -19,12 +19,15 @@ struct Options {
     var allowSystemChanges = false
     /// Draw the menu bar icons into this folder as PNGs and exit (to look at them).
     var renderMenuIcons: String?
+    /// Used by uninstall.sh: take Perch out of the login items and exit, without starting anything.
+    var unregisterLoginItem = false
     var help = false
     var ignored: [String] = []
 
     static let usage = """
     usage: Perch [--synthetic] [--echo-input] [--no-ui] [--node <path>] [--host <path>]
                  [--exit-with-host] [--allow-system-changes] [--selftest] [--render-menu-icons <dir>]
+                 [--unregister-login-item]
 
       --synthetic             test pattern and tone instead of the real screen and sound
       --echo-input            report input to the host instead of performing it
@@ -35,6 +38,7 @@ struct Options {
       --allow-system-changes  let a test run change the login item and move the app to the Trash on uninstall
       --selftest              run the built-in checks and exit
       --render-menu-icons <d> write the menu bar icons to <d> as PNGs and exit
+      --unregister-login-item stop Perch starting at login and exit (used by the uninstaller)
     """
 
     static func parse(_ args: [String]) -> Options {
@@ -56,6 +60,7 @@ struct Options {
             case "--exit-with-host": o.exitWithHost = true
             case "--allow-system-changes": o.allowSystemChanges = true
             case "--render-menu-icons": o.renderMenuIcons = value()
+            case "--unregister-login-item": o.unregisterLoginItem = true
             case "-h", "--help": o.help = true
             // Launch Services and debuggers sometimes add their own arguments; never fail because of them.
             default: o.ignored.append(args[i])

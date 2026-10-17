@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Perch test receiver</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fff; --fg: #111; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #111; --fg: #eee; } }
+  :root[data-theme="dark"] { --bg: #111; --fg: #eee; }
+  body { background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, sans-serif; margin: 16px; }
+  video { width: 640px; max-width: 100%; background: #000; display: block; }
+  pre { white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<!-- The host's headless-Chrome smoke test (test/chrome-smoke.test.mjs) drives this page. It is not the website. -->
+<video id="video" autoplay playsinline muted></video>
+<pre id="log"></pre>
+<script type="module" src="receiver.js"></script>
+</body>
+</html>

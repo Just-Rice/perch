@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- No scripts at all on this page: it only has words to read. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Perch: privacy</title>
+<meta name="description" content="What Perch keeps, what it never collects, and what the services it relies on can see. No accounts, no tracking, no servers of ours.">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/perch.css">
+</head>
+<body class="doc">
+<div class="wrap">
+  <header class="site">
+    <a class="brand" href="./">
+      <img src="img/icon.svg" alt="" width="30" height="30">
+      Perch <span class="badge">BETA</span>
+    </a>
+    <nav class="site" aria-label="Main">
+      <a href="./">About Perch</a>
+      <a href="connect.html">Connect</a>
+    </nav>
+  </header>
+</div>
+
+<main class="narrow doc-body">
+  <h1>Privacy</h1>
+  <p class="lead">Perch is a way to use your own Mac from your own browser. It has no accounts, no tracking, no
+    analytics, no ads and no servers of its own. Here is everything it keeps, and everyone who could see anything.</p>
+
+  <div class="cards doc-cards">
+    <div class="card"><h3>Nothing collected</h3>
+      <p>No sign-up, no cookies, no analytics, no tracking pixels. Nobody behind Perch learns that you use it.</p></div>
+    <div class="card"><h3>Straight from Mac to browser</h3>
+      <p>Your screen, sound, clicks and typing go directly between your Mac and your browser, encrypted the whole way.</p></div>
+    <div class="card"><h3>Your Mac decides</h3>
+      <p>Every sign-in is checked by your Mac itself: your passkey and the code from your authenticator app.</p></div>
+  </div>
+
+  <h2>Who can see what</h2>
+
+  <h3>GitHub Pages, which hosts this website</h3>
+  <p>The pages of this website (including the one you're reading) come from GitHub Pages. Like any website host,
+    GitHub sees normal web requests: your internet (IP) address, your browser type and which pages were loaded. It does
+    not see anything you do after the page has loaded: signing in and using your Mac don't go through GitHub at all.
+    See <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's
+    privacy statement</a>.</p>
+
+  <h3>Free public message services, to find your Mac</h3>
+  <p>Your Mac and your browser are usually on different networks, so before they can talk directly they swap a few
+    short "here's how to reach me" notes through free public message services (run by EMQX, HiveMQ and the Eclipse
+    Mosquitto project). They are used at the same time, so one being down doesn't matter.</p>
+  <ul class="list">
+    <li><b>The notes are scrambled.</b> They are sealed with a key that only your Mac and your passkey (or your pairing
+      link) know. The services can't read them, and can't change them without it being noticed.</li>
+    <li><b>What they can see:</b> your internet address and your Mac's, when the notes were sent, and a random-looking
+      label that doesn't contain your Mac's name.</li>
+    <li><b>Backup sign-in</b> (Mac name and password, if you turned it on): its notes are scrambled with the Mac's
+      name only, which hides them from casual onlookers but not from someone who knows that name. That's fine: your
+      password never travels at all (Perch uses a method called OPAQUE that proves you know it without sending it),
+      and the Mac still asks for your authenticator code.</li>
+    <li>These services carry anyone's messages and check nothing. Perch's safety never depends on them.</li>
+  </ul>
+
+  <h3>Address helpers (STUN servers)</h3>
+  <p>To connect directly, each side asks a public helper (Google's and Cloudflare's STUN servers) what its own
+    internet address looks like from outside. Those helpers see your internet address and nothing else: no names, no
+    picture, no sound.</p>
+
+  <h3>The connection itself</h3>
+  <p>Once your browser and your Mac have found each other, everything goes directly between them, encrypted with
+    WebRTC's built-in encryption (the same used by video-call apps). Perch has no relay server in between. Your Mac
+    sends nothing, and accepts no clicks or keys, until you have signed in with both steps.</p>
+
+  <h2>What is kept, and where</h2>
+
+  <h3>On your Mac</h3>
+  <ul class="list">
+    <li>In Perch's settings folder (<code>~/Library/Application Support/Perch</code>): your Mac's Perch name (like
+      <i>amber-otter-4821</i>), a random ID, your settings, and for each device you paired: its passkey's public part
+      (which can check a sign-in but can't make one), a label like "Safari on iPhone" and when it was added and last
+      used. Also a short list of recent sign-ins and failed attempts, so you can see if someone tried.</li>
+    <li>In your login Keychain: Perch's secret keys and the secret behind your authenticator codes.</li>
+    <li>If you turned on backup sign-in: a check value made from your password, not the password itself.</li>
+    <li>Nothing of this is ever sent anywhere. Uninstalling Perch deletes all of it.</li>
+  </ul>
+
+  <h3>In your browser</h3>
+  <ul class="list">
+    <li>The list of Macs you've connected to from this browser: each Mac's name, the details needed to find it again
+      and which passkey belongs to it. Remove one with <b>Forget</b> on the Connect page, or clear this site's data in
+      your browser settings.</li>
+    <li>A few preferences: picture quality, "Ctrl acts as ⌘", the volume, whether the connection details are shown and
+      the Mac name you last typed for backup sign-in.</li>
+    <li>Your passkey itself is kept by your device's password manager (such as iCloud Keychain or Google Password
+      Manager), not by Perch.</li>
+    <li>All of this stays in your browser. This website has no server that could receive it.</li>
+  </ul>
+
+  <h2>What you can see on the Mac</h2>
+  <p>While a device is connected, Perch's menu bar icon shows it, and macOS shows its own screen-recording
+    indicator. Only one device can use the Mac at a time, and you can disconnect it or pause Perch from the menu bar.</p>
+
+  <h2>Questions or problems</h2>
+  <p>Perch is free and open source, so you can read exactly what it does in the
+    <a href="https://github.com/Just-Rice/perch">source code</a>. Ask a question or report a problem through
+    <a href="https://github.com/Just-Rice/perch/issues">GitHub issues</a>. For a security problem, please follow the
+    <a href="https://github.com/Just-Rice/perch/blob/main/SECURITY.md">security notes</a> instead of opening a public
+    issue.</p>
+  <p class="fine">Last updated October 2026.</p>
+</main>
+
+<footer class="site">
+  <div class="wrap links">
+    <span>Perch is free and open source (Apache 2.0).</span>
+    <a href="./">Home</a>
+    <a href="connect.html">Connect</a>
+    <a href="https://github.com/Just-Rice/perch">Source code</a>
+    <a href="https://github.com/Just-Rice/perch/issues">Report a problem</a>
+  </div>
+</footer>
+</body>
+</html>

@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<!-- connect-src: the three public message services (shared/proto.js BROKERS) and, for tests run on this computer, loopback
+     WebSockets only (the page honours ?brokers= on localhost/127.0.0.1 alone). media-src: the Mac's video arrives as a
+     MediaStream. 'wasm-unsafe-eval': the backup password library is WebAssembly. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' wss://broker.emqx.io:8084 wss://broker.hivemq.com:8884 wss://test.mosquitto.org:8081 ws://127.0.0.1:* ws://localhost:*; media-src 'self' blob: mediastream:; img-src 'self' data: blob:; style-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#0d1015">
+<meta name="description" content="Connect to your Mac with Perch: sign in with your passkey and a 6-digit code.">
+<title>Perch: connect to your Mac</title>
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/perch.css">
+<link rel="stylesheet" href="css/connect.css">
+<script type="module" src="js/connect.js"></script>
+</head>
+<body class="connect">
+
+<!-- Shown until the page has checked it is allowed to run here (js/connect.js). -->
+<div id="boot" class="boot" role="status" aria-live="polite">
+  <p id="bootText"><span class="spinner" aria-hidden="true"></span> Starting Perch…</p>
+</div>
+<noscript><div class="boot"><p>Perch needs JavaScript to connect to your Mac. Turn it on for this site and reload.</p></div></noscript>
+
+<div id="app" class="app" hidden>
+  <header class="site wrap">
+    <a class="brand" href="./">
+      <img src="img/icon.svg" alt="" width="30" height="30">
+      Perch <span class="badge">BETA</span>
+    </a>
+    <nav class="site" aria-label="Main">
+      <a href="./">About Perch</a>
+      <a href="privacy.html">Privacy</a>
+    </nav>
+  </header>
+
+  <main id="main" class="narrow">
+
+    <!-- Home -->
+    <section id="s-home" class="screen" aria-labelledby="h-home" hidden>
+      <h1 id="h-home" tabindex="-1">Connect to your Mac</h1>
+      <div id="macsBlock" hidden>
+        <h2 class="label" id="macsLabel">Your Macs</h2>
+        <ul id="macList" class="macs" aria-labelledby="macsLabel"></ul>
+      </div>
+      <p id="homeLead" class="lead">Sign in with the passkey you made when you paired this device, then type the code from
+        your authenticator app.</p>
+      <div class="stack">
+        <button type="button" id="btnDiscover" class="btn primary big" data-icon="key">Sign in with a passkey</button>
+        <button type="button" id="btnBackup" class="btn big">Sign in another way</button>
+      </div>
+      <p id="homeStatus" class="msg bad" role="alert" hidden></p>
+      <p id="storageNote" class="fine" hidden>This browser isn't keeping site data, so Perch won't remember your Mac
+        after you close this tab.</p>
+      <div class="more-links">
+        <p class="fine">New to Perch? <a href="./#install">Install it on your Mac</a> first, then pair this device from
+          Perch's Setup on the Mac.</p>
+        <p class="fine">
+          <button type="button" id="btnBlank" class="btn quiet small" data-icon="blank">Open in an about:blank tab</button>
+          <a class="btn quiet small" href="./">Back to the Perch home page</a>
+        </p>
+        <p id="blankStatus" class="fine" role="status"></p>
+      </div>
+    </section>
+
+    <!-- Connecting -->
+    <section id="s-progress" class="screen" aria-labelledby="h-progress" hidden>
+      <h1 id="h-progress" tabindex="-1">Connecting to your Mac</h1>
+      <ol class="steps" id="steps">
+        <li data-step="finding">Finding your Mac</li>
+        <li data-step="connecting">Making a direct connection</li>
+        <li data-step="checking">Checking it's really your Mac</li>
+        <li data-step="verifying">Signing in</li>
+      </ol>
+      <p id="progressNote" class="fine" role="status"></p>
+      <button type="button" class="btn" data-cancel>Cancel</button>
+    </section>
+
+    <!-- Passkey -->
+    <section id="s-passkey" class="screen" aria-labelledby="h-passkey" hidden>
+      <h1 id="h-passkey" tabindex="-1">Confirm it's you</h1>
+      <p class="lead">Use your passkey for <b data-macname>your Mac</b>: Face ID, Touch ID, your screen lock, or a phone
+        nearby.</p>
+      <p id="passkeyError" class="msg bad" role="alert" hidden></p>
+      <div class="stack">
+        <button type="button" id="btnPasskeyGo" class="btn primary big" data-icon="key">Continue with passkey</button>
+        <button type="button" class="btn quiet" data-cancel>Cancel</button>
+      </div>
+    </section>
+
+    <!-- Pairing: make a passkey -->
+    <section id="s-pair" class="screen" aria-labelledby="h-pair" hidden>
+      <h1 id="h-pair" tabindex="-1">Pair this device</h1>
+      <p class="lead">Your Mac <b data-macname>your Mac</b> is ready. Make a passkey for it on this device, then type the
+        code from your authenticator app.</p>
+      <ul class="list">
+        <li>The passkey is saved in this device's password manager (such as iCloud Keychain or Google Password Manager).
+          You confirm it with Face ID, Touch ID or your screen lock.</li>
+        <li>Next time, just open Perch and pick your Mac.</li>
+      </ul>
+      <p id="pairError" class="msg bad" role="alert" hidden></p>
+      <div class="stack">
+        <button type="button" id="btnCreate" class="btn primary big" data-icon="key">Create passkey</button>
+        <button type="button" class="btn quiet" data-cancel>Cancel</button>
+      </div>
+      <p class="note warn"><b>Only pair your own devices.</b> Perch gives full control of the Mac. If someone sent you
+        this link, close this page.</p>
+    </section>
+
+    <!-- The 6-digit code -->
+    <section id="s-code" class="screen" aria-labelledby="h-code" hidden>
+      <h1 id="h-code" tabindex="-1">Type your code</h1>
+      <p class="lead">Open your authenticator app and type the 6-digit code for <b>Perch · <span data-macname>your
+        Mac</span></b>.</p>
+      <form id="codeForm" novalidate>
+        <label for="code">6-digit code</label>
+        <input id="code" name="code" class="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+          pattern="[0-9]*" enterkeyhint="go" spellcheck="false" aria-describedby="codeHelp codeError">
+        <p id="codeHelp" class="fine">It changes every 30 seconds. Pasting works too.</p>
+        <p id="codeError" class="msg bad" role="alert" hidden></p>
+        <div class="stack">
+          <button type="submit" id="btnCode" class="btn primary big">Sign in</button>
+          <button type="button" class="btn quiet" data-cancel>Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Backup sign-in -->
+    <section id="s-backup" class="screen" aria-labelledby="h-backup" hidden>
+      <h1 id="h-backup" tabindex="-1">Sign in another way</h1>
+      <p class="lead">If backup sign-in is turned on for your Mac, use the Mac's name and the backup password you chose in
+        Setup. You'll still need the code from your authenticator app.</p>
+      <p id="blankWarning" class="note warn" hidden>This tab doesn't show the website's address, so you can't check you're
+        really on Perch. Prefer your passkey here.</p>
+      <form id="backupForm" novalidate>
+        <label for="macName">Mac name</label>
+        <input id="macName" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false"
+          placeholder="amber-otter-4821" aria-describedby="macNameHelp">
+        <p id="macNameHelp" class="fine">Three parts, like amber-otter-4821. It's shown in Perch's menu on the Mac.</p>
+        <label for="password">Backup password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password">
+        <p id="backupError" class="msg bad" role="alert" hidden></p>
+        <div class="stack">
+          <button type="submit" id="btnBackupGo" class="btn primary big">Continue</button>
+          <button type="button" class="btn quiet" data-home>Back</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Something to say: an error, a refusal, a countdown -->
+    <section id="s-message" class="screen" aria-labelledby="msgTitle" hidden>
+      <h1 id="msgTitle" tabindex="-1">Something went wrong</h1>
+      <p id="msgBody" class="lead"></p>
+      <p id="msgWait" class="msg warn" role="status" hidden></p>
+      <div class="stack">
+        <button type="button" id="msgPrimary" class="btn primary big">Try again</button>
+        <button type="button" id="msgSecondary" class="btn quiet">Back to start</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site">
+    <div class="wrap links">
+      <span>Perch is free and open source.</span>
+      <a href="https://github.com/Just-Rice/perch">Source code</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="https://github.com/Just-Rice/perch/issues">Report a problem</a>
+    </div>
+  </footer>
+</div>
+
+<!-- The Mac's screen -->
+<div id="viewer" class="viewer" hidden>
+  <div id="surface" class="surface" tabindex="0" role="application" aria-roledescription="remote screen"
+    aria-label="Your Mac's screen. Mouse, touch and keys go to the Mac.">
+    <div id="zoom" class="zoom"><video id="video" autoplay playsinline disablepictureinpicture></video></div>
+  </div>
+
+  <button type="button" id="handle" class="handle" aria-label="Show the toolbar"><span></span></button>
+
+  <div id="toolbar" class="toolbar" role="toolbar" aria-label="Perch controls">
+    <span class="tb-mac">
+      <span id="dot" class="dot good" role="img" aria-label="Good connection"></span>
+      <span id="tbName" class="tb-name">your Mac</span>
+    </span>
+    <label class="tb-select">
+      <span class="sr-only">Picture quality</span>
+      <select id="tbQuality" title="Picture quality">
+        <option value="smooth">Smooth</option>
+        <option value="balanced">Balanced</option>
+        <option value="sharp">Sharp</option>
+      </select>
+    </label>
+    <label class="tb-select" id="tbDisplayWrap" hidden>
+      <span class="sr-only">Which display</span>
+      <select id="tbDisplay" title="Which display"></select>
+    </label>
+    <button type="button" id="tbKeyboard" class="tb-btn" data-icon="keyboard" title="Keyboard" aria-label="Show the keyboard" hidden></button>
+    <button type="button" id="tbKeys" class="tb-btn tb-text" title="Special keys" aria-label="Special keys" aria-pressed="false">⌘</button>
+    <button type="button" id="tbSound" class="tb-btn" data-icon="sound" title="Sound" aria-label="Mute"></button>
+    <label class="tb-volume" id="tbVolumeWrap">
+      <span class="sr-only">Volume</span>
+      <input type="range" id="tbVolume" min="0" max="1" step="0.05" value="1" title="Volume">
+    </label>
+    <button type="button" id="tbFull" class="tb-btn" data-icon="fullscreen" title="Full screen" aria-label="Full screen"></button>
+    <button type="button" id="tbStats" class="tb-btn" data-icon="stats" title="Connection details" aria-label="Connection details" aria-pressed="false"></button>
+    <button type="button" id="tbMore" class="tb-btn" data-icon="more" title="More" aria-label="More options" aria-expanded="false" aria-controls="moreMenu"></button>
+    <button type="button" id="tbBye" class="tb-btn tb-bye" data-icon="power" title="Disconnect" aria-label="Disconnect"></button>
+  </div>
+
+  <div id="moreMenu" class="menu" role="group" aria-label="More options" hidden>
+    <label class="check" id="swapWrap"><input type="checkbox" id="optSwap"> Ctrl acts as ⌘ (Command)</label>
+    <p class="fine" id="swapHelp">Ctrl+C copies, Ctrl+V pastes, as on this keyboard. Turn off to send Ctrl itself.</p>
+    <button type="button" id="optZoom" class="btn small" data-icon="zoom">Show the whole screen</button>
+    <button type="button" id="optKeyframe" class="btn small" data-icon="refresh">Refresh the picture</button>
+  </div>
+
+  <div id="banners" class="banners" aria-live="polite"></div>
+
+  <button type="button" id="soundPrompt" class="sound-prompt" data-icon="sound" hidden>Tap for sound</button>
+
+  <div id="stats" class="stats" aria-live="off" hidden></div>
+
+  <div id="keysBar" class="keysbar" role="toolbar" aria-label="Special keys" hidden>
+    <button type="button" class="key mod" data-mod="8" aria-pressed="false" title="Command">⌘</button>
+    <button type="button" class="key mod" data-mod="4" aria-pressed="false" title="Option">⌥</button>
+    <button type="button" class="key mod" data-mod="2" aria-pressed="false" title="Control">⌃</button>
+    <button type="button" class="key mod" data-mod="1" aria-pressed="false" title="Shift">⇧</button>
+    <button type="button" class="key" data-key="esc">esc</button>
+    <button type="button" class="key" data-key="tab">tab</button>
+    <button type="button" class="key" data-key="left" aria-label="Left arrow">←</button>
+    <button type="button" class="key" data-key="up" aria-label="Up arrow">↑</button>
+    <button type="button" class="key" data-key="down" aria-label="Down arrow">↓</button>
+    <button type="button" class="key" data-key="right" aria-label="Right arrow">→</button>
+    <button type="button" class="key" data-key="delete" aria-label="Delete">⌫</button>
+    <button type="button" class="key wide" data-key="cmdTab" title="Switch apps">⌘ Tab</button>
+    <button type="button" class="key wide" data-key="missionControl" title="Mission Control (Control + Up)">Mission Control</button>
+    <button type="button" class="key wide" data-key="spotlight" title="Spotlight (⌘ Space)">Spotlight</button>
+    <button type="button" class="key wide" data-key="cmdW" title="Close window">⌘W</button>
+    <button type="button" class="key wide" data-key="cmdQ" title="Quit app">⌘Q</button>
+  </div>
+
+  <!-- Phone keyboards type into this invisible box; viewer/keyboard.js passes what they type to the Mac. -->
+  <textarea id="softkbd" class="softkbd" aria-label="Type on your Mac" autocapitalize="off" autocomplete="off"
+    autocorrect="off" spellcheck="false" enterkeyhint="enter" rows="1"></textarea>
+
+  <div id="ended" class="ended" role="dialog" aria-modal="true" aria-labelledby="endedTitle" hidden>
+    <div class="ended-card">
+      <h2 id="endedTitle" tabindex="-1">Disconnected</h2>
+      <p id="endedBody"></p>
+      <div class="stack">
+        <button type="button" id="btnReconnect" class="btn primary big" data-icon="refresh">Reconnect</button>
+        <button type="button" id="btnEndHome" class="btn quiet">Back to start</button>
+      </div>
+    </div>
+  </div>
+
+  <aside id="demoLog" class="demolog" aria-label="Input messages (demo)" hidden>
+    <h2>Demo · messages to the Mac</h2>
+    <ol id="demoList"></ol>
+  </aside>
+</div>
+</body>
+</html>

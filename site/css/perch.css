@@ -158,3 +158,12 @@ input.code { font-family: var(--mono); font-size: 1.5rem; letter-spacing: .35em;
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid var(--line); border-top-color: var(--accent); animation: spin .8s linear infinite; display: inline-block; vertical-align: -3px; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+
+/* plain reading pages (privacy) */
+.doc-body { padding-bottom: 32px; }
+.doc-body h1 { font-size: clamp(1.9rem, 4.5vw, 2.6rem); line-height: 1.1; margin: 16px 0 12px; letter-spacing: -.02em; }
+.doc-body h2 { font-size: clamp(1.3rem, 3vw, 1.6rem); margin: 36px 0 8px; }
+.doc-body h3 { font-size: 1.08rem; margin: 22px 0 4px; }
+.doc-body p.lead { font-size: 1.12rem; color: var(--muted); margin: 0 0 20px; }
+.doc-body .doc-cards { margin: 24px 0 8px; }
+@media (max-width: 860px) { .doc-body .doc-cards { grid-template-columns: 1fr; } }

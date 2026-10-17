@@ -137,6 +137,13 @@ export class Store {
   get hostId() { return fromB64url(this.config.hostId); }
   get sigKey() { return fromB64url(this.secrets.sigKey); }
   get macName() { return this.config.macName; }
+  // The backup password is tied to the name (it is the OPAQUE user name), so a new name clears it.
+  setMacName(name) {
+    this.config.macName = name;
+    this.config.backup = { record: null, setAt: null };
+    this.config.settings.backupOn = false;
+    this.save();
+  }
   // The passkey user handle: hostId ‖ sigKey.
   get userHandle() {
     const h = new Uint8Array(HOST_ID_BYTES + SIG_KEY_BYTES);

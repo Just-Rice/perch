@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Perch Setup</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="setup.css">
+<!-- qrcode-generator 1.4.4 (MIT): a classic script that defines the global `qrcode`. -->
+<script src="vendor/qrcode.js"></script>
+<script type="module" src="setup.js"></script>
+</head>
+<body>
+<header class="top">
+  <div class="page top-inner">
+    <span class="brand"><img src="icon.svg" alt="" width="30" height="30"> Perch <span class="brand-sub">Setup</span></span>
+    <span class="top-right">
+      <span class="badge test" id="testBadge" hidden>Test mode</span>
+      <span class="pill" id="statePill" data-tone="neutral" role="status"><span class="pill-dot" aria-hidden="true"></span><span id="statePillText">Loading…</span></span>
+    </span>
+  </div>
+</header>
+
+<main class="page" id="main">
+  <div class="banner" id="banner" role="alert" hidden></div>
+
+  <section class="card hello" aria-labelledby="macName">
+    <p class="eyebrow">This Mac</p>
+    <h1 class="mac-name" id="macName">…</h1>
+    <p class="muted">This is your Mac's name. You'll see it on the devices that connect to it.</p>
+    <p class="state-text" id="stateText"></p>
+    <p class="small muted">Perch <span id="headVersion"></span></p>
+  </section>
+
+  <!-- Step 1 -->
+  <section class="card step" id="stepPermissions" aria-labelledby="hPerm">
+    <div class="step-head">
+      <span class="num" id="numPerm" aria-hidden="true">1</span>
+      <div>
+        <h2 id="hPerm">Allow Perch to show and control this Mac</h2>
+        <p class="lead">macOS asks you to allow these once, so Perch can show your screen on your other device and click
+          and type there for you.</p>
+      </div>
+    </div>
+    <ul class="rows">
+      <li class="row" id="permScreen">
+        <div class="row-main">
+          <h3>Screen Recording</h3>
+          <p class="muted">Needed to show your screen and play its sound.</p>
+          <p class="hint" data-hint>In System Settings, open <b>Privacy &amp; Security › Screen &amp; System Audio
+            Recording</b> and switch on <b>Perch</b>. macOS may then ask you to reopen Perch.</p>
+        </div>
+        <div class="row-side">
+          <span class="status" data-status></span>
+          <button type="button" class="btn" data-open>Open System Settings</button>
+        </div>
+      </li>
+      <li class="row" id="permAccessibility">
+        <div class="row-main">
+          <h3>Accessibility</h3>
+          <p class="muted">Needed to click and type for you. Without it, devices can only watch.</p>
+          <p class="hint" data-hint>In System Settings, open <b>Privacy &amp; Security › Accessibility</b> and switch
+            on <b>Perch</b>.</p>
+        </div>
+        <div class="row-side">
+          <span class="status" data-status></span>
+          <button type="button" class="btn" data-open>Open System Settings</button>
+        </div>
+      </li>
+    </ul>
+    <p class="msg bad" id="permError" role="alert" hidden></p>
+  </section>
+
+  <!-- Step 2 -->
+  <section class="card step" id="stepTotp" aria-labelledby="hTotp">
+    <div class="step-head">
+      <span class="num" id="numTotp" aria-hidden="true">2</span>
+      <div>
+        <h2 id="hTotp">Add Perch to your authenticator app</h2>
+        <p class="lead">Each time you connect, Perch asks for a 6-digit code from this app as well as your passkey, so a
+          lost phone or a guessed password is never enough on its own.</p>
+      </div>
+    </div>
+
+    <div id="totpIdle">
+      <button type="button" class="btn primary" id="totpStartBtn">Set up the authenticator app</button>
+      <p class="small muted">Any authenticator app works: Apple Passwords, Google Authenticator, Microsoft
+        Authenticator, 1Password and others.</p>
+    </div>
+
+    <div id="totpDone" hidden>
+      <p class="done-line"><span class="tick" aria-hidden="true">✓</span><span>Set up<span id="totpSetAt"></span></span></p>
+      <p class="small muted">New phone or new app? Replace it. The old codes keep working until the new one is confirmed.</p>
+      <button type="button" class="btn" id="totpReplaceBtn">Replace it</button>
+    </div>
+
+    <div id="totpPending" hidden>
+      <ol class="how">
+        <li>Open your authenticator app and add a new account (often a <b>+</b> button).</li>
+        <li>Scan this code with it.</li>
+        <li>Type the 6-digit code the app shows, then press <b>Confirm</b>.</li>
+      </ol>
+      <div class="qr-wrap">
+        <div class="qr" id="totpQr"></div>
+        <div class="qr-side">
+          <p>Can't scan it? In the app, choose to enter a setup key and type this:</p>
+          <p class="secret" id="totpSecret" aria-label="Setup key"></p>
+          <p class="small muted">Account: <span id="totpAccount"></span> · Time-based</p>
+        </div>
+      </div>
+      <form id="totpForm" class="code-form" novalidate>
+        <label for="totpCode">6-digit code from the app</label>
+        <div class="inline">
+          <input id="totpCode" class="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+            maxlength="7" spellcheck="false" aria-describedby="totpError">
+          <button type="submit" class="btn primary" id="totpConfirmBtn">Confirm</button>
+          <button type="button" class="btn quiet" id="totpCancelBtn">Cancel</button>
+        </div>
+      </form>
+    </div>
+    <p class="msg bad" id="totpError" role="alert" hidden></p>
+    <p class="msg ok" id="totpOk" role="status" hidden></p>
+  </section>
+
+  <!-- Step 3 -->
+  <section class="card step" id="stepPair" aria-labelledby="hPair">
+    <div class="step-head">
+      <span class="num" id="numPair" aria-hidden="true">3</span>
+      <div>
+        <h2 id="hPair">Pair a device</h2>
+        <p class="lead">Pairing lets your phone, tablet or another computer connect to this Mac. Do it once for each
+          device.</p>
+      </div>
+    </div>
+
+    <p class="note" id="pairLocked">Finish step 2 first: every sign-in needs a code from your authenticator app.</p>
+
+    <div id="pairIdle">
+      <button type="button" class="btn primary" id="pairStartBtn">Pair a device</button>
+      <p class="small muted">Perch shows a code to scan with the device you want to use.</p>
+    </div>
+
+    <div id="pairActive" hidden>
+      <div class="note warn"><b>Only scan this with your own device.</b> Never send this code or link to anyone —
+        whoever uses it can control this Mac.</div>
+      <div class="qr-wrap big">
+        <div class="qr" id="pairQr"></div>
+        <div class="qr-side">
+          <ol class="how">
+            <li>On your device, scan this code with the camera, or open the link below in its browser.</li>
+            <li>It asks for Face ID, Touch ID or its screen lock, to make a passkey for this Mac.</li>
+            <li>Then it asks for the 6-digit code from your authenticator app.</li>
+          </ol>
+          <p class="countdown"><span class="clock" aria-hidden="true"></span>
+            <span id="pairCountdown">This code works for 10:00 more.</span></p>
+        </div>
+      </div>
+      <label for="pairLink">Pairing link</label>
+      <div class="inline">
+        <input id="pairLink" type="text" readonly spellcheck="false">
+        <button type="button" class="btn" id="pairCopyBtn">Copy</button>
+      </div>
+      <p class="small muted" id="pairCopyStatus" role="status"></p>
+      <button type="button" class="btn quiet" id="pairCancelBtn">Cancel pairing</button>
+    </div>
+    <p class="msg ok" id="pairOk" role="status" hidden></p>
+    <p class="msg warn" id="pairExpired" role="status" hidden>That pairing code ran out. Press <b>Pair a device</b> to
+      make a new one.</p>
+    <p class="msg warn" id="pairGone" role="status" hidden>That pairing code stopped working, so nobody can use it now.
+      Press <b>Pair a device</b> to make a new one.</p>
+    <p class="msg bad" id="pairError" role="alert" hidden></p>
+  </section>
+
+  <!-- Devices -->
+  <section class="card" id="devicesCard" aria-labelledby="hDevices">
+    <h2 id="hDevices">Your devices</h2>
+    <p class="lead">These devices can connect to this Mac. Remove any you no longer use or don't recognise.</p>
+    <ul class="devices" id="deviceList"></ul>
+    <p class="empty" id="devicesEmpty">No devices yet. Pair one in step 3.</p>
+    <div class="confirm-host" id="removeAllHost">
+      <button type="button" class="btn danger-quiet" id="removeAllBtn">Remove all devices</button>
+    </div>
+    <p class="msg bad" id="devicesError" role="alert" hidden></p>
+  </section>
+
+  <!-- Backup sign-in -->
+  <section class="card" id="backupCard" aria-labelledby="hBackup">
+    <h2 id="hBackup">Backup sign-in <span class="optional">optional</span></h2>
+    <p class="lead">For a device that can't use a passkey, such as an old computer. You sign in with this Mac's name,
+      a password and the 6-digit code. It's not as strong as a passkey, so only turn it on if you need it.</p>
+    <dl class="facts">
+      <dt>Username</dt><dd><code id="backupUser"></code></dd>
+      <dt>Password</dt><dd id="backupStatus">Not set</dd>
+    </dl>
+    <div class="switch-row" id="backupToggleRow">
+      <label class="switch" for="backupOn">
+        <span class="switch-text"><b>Allow backup sign-in</b>
+          <span class="muted" id="backupOnHint">Set a password below to turn this on.</span></span>
+        <input type="checkbox" role="switch" id="backupOn">
+      </label>
+    </div>
+
+    <form id="backupForm" novalidate>
+      <h3 id="backupFormTitle">Choose a password</h3>
+      <!-- Lets password managers save the password under the right username (the Mac's name). -->
+      <input type="text" id="backupUsername" autocomplete="username" readonly hidden tabindex="-1" aria-hidden="true">
+      <label for="backupPw">Password</label>
+      <div class="inline">
+        <input id="backupPw" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="off"
+          aria-describedby="backupHint">
+        <button type="button" class="btn quiet" id="backupShowBtn" aria-pressed="false" aria-controls="backupPw">Show</button>
+      </div>
+      <p class="hint strength" id="backupHint" data-level="empty" aria-live="polite"></p>
+      <div class="actions">
+        <button type="button" class="btn" id="backupSuggestBtn">Suggest a strong password</button>
+        <button type="submit" class="btn primary" id="backupSaveBtn">Save password</button>
+      </div>
+      <p class="small muted">Your password never leaves this page: Perch keeps only a scrambled check of it that can't be
+        turned back into the password. So Perch can't show it to you again: save it in your password manager or write
+        it down.</p>
+    </form>
+    <p class="msg ok" id="backupOk" role="status" hidden></p>
+    <p class="msg bad" id="backupError" role="alert" hidden></p>
+    <div class="confirm-host" id="backupRemoveHost" hidden>
+      <button type="button" class="btn danger-quiet" id="backupRemoveBtn">Remove backup sign-in</button>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section class="card" id="settingsCard" aria-labelledby="hSettings">
+    <h2 id="hSettings">Settings</h2>
+    <div class="switch-row">
+      <label class="switch" for="setLoginItem">
+        <span class="switch-text"><b>Start Perch when I log in</b>
+          <span class="muted">So you can still connect after the Mac restarts.</span></span>
+        <input type="checkbox" role="switch" id="setLoginItem" data-setting="loginItem">
+      </label>
+      <p class="hint" id="loginItemHint" hidden></p>
+    </div>
+    <div class="switch-row">
+      <label class="switch" for="setKeepAwake">
+        <span class="switch-text"><b>Keep this Mac awake while Perch is on</b>
+          <span class="muted">A sleeping Mac can't be reached. The screen can still turn off.</span></span>
+        <input type="checkbox" role="switch" id="setKeepAwake" data-setting="keepAwake">
+      </label>
+    </div>
+    <div class="switch-row">
+      <label class="switch" for="setPaused">
+        <span class="switch-text"><b>Pause Perch</b>
+          <span class="muted">Nobody can connect while Perch is paused.</span></span>
+        <input type="checkbox" role="switch" id="setPaused" data-setting="paused">
+      </label>
+    </div>
+    <div class="field-row">
+      <label for="setIdle">End a session after this long without use</label>
+      <select id="setIdle">
+        <option value="15">15 minutes</option>
+        <option value="30">30 minutes</option>
+        <option value="60">1 hour</option>
+        <option value="120">2 hours</option>
+        <option value="0">Never</option>
+      </select>
+      <p class="small muted">If nobody moves the mouse or types for this long, Perch ends the session.</p>
+    </div>
+    <fieldset class="choices" id="setQuality">
+      <legend>Video quality</legend>
+      <p class="small muted">What new sessions start with. You can change it during a session too.</p>
+      <div class="choice-grid">
+        <label class="choice"><input type="radio" name="quality" value="smooth">
+          <span><b>Smooth</b><span class="muted">Best on slow connections</span></span></label>
+        <label class="choice"><input type="radio" name="quality" value="balanced">
+          <span><b>Balanced</b><span class="muted">Good for most connections</span></span></label>
+        <label class="choice"><input type="radio" name="quality" value="sharp">
+          <span><b>Sharp</b><span class="muted">Clearest text, needs a fast connection</span></span></label>
+      </div>
+    </fieldset>
+    <p class="small muted saved" id="settingsSaved" role="status"></p>
+    <p class="msg bad" id="settingsError" role="alert" hidden></p>
+  </section>
+
+  <!-- Current session -->
+  <section class="card" id="sessionCard" aria-labelledby="hSession">
+    <h2 id="hSession">Current session</h2>
+    <p id="sessionNone" class="muted">Nobody is connected right now.</p>
+    <div id="sessionActive" hidden>
+      <p class="session-line"><span class="live" aria-hidden="true"></span>
+        <span><b id="sessionViewer"></b> is connected <span id="sessionRoute"></span>, since <span id="sessionSince"></span>.</span></p>
+      <button type="button" class="btn" id="disconnectBtn">Disconnect</button>
+    </div>
+    <p class="msg bad" id="sessionError" role="alert" hidden></p>
+  </section>
+
+  <!-- Activity -->
+  <section class="card" id="activityCard" aria-labelledby="hActivity">
+    <h2 id="hActivity">Recent activity</h2>
+    <p class="lead">Sign-ins, failed attempts and pairing, newest first. See something you don't recognise? Remove
+      devices you don't know, or use <b>Start over</b> below.</p>
+    <ol class="activity" id="activityList"></ol>
+    <p class="empty" id="activityEmpty">Nothing yet.</p>
+    <button type="button" class="btn quiet" id="activityMoreBtn" hidden>Show more</button>
+  </section>
+
+  <!-- About -->
+  <section class="card" id="aboutCard" aria-labelledby="hAbout">
+    <h2 id="hAbout">About Perch</h2>
+    <dl class="facts">
+      <dt>Version</dt><dd id="aboutVersion"></dd>
+      <dt>Internet</dt><dd id="aboutOnline"></dd>
+    </dl>
+    <div class="actions">
+      <button type="button" class="btn" id="checkUpdatesBtn">Check for updates</button>
+      <span class="small muted" id="updateStatus" role="status"></span>
+    </div>
+    <div class="note update" id="updateBox" hidden>
+      <p><b>Perch <span id="updateVersion"></span> is available.</b></p>
+      <p class="notes" id="updateNotes"></p>
+      <div class="actions">
+        <button type="button" class="btn primary" id="installUpdateBtn">Install update</button>
+        <a id="updateLink" href="https://github.com/Just-Rice/perch/releases" target="_blank" rel="noopener noreferrer">What's new</a>
+      </div>
+    </div>
+    <p class="msg bad" id="aboutError" role="alert" hidden></p>
+    <p class="links">
+      <a href="https://just-rice.github.io/perch/" target="_blank" rel="noopener noreferrer">Perch website</a>
+      <a href="https://github.com/Just-Rice/perch" target="_blank" rel="noopener noreferrer">Source code on GitHub</a>
+    </p>
+
+    <div class="zone">
+      <div class="zone-item">
+        <h3>Give this Mac a new name</h3>
+        <p class="small muted">Your devices keep working. The backup password is removed, because it goes with the name.</p>
+        <div class="confirm-host" id="renameMacHost">
+          <button type="button" class="btn" id="renameMacBtn">Get a new name</button>
+        </div>
+      </div>
+      <div class="zone-item">
+        <h3>Start over</h3>
+        <p class="small muted">Forget everything: this Mac gets a new name and new keys, every device is removed and you
+          set Perch up again from step 1.</p>
+        <div class="confirm-host" id="resetHost">
+          <button type="button" class="btn danger-quiet" id="resetBtn">Start over</button>
+        </div>
+      </div>
+      <div class="zone-item">
+        <h3>Uninstall Perch</h3>
+        <p class="small muted">Removes Perch, its settings and its keys from this Mac, and moves the app to the Trash.</p>
+        <div class="confirm-host" id="uninstallHost">
+          <button type="button" class="btn danger-quiet" id="uninstallBtn">Uninstall Perch</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card farewell" id="farewell" aria-labelledby="hBye" hidden>
+    <h2 id="hBye">Perch is being removed</h2>
+    <p>Its settings and keys are gone and the app is on its way to the Trash. You can close this tab.</p>
+  </section>
+</main>
+
+<footer class="foot page">
+  <p>Perch is free and open source. This page only works on this Mac.</p>
+</footer>
+</body>
+</html>

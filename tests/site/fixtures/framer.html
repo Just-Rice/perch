@@ -1,0 +1,6 @@
+<!doctype html>
+<!-- Test page: frames the URL in ?src= the plain way (used from another origin to check the frame guard refuses). -->
+<meta charset="utf-8"><title>framer</title>
+<style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}</style>
+<iframe id="f" allow="publickey-credentials-get *; publickey-credentials-create *"></iframe>
+<script>document.getElementById('f').src = new URLSearchParams(location.search).get('src');</script>

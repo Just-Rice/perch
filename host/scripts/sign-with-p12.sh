@@ -14,19 +14,32 @@ P12="$1"; P12PW="$2"; APP="$3"; shift 3
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/perchsign.XXXXXX")"
 KC="$WORK/sign.keychain-db"
 KCPW="$(openssl rand -hex 16)"
-cleanup() { security delete-keychain "$KC" 2>/dev/null || true; rm -rf "$WORK"; }
+# Older macOS (15, as on GitHub's runners) only finds a signing identity in a keychain on the user's search list, so the
+# throwaway keychain joins the list for the signing and the original list is put back exactly afterwards.
+ORIGINAL_LIST=()
+while IFS= read -r k; do k="${k#"${k%%[![:space:]]*}"}"; k="${k%\"}"; k="${k#\"}"; [ -n "$k" ] && ORIGINAL_LIST+=("$k"); done \
+  < <(security list-keychains -d user)
+cleanup() {
+  [ ${#ORIGINAL_LIST[@]} -gt 0 ] && security list-keychains -d user -s "${ORIGINAL_LIST[@]}" 2>/dev/null
+  security delete-keychain "$KC" 2>/dev/null || true
+  rm -rf "$WORK"
+}
 trap cleanup EXIT
 security create-keychain -p "$KCPW" "$KC"
 security set-keychain-settings -lut 3600 "$KC"
 security unlock-keychain -p "$KCPW" "$KC"
 # p12 must use legacy PBE (openssl pkcs12 -export -legacy); OpenSSL 3+ defaults fail with
 # "MAC verification failed during PKCS12 import (wrong password?)".
+echo "sign: importing the certificate" >&2
 security import "$P12" -k "$KC" -P "$P12PW" -T /usr/bin/codesign >/dev/null
 security set-key-partition-list -S apple-tool:,apple: -s -k "$KCPW" "$KC" >/dev/null
+security list-keychains -d user -s "$KC" "${ORIGINAL_LIST[@]}"
 # A self-signed cert is listed as (CSSMERR_TP_NOT_TRUSTED) and `find-identity -v` hides it, but
 # codesign still signs with it. Pick the SHA-1 from the non -v listing.
+echo "sign: finding the identity" >&2
 SHA1="$(security find-identity -p codesigning "$KC" | awk '/^  1\)/{print $2; exit}')"
 [ -n "$SHA1" ] || { echo "no identity found in p12" >&2; exit 1; }
+echo "sign: signing with $SHA1" >&2
 codesign --force --sign "$SHA1" --keychain "$KC" "$@" "$APP"
 codesign --verify --deep --strict "$APP"
 codesign -d -r- "$APP" 2>&1 | grep '^designated'

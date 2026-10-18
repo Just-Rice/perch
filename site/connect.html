@@ -243,9 +243,14 @@
     <button type="button" class="key wide" data-key="cmdQ" title="Quit app">⌘Q</button>
   </div>
 
-  <!-- Phone keyboards type into this invisible box; viewer/keyboard.js passes what they type to the Mac. -->
-  <textarea id="softkbd" class="softkbd" aria-label="Type on your Mac" autocapitalize="off" autocomplete="off"
-    autocorrect="off" spellcheck="false" enterkeyhint="enter" rows="1"></textarea>
+  <!-- Phones and tablets: a keyboard button that is always on screen. The invisible text box lies right on top of it,
+       so a tap lands on a real text field, which is what iPhones need before they open their keyboard; tapping it
+       again closes the keyboard. What's typed goes to the Mac (viewer/keyboard.js). -->
+  <div id="kbdFab" class="kbd-fab" hidden>
+    <span class="kbd-fab-icon" data-icon="keyboard" aria-hidden="true"></span>
+    <textarea id="softkbd" class="softkbd" aria-label="Type on your Mac" autocapitalize="off" autocomplete="off"
+      autocorrect="off" spellcheck="false" enterkeyhint="enter" rows="1"></textarea>
+  </div>
 
   <div id="ended" class="ended" role="dialog" aria-modal="true" aria-labelledby="endedTitle" hidden>
     <div class="ended-card">

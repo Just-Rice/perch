@@ -81,6 +81,7 @@ export class Viewer {
     this._on(window, 'keydown', e => this._ownShortcut(e), true);
     this.pointer.attach();
     this.keys.attach();
+    this._wireKeyboardButton();
 
     this._applyStatus({ locked: this.ready.locked, input: this.ready.input });
     const q = this.prefs.get('quality');
@@ -181,6 +182,7 @@ export class Viewer {
     if ('input' in st) {
       this.inputAllowed = st.input !== false;
       this.root.classList.toggle('view-only', !this.inputAllowed);
+      this._syncKeyboardButton();
       if (!this.inputAllowed) {
         this.banners.show('viewonly', { kind: 'warn', icon: 'eye', title: 'View only.',
           body: "Your Mac hasn't let Perch control it yet. On the Mac, open System Settings › Privacy & Security › " +
@@ -421,6 +423,45 @@ export class Viewer {
   _activity(e) {
     // The first touch or click after the toolbar went away shouldn't bring it back (it would cover what you tapped).
     if (e?.type === 'pointerdown') this._toggleMenu(false);
+  }
+
+  // --- the phone keyboard button ---
+
+  // Always on screen on touch devices (the toolbar, with its own keyboard button, tucks itself away). Its invisible
+  // text box takes the tap itself, so the phone sees a tap on a real text field and opens its keyboard; a tap while
+  // the keyboard is open closes it. The special keys (⌘, Esc, arrows…) come up with the keyboard.
+  _wireKeyboardButton() {
+    const fab = this.$('kbdFab'), box = this.$('softkbd'), bar = this.$('keysBar'), keysBtn = this.$('tbKeys');
+    let barWasHidden = true;
+    const closeIfOpen = e => {
+      if (document.activeElement !== box) return;
+      e.preventDefault();
+      box.blur();
+    };
+    this._on(box, 'touchstart', closeIfOpen, { passive: false });
+    this._on(box, 'mousedown', closeIfOpen);
+    this._on(box, 'focus', () => {
+      fab.classList.add('open');
+      fab.setAttribute('aria-label', 'Hide the keyboard');
+      barWasHidden = bar.hidden;
+      bar.hidden = false;
+      keysBtn.setAttribute('aria-pressed', 'true');
+    });
+    this._on(box, 'blur', () => {
+      fab.classList.remove('open');
+      fab.setAttribute('aria-label', 'Show the keyboard');
+      if (barWasHidden) {
+        bar.hidden = true;
+        keysBtn.setAttribute('aria-pressed', 'false');
+      }
+    });
+    this._syncKeyboardButton();
+  }
+
+  _syncKeyboardButton() {
+    const fab = this.$('kbdFab');
+    fab.hidden = !(this.touchFirst && this.inputAllowed);
+    if (fab.hidden && document.activeElement === this.$('softkbd')) this.$('softkbd').blur();
   }
 
   // --- full screen ---

@@ -197,11 +197,25 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .key:active { background: rgba(255, 255, 255, .18); }
 .key[aria-pressed="true"] { background: #2dd4bf; color: #04201d; border-color: #2dd4bf; }
 
-/* The phone keyboard's invisible text box. It must stay focusable and on screen (iOS scrolls to focused fields). */
+/* The phone keyboard button, always on screen on touch devices, and its invisible text box lying on top of it. */
+.kbd-fab {
+  position: absolute; right: calc(env(safe-area-inset-right) + 14px);
+  bottom: calc(var(--kb-inset, 0px) + env(safe-area-inset-bottom) + 18px); z-index: 3;
+  width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(22, 25, 32, .72); border: 1px solid rgba(255, 255, 255, .22); color: #e8ebf0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .35);
+}
+.kbd-fab[hidden] { display: none; }
+.kbd-fab.open { background: #2dd4bf; color: #04201d; border-color: #2dd4bf; }
+.kbd-fab .icon { width: 26px; height: 26px; pointer-events: none; }
+.viewer:has(.keysbar:not([hidden])) .kbd-fab { bottom: calc(var(--kb-inset, 0px) + env(safe-area-inset-bottom) + 80px); }
+@supports (backdrop-filter: blur(8px)) { .kbd-fab:not(.open) { backdrop-filter: blur(12px); } }
 .softkbd {
-  position: absolute; left: 0; bottom: 0; width: 1px; height: 1px; padding: 0; border: 0; margin: 0; opacity: 0;
-  resize: none; overflow: hidden; font-size: 16px; color: transparent; background: transparent; caret-color: transparent;
-  pointer-events: none;
+  position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; margin: 0; border-radius: 50%;
+  opacity: 0; resize: none; overflow: hidden; cursor: pointer;
+  /* 16px stops iPhones zooming the page in when the box gets focus. */
+  font-size: 16px; color: transparent; background: transparent; caret-color: transparent;
+  -webkit-user-select: text; user-select: text;
 }
 
 /* When the session ends */

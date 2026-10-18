@@ -46,6 +46,7 @@ test('desktop: the viewer shows the test picture, with the toolbar', async () =>
   assert.equal(await page.text('#tbName'), 'demo-mac-0000');
   assert.equal(await page.eval(`document.getElementById('tbDisplayWrap').hidden`), false, 'two displays: a picker');
   assert.equal(await page.eval(`document.getElementById('tbKeyboard').hidden`), true, 'no keyboard button on a desktop');
+  assert.equal(await page.eval(`document.getElementById('kbdFab').hidden`), true, 'no floating keyboard button on a desktop');
   assert.equal(await page.eval(`document.getElementById('swapWrap').hidden`), true, 'this Chrome says Mac: no Ctrl/⌘ swap');
   await page.shot('viewer-demo-toolbar-desktop');
   // The toolbar tucks itself away, and comes back when the mouse goes near the top.
@@ -361,10 +362,26 @@ test('phone: taps, double taps, long press, two-finger scroll, pinch zoom, the p
   n = await count(page);
   await page.key('Backspace', 'Backspace');
   await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'k' && m.c === 'Backspace')`, { what: 'backspace' });
-  await page.tap(...Object.values(await page.center('#tbKeys')).slice(0, 2));
+  // The keyboard button that is always on screen: its text box takes the tap itself (what iPhones need to open the
+  // keyboard), the special keys come up with the keyboard, and a second tap closes both.
+  await page.eval(`document.getElementById('softkbd').blur()`);
+  await page.waitFor(`!document.getElementById('kbdFab').hidden && !document.getElementById('kbdFab').classList.contains('open')`,
+    { what: 'keyboard button, closed' });
+  assert.equal(await page.eval(`document.getElementById('keysBar').hidden`), true, 'special keys went away with the keyboard');
+  await page.tap(...Object.values(await page.center('#kbdFab')).slice(0, 2));
+  await page.waitFor(`document.activeElement === document.getElementById('softkbd')`, { what: 'keyboard opened from the button' });
+  assert.equal(await page.eval(`document.getElementById('kbdFab').classList.contains('open')`), true);
+  assert.equal(await page.eval(`document.getElementById('keysBar').hidden`), false, 'special keys come up with the keyboard');
+  n = await count(page);
+  await page.type('ok');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'txt')`, { what: 'typed text from the button' });
   await page.shot('viewer-demo-keysbar-phone');
   await page.setView({ view: PHONE_LANDSCAPE });
   await page.shot('viewer-demo-keysbar-phone-landscape');
+  await page.setView({ view: PHONE });
+  await page.tap(...Object.values(await page.center('#kbdFab')).slice(0, 2));
+  await page.waitFor(`document.activeElement !== document.getElementById('softkbd')`, { what: 'keyboard closed by a second tap' });
+  assert.equal(await page.eval(`document.getElementById('keysBar').hidden`), true, 'special keys go away with it');
   assert.deepEqual(page.problems(), []);
   await page.close();
 });

@@ -8,6 +8,7 @@
 //
 // After that, control messages are handed out with next(types): the sign-in steps in ui/signin.js read them one at a
 // time, and once signed in everything goes to onmessage for the viewer.
+import { cleanIceServers, hasRelay } from '../shared/relay.js';
 import { Rendezvous, hostTopic, nameTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey } from '../shared/rendezvous.js';
 import { bindingHash } from '../shared/bind.js';
 import { toB64url, fromB64url, randomBytes } from '../shared/bytes.js';
@@ -16,6 +17,7 @@ import { PROTO, MIN_PEER_PROTO, CONTROL_CHANNEL, INPUT_CHANNEL, POINTER_CHANNEL 
 export const OFFER_TIMEOUT_MS = 15000; // the Mac answers a hello in well under a second when it is there
 const BROKER_GRACE_MS = 2500;          // wait this long for the other message services before saying hello
 const GATHER_MAX_MS = 3000;            // send the answer after this even if ICE gathering hasn't finished
+const GATHER_RELAY_MAX_MS = 6000;      // ...longer when the Mac sent a relay: reaching it over port 443 can be slow
 const HI_TIMEOUT_MS = 20000;           // from answer sent to the Mac's hi on the control channel
 const LOST_AFTER_MS = 8000;            // "disconnected" this long counts as lost
 const POINTER_BACKLOG = 64 * 1024;     // drop pointer moves while this much is still waiting to go out
@@ -98,6 +100,8 @@ export class Connection {
 
     this.onStage('connecting');
     this.offerSdp = first.sdp;
+    // The Mac's own relay (if its owner set one up), for networks that block direct connections.
+    this.relayServers = cleanIceServers(first.iceServers);
     await this._answer();
     await this.rdv.send(topic, key, { t: 'answer', sid: this.sid, sdp: this.answerSdp });
 
@@ -175,7 +179,7 @@ export class Connection {
   async _answer() {
     let pc;
     try {
-      pc = this.pc = new this.PeerConnection({ iceServers: this.iceServers });
+      pc = this.pc = new this.PeerConnection({ iceServers: [...this.iceServers, ...(this.relayServers ?? [])] });
     } catch (e) {
       throw this._fail(new PerchError('webrtc', { message: e.message }));
     }
@@ -196,7 +200,7 @@ export class Connection {
     // No trickle ICE: the answer has to carry every candidate, so wait for gathering (but never too long).
     if (pc.iceGatheringState !== 'complete') {
       await new Promise(resolve => {
-        const t = setTimeout(resolve, GATHER_MAX_MS);
+        const t = setTimeout(resolve, hasRelay(this.relayServers) ? GATHER_RELAY_MAX_MS : GATHER_MAX_MS);
         pc.addEventListener('icegatheringstatechange', () => {
           if (pc.iceGatheringState === 'complete') { clearTimeout(t); resolve(); }
         });

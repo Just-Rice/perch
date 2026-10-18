@@ -25,7 +25,7 @@ class FakeSession {
   end(reason) { this.state = 'ended'; this.ended = reason; }
 }
 
-async function setup({ refusal = () => null } = {}) {
+async function setup({ refusal = () => null, relay = null } = {}) {
   let t = 1_000_000;
   const sessions = [];
   const hub = {
@@ -33,6 +33,7 @@ async function setup({ refusal = () => null } = {}) {
     refusal,
     unauthenticatedCount: () => sessions.filter(s => s.state !== 'ended' && s.state !== 'ready').length,
     createSession: (hello, kind) => { const s = new FakeSession({ ...hello, kind }); sessions.push(s); return s; },
+    ...(relay ? { relayIceServers: async () => relay } : {}),
   };
   const rv = new FakeRendezvous();
   const sig = new Signaling({ rendezvous: rv, hub, now: () => t });
@@ -188,4 +189,19 @@ test('a session that fails to make an offer is ended and the viewer told to try 
   await rv.deliver(topic, h);
   assert.equal(sig.lastSession.state, 'ended');
   assert.equal(repliesTo(rv, topic, h.sid)[0].reason, 'busy');
+});
+
+test('with a relay set up, the offer carries its logins', async () => {
+  const relay = [{ urls: ['turns:turn.cloudflare.com:443?transport=tcp'], username: 'u', credential: 'c' }];
+  const { rv, topic } = await setup({ relay });
+  const h = hello();
+  await rv.deliver(topic, h);
+  const [offer] = repliesTo(rv, topic, h.sid);
+  assert.equal(offer.t, 'offer');
+  assert.deepEqual(offer.iceServers, relay);
+  // Without a relay the offer has no iceServers at all.
+  const plain = await setup({ relay: [] });
+  const h2 = hello();
+  await plain.rv.deliver(plain.topic, h2);
+  assert.equal('iceServers' in repliesTo(plain.rv, plain.topic, h2.sid)[0], false);
 });

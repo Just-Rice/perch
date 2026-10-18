@@ -51,14 +51,32 @@ Messages (all carry `sid`, a random 16-byte base64url session id chosen by the v
 
 1. viewer → topic: `{t:"hello", sid, pv, route, label, pairId?}` — `pv` = viewer's `PROTO`; `route` is
    `"passkey"`, `"backup"` or `"pair"`; `label` is a short device description such as `"Safari on iPhone"`.
-2. Mac → reply topic: `{t:"offer", sid, pv, minPv, hv, sdp}` — `hv` is the app version; `sdp` the complete offer
-   (ICE gathering finished, no trickle). Or `{t:"refuse", sid, reason, retryAfter?, pv, minPv, hv}` where reason is
+2. Mac → reply topic: `{t:"offer", sid, pv, minPv, hv, sdp, iceServers?}` — `hv` is the app version; `sdp` the
+   complete offer (ICE gathering finished, no trickle); `iceServers` the owner's relay logins, if a relay is set up
+   (see Relay). Or `{t:"refuse", sid, reason, retryAfter?, pv, minPv, hv}` where reason is
    `version | busy | paused | locked-out | backup-off | not-set-up | rate`.
 3. viewer → topic: `{t:"answer", sid, sdp}` — the complete answer (ICE gathering finished or 3 s passed).
 
 The viewer refuses a Mac whose `pv < MIN_PEER_PROTO` ("Update Perch on your Mac"); the Mac refuses a viewer whose
 `pv < minPv` ("version"), and the page then tells the user to reload. The Mac rate-limits hellos (20 a minute) and
 keeps at most 3 unauthenticated sessions; each must finish signing in within `AUTH_TIMEOUT_MS` (2 minutes).
+
+Brokers that want a (public) login carry it in their URL (`wss://public:public@public.cloud.shiftr.io/`); the login
+goes in MQTT's CONNECT and the WebSocket uses the plain URL. That broker listens on port 443, so viewers on networks
+that only allow ordinary web traffic can still reach the Mac.
+
+## Relay
+
+Optional, per Mac: the owner's own Cloudflare TURN key (Turn Token ID and API token), saved in Setup and kept with the
+secrets. For each hello the Mac obtains short-lived (24 h) TURN logins from
+`POST https://rtc.live.cloudflare.com/v1/turn/keys/<id>/credentials/generate-ice-servers` (cached until 12 h remain)
+and puts the TURN entries in the offer's `iceServers`. Both sides pass relay settings through
+`site/js/shared/relay.js` `cleanIceServers` (stun/turn/turns URLs only, no port 53, TURN entries need a login). The
+viewer adds them to its own STUN servers, so on a network that blocks direct connections its browser reaches the Mac
+through `turns:turn.cloudflare.com:443`. The Mac itself does not use the relay. If Cloudflare can't be reached the
+offer simply has no relay. The logins travel inside the sealed envelope; anyone able to open it (a holder of the
+rendezvous key, or of the Mac's name on the backup route) could use them until they expire, which would only cost the
+owner relay traffic.
 
 ## WebRTC
 

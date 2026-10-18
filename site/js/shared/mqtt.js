@@ -25,8 +25,11 @@ const u16 = n => Uint8Array.of(n >> 8, n & 0xff);
 const packet = (first, body) => concat(Uint8Array.of(first), remainingLength(body.length), body);
 
 export class MqttClient {
-  constructor(url, { WebSocketImpl = globalThis.WebSocket, keepalive = 30, maxPacket = 1 << 20 } = {}) {
+  // `username`/`password`: some public brokers ask for a fixed public login (e.g. shiftr.io's "public"/"public").
+  constructor(url, { WebSocketImpl = globalThis.WebSocket, keepalive = 30, maxPacket = 1 << 20, username = null, password = null } = {}) {
     this.url = url;
+    this.username = username;
+    this.password = password;
     this.WS = WebSocketImpl;
     this.keepalive = keepalive;
     this.maxPacket = maxPacket;
@@ -62,7 +65,10 @@ export class MqttClient {
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => {
         const clientId = 'perch-' + toHex(randomBytes(8));
-        const body = concat(str('MQTT'), Uint8Array.of(4, 0x02), u16(this.keepalive), str(clientId));
+        // Connect flags: clean session (0x02), plus username (0x80) and password (0x40) when given.
+        const flags = 0x02 | (this.username != null ? 0x80 : 0) | (this.password != null ? 0x40 : 0);
+        const body = concat(str('MQTT'), Uint8Array.of(4, flags), u16(this.keepalive), str(clientId),
+          ...(this.username != null ? [str(this.username)] : []), ...(this.password != null ? [str(this.password)] : []));
         this._send(packet(CONNECT << 4, body));
       };
       ws.onmessage = (ev) => {

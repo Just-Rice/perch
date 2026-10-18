@@ -11,13 +11,16 @@ export const RP_ID = 'just-rice.github.io';
 export const SITE_URL = 'https://just-rice.github.io/perch/';
 export const CONNECT_URL = 'https://just-rice.github.io/perch/connect.html';
 
-// Free public MQTT-over-WebSocket brokers from three separate operators, all used at once. They only carry sealed
+// Free public MQTT-over-WebSocket brokers from four separate operators, all used at once. They only carry sealed
 // rendezvous messages, which stay under 32 KB (the smallest limit seen on public brokers is about 48 KB). Node's
 // built-in WebSocket can't talk to brokers that offer HTTP/2 WebSockets, so only add brokers tested from Node too.
+// The last one listens on the normal web port (443), so it still works on school and office Wi-Fi that blocks the
+// others' ports; it asks for a fixed public login.
 export const BROKERS = [
   'wss://broker.emqx.io:8084/mqtt',
   'wss://broker.hivemq.com:8884/mqtt',
   'wss://test.mosquitto.org:8081/mqtt',
+  'wss://public:public@public.cloud.shiftr.io/',
 ];
 
 // Public STUN servers: they tell each side its public address so the two can connect directly.

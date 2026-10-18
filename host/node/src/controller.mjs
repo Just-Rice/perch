@@ -8,6 +8,7 @@ import { QUALITY, DEFAULT_QUALITY, PAIR_TTL_MS, AUTH_TIMEOUT_MS } from '../../..
 import { newMacName as makeMacName, suggestPassword } from './names.mjs';
 import { HostPeer } from './rtc.mjs';
 import { Session } from './session.mjs';
+import { Relay } from './relay.mjs';
 import { Signaling } from './signaling.mjs';
 import { silentLog } from './log.mjs';
 
@@ -34,9 +35,10 @@ function cleanDisplays(list) {
 
 export class Controller {
   constructor({ config, store, auth, rendezvous, app, log = silentLog(), updater = null, now = () => Date.now(),
-    authTimeoutMs = AUTH_TIMEOUT_MS }) {
+    authTimeoutMs = AUTH_TIMEOUT_MS, relay = null }) {
     Object.assign(this, { config, store, auth, rendezvous, app, log, updater, now, authTimeoutMs });
     this.signaling = new Signaling({ rendezvous, hub: this, log: log.child('rendezvous'), now });
+    this.relay = relay ?? new Relay({ store, log: log.child('relay'), now });
     this.sessions = new Set();
     this.active = null;
     this.listeners = new Set();
@@ -129,6 +131,7 @@ export class Controller {
       loginItem: { on: !!this.loginItemState.on, status: this.loginItemState.status ?? 'unknown' },
       totp: { set: !!s.config.totp.set, setAt: s.config.totp.setAt ?? null },
       backup: { set: !!s.config.backup.record, on: !!s.settings.backupOn, setAt: s.config.backup.setAt ?? null },
+      relay: this.relay.state(),
       devices: s.devices.map(publicDevice),
       pairing: this.auth.pairingInfo(),
       session: a ? { viewer: a.label, route: a.route, since: new Date(a.signedInAt).toISOString(), deviceId: a.deviceId } : null,
@@ -427,6 +430,25 @@ export class Controller {
     await this._applyListening();
     this._changed();
     return { ok: true };
+  }
+
+  // --- the optional relay for strict networks ---
+
+  // Relay logins for an offer (signaling.mjs); [] without a relay.
+  relayIceServers() { return this.relay.iceServers(); }
+
+  async relaySet(keyId, apiToken) {
+    const replacing = this.relay.configured;
+    await this.relay.save(keyId, apiToken);
+    this.store.activity('settings', replacing ? 'Relay key replaced' : 'Relay for strict networks set up');
+    this._changed();
+    return { ok: true };
+  }
+
+  async relayRemove() {
+    if (this.relay.configured) this.store.activity('settings', 'Relay for strict networks removed');
+    await this.relay.remove();
+    this._changed();
   }
 
   async backupRemove() {

@@ -185,6 +185,15 @@ export class Store {
     this.save();
   }
 
+  // --- the optional relay (Cloudflare TURN key; the token is a secret, so it lives with the other secrets) ---
+  get relayLogin() { return this.secrets.relay ?? null; }
+  async setRelayLogin(login) {
+    this.secrets.relay = login ? { keyId: login.keyId, apiToken: login.apiToken } : null;
+    await this.saveSecrets();
+    this.config.relay = { set: !!login, setAt: login ? new Date().toISOString() : null };
+    this.save();
+  }
+
   // --- devices ---
   get devices() { return this.config.devices; }
   findDevice(id) { return this.config.devices.find(d => d.id === id) ?? null; }

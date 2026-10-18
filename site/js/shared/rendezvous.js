@@ -56,6 +56,18 @@ export async function open(key, topic, payload, now = Date.now()) {
   return { id: env.i, msg };
 }
 
+// A broker that wants a (public) login carries it in its URL, like wss://public:public@public.cloud.shiftr.io. The
+// login goes in MQTT's CONNECT; the WebSocket gets the plain URL (browsers don't send URL credentials).
+export function brokerLogin(url) {
+  let u;
+  try { u = new URL(url); } catch { return [url, {}]; }
+  if (!u.username && !u.password) return [url, {}];
+  const login = { username: decodeURIComponent(u.username), password: decodeURIComponent(u.password) };
+  u.username = '';
+  u.password = '';
+  return [u.href, login];
+}
+
 // --- the multi-broker client ---
 
 export class Rendezvous {
@@ -78,7 +90,7 @@ export class Rendezvous {
   }
 
   status() {
-    return this.brokers.map(url => ({ url, connected: !!this.clients.get(url)?.client?.connected }));
+    return this.brokers.map(url => ({ url: brokerLogin(url)[0], connected: !!this.clients.get(url)?.client?.connected }));
   }
 
   // Resolves once at least one broker is connected; keeps (re)connecting to the rest in the background.
@@ -143,7 +155,8 @@ export class Rendezvous {
     if (this.closed) return;
     const slot = this.clients.get(url);
     if (!slot) return;
-    const client = new MqttClient(url, { WebSocketImpl: this.WS });
+    const [plainUrl, login] = brokerLogin(url);
+    const client = new MqttClient(plainUrl, { WebSocketImpl: this.WS, ...login });
     slot.client = client;
     client.onmessage = (topic, payload) => this._receive(url, topic, payload);
     client.onclose = (reason) => {

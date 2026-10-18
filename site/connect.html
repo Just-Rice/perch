@@ -6,7 +6,7 @@
 <!-- connect-src: the three public message services (shared/proto.js BROKERS) and, for tests run on this computer, loopback
      WebSockets only (the page honours ?brokers= on localhost/127.0.0.1 alone). media-src: the Mac's video arrives as a
      MediaStream. 'wasm-unsafe-eval': the backup password library is WebAssembly. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' wss://broker.emqx.io:8084 wss://broker.hivemq.com:8884 wss://test.mosquitto.org:8081 ws://127.0.0.1:* ws://localhost:*; media-src 'self' blob: mediastream:; img-src 'self' data: blob:; style-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' wss://broker.emqx.io:8084 wss://broker.hivemq.com:8884 wss://test.mosquitto.org:8081 wss://public.cloud.shiftr.io ws://127.0.0.1:* ws://localhost:*; media-src 'self' blob: mediastream:; img-src 'self' data: blob:; style-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#0d1015">

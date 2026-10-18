@@ -72,6 +72,8 @@ const ACTIONS = {
   backupRegisterStart: [['registrationRequest', 'string']],
   backupRegisterFinish: [['registrationRecord', 'string']],
   backupRemove: [],
+  relaySet: [['keyId', 'string'], ['apiToken', 'string']],
+  relayRemove: [],
   updateSettings: [['patch', 'object']],
   disconnect: [],
   requestPermission: [['which', 'string']],

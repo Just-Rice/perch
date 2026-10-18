@@ -228,6 +228,41 @@
     </div>
   </section>
 
+  <!-- Relay for strict networks -->
+  <section class="card" id="relayCard" aria-labelledby="hRelay">
+    <h2 id="hRelay">School or office Wi-Fi <span class="optional">optional</span></h2>
+    <p class="lead">Some networks block the direct connection Perch normally uses. A relay passes the connection through
+      Cloudflare instead, over the same route as ordinary websites. It's free for the first 1,000 GB each month, which
+      is hundreds of hours of use. You set it up once, in your own Cloudflare account.</p>
+    <p class="small"><b>Status:</b> <span id="relayStatus">Not set up</span></p>
+    <details id="relayHow">
+      <summary>How to get a relay key (about 5 minutes)</summary>
+      <ol class="small">
+        <li>Sign up or sign in at <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com</a> (a free account is enough).</li>
+        <li>In the menu, open <b>Realtime</b> (it may be called <b>Calls</b>), then <b>TURN Server</b>.</li>
+        <li>Choose <b>Create</b>, give it a name such as <i>Perch</i>, and create it.</li>
+        <li>Cloudflare shows a <b>Turn Token ID</b> and an <b>API Token</b>. Copy both into the boxes below. The API token is
+          shown only once; if you lose it, create a new key.</li>
+      </ol>
+    </details>
+    <form id="relayForm" novalidate>
+      <label for="relayKeyId">Turn Token ID</label>
+      <input id="relayKeyId" type="text" autocomplete="off" spellcheck="false" autocapitalize="off">
+      <label for="relayToken">API Token</label>
+      <input id="relayToken" type="password" autocomplete="off" spellcheck="false" autocapitalize="off">
+      <div class="actions">
+        <button type="submit" class="btn primary" id="relaySaveBtn">Check and save</button>
+      </div>
+      <p class="small muted">Perch keeps the token in this Mac's Keychain and only uses it to ask Cloudflare for
+        short-lived relay logins for each connection.</p>
+    </form>
+    <p class="msg ok" id="relayOk" role="status" hidden></p>
+    <p class="msg bad" id="relayError" role="alert" hidden></p>
+    <div class="confirm-host" id="relayRemoveHost" hidden>
+      <button type="button" class="btn danger-quiet" id="relayRemoveBtn">Remove the relay</button>
+    </div>
+  </section>
+
   <!-- Settings -->
   <section class="card" id="settingsCard" aria-labelledby="hSettings">
     <h2 id="hSettings">Settings</h2>

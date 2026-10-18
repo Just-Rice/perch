@@ -145,7 +145,10 @@ export class Signaling {
       return this._refuse(where, sid, 'busy', 5);
     }
     if (session.state !== 'offered') return; // ended while gathering (paused, timed out...)
-    entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp };
+    // The owner's relay, if any, for viewers on networks that block direct connections (see relay.mjs).
+    const iceServers = this.hub.relayIceServers ? await this.hub.relayIceServers() : [];
+    if (session.state !== 'offered') return;
+    entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp, ...(iceServers.length ? { iceServers } : {}) };
     this.stats.offers++;
     await this._reply(where, sid, entry.offer);
   }

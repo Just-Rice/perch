@@ -5,6 +5,7 @@
 //
 // What these check, above all: no picture, no sound and no input before a viewer has signed in over this exact
 // connection, and every sign-in proof fails when an SDP was changed on the way.
+import { fingerprintBytes, sdpFingerprint } from '../../../site/js/shared/bind.js';
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
@@ -12,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as opaque from '@serenity-kit/opaque';
 import { startBroker } from '../../../tests/e2e/broker.mjs';
-import { fromB64url } from '../../../site/js/shared/bytes.js';
+import { fromB64url, randomBytes } from '../../../site/js/shared/bytes.js';
 import { startHost, TEST_ORIGIN, TEST_RP_ID, TEST_SITE } from './fake-app.mjs';
 import { SoftViewer, Refused, parsePairLink } from './soft-viewer.mjs';
 import { SoftAuthenticator } from './soft-authenticator.mjs';
@@ -218,7 +219,10 @@ test('pairing: nothing is sent and no input reaches the app until the code is ri
   assert.equal(o.user.name, `Perch · ${hi.name}`);
   assert.equal(o.authenticatorSelection.userVerification, 'required');
   assert.equal(o.authenticatorSelection.residentKey, 'required');
-  assert.equal(Buffer.from(o.user.id, 'base64url').length, 48);
+  // hostId ‖ sigKey ‖ a 16-byte pin of the Mac's fixed DTLS certificate: the fingerprint in the Mac's offer.
+  const handle = Buffer.from(o.user.id, 'base64url');
+  assert.equal(handle.length, 64);
+  assert.deepEqual([...handle.subarray(48)], [...fingerprintBytes(sdpFingerprint(v.offerSdp))]);
 
   assert.equal(v.paired.name, hi.name);
   assert.equal(v.paired.credentialId, v.credentialId);
@@ -351,38 +355,43 @@ test('passkey sign-in: a wrong code can be retried, each code works once, and a 
   assert.equal(st.session.deviceId, ctx.credentialId);
 });
 
-test('bad passkey sign-ins are refused; five failures lock the route (pairing too) until the lock runs out', async (t) => {
+test('bad passkeys never lock anyone out; five wrong codes lock the passkey route (not pairing) until the lock runs out', async (t) => {
   const ctx = await pairedHost(t);
   const { app } = ctx;
 
-  // A passkey this Mac never paired.
+  // A passkey this Mac never paired, and one made inside another page's frame: refused, and NOT counted. Anyone with
+  // the rendezvous key (an old pairing link, a removed device) could otherwise lock the owner out with rubbish.
   const stranger = authenticator();
   stranger.create({ challenge: 'AAAA', rp: { id: TEST_RP_ID }, user: { id: Buffer.from(ctx.hostId).toString('base64url') } });
-  const u = viewer(t, { authenticator: stranger });
-  await u.open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey });
-  assert.equal((await u.signInPasskey({ code: '000000' })).reason, 'unknown-device');
-
-  // Made inside a frame of another page: Perch's own clientData rule.
+  for (let i = 0; i < 6; i++) {
+    const u = viewer(t, { authenticator: stranger });
+    await u.open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey });
+    assert.equal((await u.signInPasskey({ code: '000000' })).reason, 'unknown-device');
+    await u.close();
+  }
   const framed = await passkey(t, ctx, { overrides: { topOrigin: 'https://evil.example' }, code: '000000' });
   assert.deepEqual([framed.end.reason, framed.end.final], ['bad-passkey', true]);
+  assert.deepEqual((await app.call('debug')).limits.passkey, { fails: 0, lockedUntil: 0 }, 'nothing counted');
 
-  // A right passkey but three wrong codes (failures 3, 4 and 5 lock the route).
-  const codes = await passkey(t, ctx, { code: [wrongCode(app), wrongCode(app), wrongCode(app)] });
-  assert.equal(codes.end.reason, 'locked-out');
-  assert.equal(codes.end.retryAfter, 60);
-  assert.equal(codes.end.final, true);
+  // A right passkey but wrong codes: these count. Three in one session (it then ends), two more in the next.
+  const first = await passkey(t, ctx, { code: [wrongCode(app), wrongCode(app), wrongCode(app)] });
+  assert.equal(first.end.reason, 'wrong-code');
+  const second = await passkey(t, ctx, { code: [wrongCode(app), wrongCode(app)] });
+  assert.equal(second.end.reason, 'locked-out');
+  assert.equal(second.end.retryAfter, 60);
+  assert.equal(second.end.final, true);
 
-  // While locked, passkey and pairing hellos are refused before any WebRTC is set up.
+  // While locked, passkey hellos are refused before any WebRTC is set up; pairing has its own counter and still works.
   const locked = await refusal(viewer(t).open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey }));
   assert.equal(locked.reason, 'locked-out');
   assert.ok(locked.retryAfter > 50 && locked.retryAfter <= 60);
   await app.call('pairStart');
-  const pairLocked = await refusal(viewer(t).open({ route: 'pair', hostId: ctx.hostId, sigKey: ctx.sigKey, pairId: new Uint8Array(16) }));
-  assert.equal(pairLocked.reason, 'locked-out');
+  const pairer = viewer(t);
+  await pairer.open({ route: 'pair', hostId: ctx.hostId, sigKey: ctx.sigKey, pairId: new Uint8Array(16) });
+  await pairer.close();
 
   const st = await app.call('state');
   assert.ok(st.activity.some(a => a.kind === 'lockout' && /Passkey sign-in locked for 1 minute/.test(a.text)), JSON.stringify(st.activity));
-  assert.ok(st.activity.filter(a => a.kind === 'failure').length >= 5);
 
   // A minute later it opens again, and a success clears the count.
   await app.advance(61_000);
@@ -683,4 +692,45 @@ test('reset forgets everything: old passkeys and addresses stop working', async 
   await assert.rejects(viewer(t).open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey, timeoutMs: 1500 }), /no offer/);
   const r = await refusal(viewer(t).open({ route: 'passkey', hostId: after.hostId, sigKey: after.sigKey }));
   assert.equal(r.reason, 'not-set-up');
+});
+
+test('one-tap sign-in: the passkey signs the viewer\'s own certificate up front; replays, old times and other certificates are refused', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  // A good one: the Mac offers "quick", and a passkey over (r, ts, this viewer's fingerprint) is accepted.
+  const v = viewer(t, { authenticator: ctx.authn, label: 'One-tap viewer' });
+  await v.open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey });
+  assert.deepEqual(v.firstReply.caps, ['quick']);
+  const r = randomBytes(16);
+  const end = await v.signInQuick({ credentialId: ctx.credentialId, code: () => app.freshCode(), r });
+  assert.equal(end.t, 'ready', JSON.stringify(end));
+  v.send({ t: 'bye' });
+  await app.waitFor(async () => (await app.call('state')).session === null, { what: 'the session to end' });
+  await v.close();
+
+  const refusedWith = async (opts, what) => {
+    const w = viewer(t, { authenticator: ctx.authn, label: what });
+    await w.open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey });
+    const res = await w.signInQuick({ credentialId: ctx.credentialId, code: () => app.freshCode(), ...opts });
+    await w.close();
+    return res;
+  };
+  // The same r again (a replayed assertion), a time from 10 minutes ago, and a passkey that signed some other
+  // certificate (made for a different connection) all fail at factor one.
+  for (const [opts, what] of [
+    [{ r }, 'replayed r'],
+    [{ ts: Date.now() - 10 * 60_000 }, 'stale time'],
+    [{ fingerprint: `sha-256 ${Array(32).fill('AB').join(':')}` }, 'another certificate'],
+  ]) {
+    const res = await refusedWith(opts, what);
+    assert.equal(res.t, 'denied', `${what}: ${JSON.stringify(res)}`);
+    assert.equal(res.reason, 'bad-proof', what);
+  }
+});
+
+test('passkeys made before one-tap sign-in (48-byte user handle) still sign in', async (t) => {
+  const ctx = await pairedHost(t);
+  const legacy = Buffer.from([...ctx.hostId, ...ctx.sigKey]).toString('base64url');
+  const { end } = await passkey(t, ctx, { overrides: { userHandle: legacy } });
+  assert.equal(end.t, 'ready', JSON.stringify(end));
 });

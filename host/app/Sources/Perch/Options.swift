@@ -73,7 +73,7 @@ struct Options {
 
 /// Where things are, depending on whether we run from Perch.app or as a bare binary during development.
 enum AppPaths {
-    static let version = "0.1.0"
+    static let version = "0.2.0"
 
     /// True inside Perch.app (Launch Services, the login item, or Contents/MacOS/Perch run directly).
     static var isBundled: Bool {

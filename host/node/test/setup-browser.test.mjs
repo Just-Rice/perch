@@ -827,7 +827,7 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     await click(page, '#pairStartBtn');
     await waitFor(page, `!document.getElementById('pairActive').hidden && !!document.querySelector('#pairQr svg')`);
     const link = await value(page, '#pairLink');
-    assert.match(link, /^https:\/\/just-rice\.github\.io\/perch\/connect\.html#pair=[A-Za-z0-9_-]{128}$/);
+    assert.match(link, /^https:\/\/just-rice\.github\.io\/perch\/connect\.html#pair=[A-Za-z0-9_-]{150}$/);
     assert.equal((await state()).pairing.link, link);
     await checkQr(page, '#pairQr', link);
     assert.match(await text(page, '#pairCountdown'), /^This code works for (10:00|9:5\d) more\.$/);

@@ -9,6 +9,7 @@ import { Connection, PerchError } from './connection.js';
 import { signIn, loadOpaque } from './signin.js';
 import { Screens } from './screens.js';
 import { getAssertion, webauthnAvailable, webauthnErrorKind } from './passkey.js';
+import { prepareQuick, quickRequest } from './quick.js';
 import { failureMessage, messageFor } from './messages.js';
 import { fillIcons, icon } from './icons.js';
 import { openInBlankTab } from '../blank.js';
@@ -85,6 +86,7 @@ function wireHome(app) {
 
 function showHome(app, { status } = {}) {
   closeCurrent(app);
+  prepareQuick(); // make the certificate now, so "Sign in with a passkey" needs only one passkey request
   const list = app.macs.list();
   const ul = $('macList');
   ul.replaceChildren();
@@ -142,17 +144,25 @@ function macItem(app, mac) {
 }
 
 // "Sign in with a passkey" with no Mac in mind: any Perch passkey's user handle says which Mac it is for.
-function discover(app) {
+// One request does it all when it can (one-tap sign-in, quick.js): the passkey signs this browser's certificate,
+// prepared in advance, and its user handle carries the Mac's address and certificate pin. Older passkeys (no pin)
+// still work, but the Mac then asks for the passkey a second time, over the live connection.
+async function discover(app) {
   app.ui.showError('homeStatus', '');
   if (!webauthnAvailable()) return showMessage(app, failureMessage('no-webauthn'), null);
-  // Called right here in the click: Safari only allows passkey requests straight from a tap.
-  getAssertion({ challenge: randomBytes(32), rpId: app.env.rpId }).then(cred => {
+  // Already prepared when the home screen opened, so this resolves at once and the request stays inside the tap
+  // (Safari only allows passkey requests straight from one).
+  const q = await prepareQuick();
+  const request = q ? await quickRequest(q) : { challenge: randomBytes(32), proof: null };
+  getAssertion({ challenge: request.challenge, rpId: app.env.rpId }).then(cred => {
     const ids = parseUserHandle(cred.userHandle);
     if (!ids) return showMessage(app, failureMessage('not-perch-passkey'), null);
     const mac = app.macs.save({
       hostId: toB64url(ids.hostId), sigKey: toB64url(ids.sigKey), credentialId: cred.id, lastUsed: Date.now(),
+      ...(ids.pin ? { pin: toB64url(ids.pin) } : {}),
     });
-    runSession(app, { route: 'passkey', mac });
+    const quick = q && ids.pin && request.proof ? { cert: q.cert, response: cred.json, proof: request.proof } : null;
+    runSession(app, { route: 'passkey', mac, quick });
   }, e => {
     const kind = webauthnErrorKind(e);
     app.ui.showError('homeStatus', kind === 'cancelled'
@@ -203,20 +213,24 @@ async function runSession(app, target) {
 
   const ids = route === 'pair' ? { hostId: pair.hostId, sigKey: pair.sigKey }
     : route === 'passkey' ? { hostId: fromB64url(mac.hostId), sigKey: fromB64url(mac.sigKey) } : {};
+  // The Mac's certificate pin, from its passkey, a remembered Mac or the pairing link: only that Mac is trusted.
+  const pin = route === 'pair' ? pair.pin ?? null : route === 'passkey' && mac?.pin ? fromB64url(mac.pin) : null;
   const conn = new Connection({
-    route, ...ids, macName: target.macName, pairId: pair?.pairId, label: app.label,
+    route, ...ids, macName: target.macName, pairId: pair?.pairId, label: app.label, pin,
+    certificate: target.quick?.cert ?? null,
     brokers: env.brokers, iceServers: env.iceServers, log: app.log, onStage: s => ui.stage(s),
   });
   app.conn = conn;
   let saved = mac || null;
   const ctx = {
     route, rpId: env.rpId, label: app.label, credentialId: mac?.credentialId, password: target.password, pair,
+    quick: target.quick ?? null,
     alwaysTap: env.params.get('tap') === '1',
     onHi: hi => ui.setMacName(hi.name),
     onPaired: m => {
       saved = app.macs.save({
         hostId: toB64url(pair.hostId), sigKey: toB64url(pair.sigKey), credentialId: m.credentialId,
-        name: m.name || '', lastUsed: Date.now(),
+        name: m.name || '', lastUsed: Date.now(), ...(pair.pin ? { pin: toB64url(pair.pin) } : {}),
       });
     },
   };

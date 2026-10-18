@@ -145,12 +145,31 @@ export class Store {
     this.save();
   }
   // The passkey user handle: hostId ‖ sigKey.
-  get userHandle() {
+  // Passkeys made before one-tap sign-in carry just hostId ‖ sigKey (48 bytes).
+  get legacyUserHandle() {
     const h = new Uint8Array(HOST_ID_BYTES + SIG_KEY_BYTES);
     h.set(this.hostId, 0);
     h.set(this.sigKey, HOST_ID_BYTES);
     return h;
   }
+  // hostId ‖ sigKey ‖ the first 16 bytes of this Mac's DTLS certificate fingerprint (64 bytes, WebAuthn's maximum):
+  // the pin a browser checks before sending a one-tap sign-in. 48 bytes until the certificate exists.
+  get userHandle() {
+    const pin = this.dtlsPin;
+    if (!pin) return this.legacyUserHandle;
+    const h = new Uint8Array(HOST_ID_BYTES + SIG_KEY_BYTES + pin.length);
+    h.set(this.legacyUserHandle, 0);
+    h.set(pin, HOST_ID_BYTES + SIG_KEY_BYTES);
+    return h;
+  }
+
+  // The Mac's own DTLS certificate (it never changes, so passkeys can pin it). {certPem, keyPem, signatureHash}.
+  get dtlsKeys() { return this.secrets.dtls ?? null; }
+  async setDtlsKeys(keys, pin) {
+    this.secrets.dtls = { certPem: keys.certPem, keyPem: keys.keyPem, signatureHash: keys.signatureHash, pin: toB64url(pin) };
+    await this.saveSecrets();
+  }
+  get dtlsPin() { return this.secrets.dtls?.pin ? fromB64url(this.secrets.dtls.pin) : null; }
 
   // --- settings ---
   get settings() { return this.config.settings; }

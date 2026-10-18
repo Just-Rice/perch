@@ -5,9 +5,11 @@
 // connection's binding value. Until then nothing is sent but sign-in messages: no picture, no sound, and input is
 // ignored. The controller ("hub") owns the app and decides which signed-in session is the active one.
 import { randomBytes } from 'node:crypto';
-import { bindingHash, bindProof } from '../../../site/js/shared/bind.js';
+import { bindingHash, bindProof, quickChallenge, sdpFingerprint } from '../../../site/js/shared/bind.js';
 import { toB64url, fromB64url, equalBytes } from '../../../site/js/shared/bytes.js';
 import { PROTO, AUTH_TIMEOUT_MS, QUALITY } from '../../../site/js/shared/proto.js';
+
+const ANSWER_TIMEOUT_MS = 15000; // offer sent, no answer yet
 import { AuthError } from './auth.mjs';
 import { MediaSender } from './media.mjs';
 import { validateInput, RateLimiter, POINTER_RATE, INPUT_RATE, CONTROL_RATE } from './input.mjs';
@@ -56,6 +58,13 @@ export class Session {
         this._deny('timeout');
       }
     }, authTimeoutMs);
+    // A real browser answers within a few seconds; one that never does is only holding a sign-in slot.
+    this._timer(() => {
+      if (this.state === 'new' || this.state === 'offered') {
+        this.log?.info(`no answer from the viewer (${this.route})`);
+        this.end('timeout', { sendBye: false });
+      }
+    }, Math.min(authTimeoutMs, ANSWER_TIMEOUT_MS));
 
     const { control, input, pointer } = peer.channels;
     this.subs.push(control.stateChanged.subscribe(s => {
@@ -153,24 +162,36 @@ export class Session {
     }
   }
 
-  // A failed check: count it towards the route's lockout and tell the viewer.
-  _failed(e, what) {
-    this.log?.info(`${this.route} sign-in refused: ${e.message}`);
-    const lockedMs = this.auth.fail(this.route, what);
-    if (lockedMs > 0) return this._deny('locked-out', { retryAfter: seconds(lockedMs) });
-    return this._deny(e.reason);
-  }
 
   async _assert(msg) {
     try {
-      const device = await this.auth.verifyAssertion(msg.response, this.bind);
+      // One-tap sign-in: the passkey signed the browser's own certificate fingerprint before connecting (bind.js,
+      // "quick"). Otherwise it signed this connection's binding, as usual.
+      const challenge = msg.quick !== undefined ? await this._quickChallenge(msg.quick) : this.bind;
+      const device = await this.auth.verifyAssertion(msg.response, challenge);
       this.deviceId = device.id;
       this.deviceLabel = device.label;
     } catch (e) {
       if (!(e instanceof AuthError)) throw e;
-      return this._failed(e, `Passkey sign-in refused (${this.label})`);
+      // Refused without counting toward the lockout. A passkey signature can't be guessed, so the lockout is only for
+      // the 6-digit code; counting passkey failures would let anyone holding the rendezvous key (an old pairing link,
+      // a removed device) keep the owner locked out just by sending rubbish.
+      this.log?.info(`passkey sign-in refused: ${e.message}`);
+      return this._deny(e.reason);
     }
     this._askCode();
+  }
+
+  // The challenge a one-tap sign-in must have signed: over the certificate this viewer's DTLS actually used (the one
+  // in the answer it sent, which werift holds it to), a fresh time and a never-seen r. Throws AuthError otherwise.
+  async _quickChallenge(q) {
+    const fingerprint = sdpFingerprint(this.peer.answerSdp);
+    if (!fingerprint) throw new AuthError('bad-proof', 'one-tap sign-in: the answer has no single sha-256 fingerprint');
+    let r = null;
+    try { r = q && typeof q.r === 'string' ? fromB64url(q.r) : null; } catch {}
+    if (!r || r.length !== 16 || !Number.isSafeInteger(q.ts)) throw new AuthError('bad-proof', 'one-tap sign-in: malformed');
+    this.auth.useQuickNonce(q.r, q.ts); // throws if stale or seen before
+    return quickChallenge(r, q.ts, fingerprint);
   }
 
   async _opaque1(msg) {

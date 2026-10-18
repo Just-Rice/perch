@@ -208,3 +208,26 @@ test('inside an about:blank tab: same sign-in, same picture', async () => {
   assert.equal(await inFrame(`document.getElementById('video').videoWidth > 0`), true, 'video in the about:blank tab');
   assert.equal((await app.call('state')).session?.route, 'passkey');
 });
+
+test('"Sign in with a passkey" on a browser that doesn\'t remember the Mac asks for the passkey only once', async () => {
+  let asked = 0;
+  const off = stack.cdp.on(m => { if (m.method === 'WebAuthn.credentialAsserted') asked++; });
+  try {
+    const page = await openPage(stack, `${stack.base}connect.html?${testParams()}`, { name: 'one-tap' });
+    await page.eval(`localStorage.removeItem('perch.macs.v1')`);
+    await page.goto(`${stack.base}connect.html?${testParams()}`);
+    await page.waitScreen('home');
+    assert.equal(await page.eval(`document.querySelectorAll('#macList button').length`), 0, 'no remembered Mac');
+    await page.click('#btnDiscover');
+    await enterCode(page);
+    await assertPlaying(page);
+    assert.equal((await app.call('state')).session?.route, 'passkey');
+    assert.equal(asked, 1, `passkey requests: ${asked}`);
+    const macs = JSON.parse(await page.eval(`localStorage.getItem('perch.macs.v1')`));
+    assert.equal(macs.length, 1);
+    assert.match(macs[0].pin ?? '', /^[A-Za-z0-9_-]{22}$/, 'the Mac is remembered with its certificate pin');
+    assert.deepEqual(page.problems(), []);
+  } finally {
+    off();
+  }
+});

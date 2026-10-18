@@ -21,8 +21,9 @@ volunteer project, so please allow a few days.
   ([PROTOCOL.md, Binding](docs/PROTOCOL.md#binding)).
 - **Pairing needs someone at the Mac.** A new device needs a one-time link shown in Setup on the Mac (valid 10 minutes,
   single use), plus the 6-digit code.
-- **Guessing is slow.** Five failures lock that way of signing in for a minute, doubling up to an hour. Codes work
-  once.
+- **Guessing is slow.** Five wrong codes lock that way of signing in for a minute, doubling up to an hour, and codes
+  work once. Passkey, pairing and backup sign-in are locked separately, so nobody can lock you out of your passkeys by
+  guessing elsewhere.
 - **No servers of ours, and nothing readable on anyone else's.** The free public message services that help the two
   ends find each other only carry encrypted notes. The screen, sound and input go directly between the Mac and the
   browser over WebRTC's encryption (DTLS-SRTP).
@@ -37,9 +38,16 @@ volunteer project, so please allow a few days.
 - **Every page on `just-rice.github.io` shares one web origin.** Browsers treat all of the projects published there
   as one site. If any of them were compromised, a malicious page could imitate Perch's sign-in. It would still need
   your passkey approval and your 6-digit code, so stay alert to unexpected prompts.
+- **Recognising the Mac.** Passkeys and pairing links made by Perch 0.2 or later carry a pin of the Mac's own
+  connection certificate, and the website refuses to talk to anything that can't prove it holds that certificate.
+  Passkeys from Perch 0.1 have no pin: pair those devices again to get it. The backup sign-in (Mac name + password)
+  has no pin either, so there the website relies on the password check (OPAQUE), which a fake Mac can't pass.
+- **A lost device or pairing link.** Removing a device stops its passkey working, but it still knows how to reach
+  your Mac. It can't sign in or lock you out, but it could keep trying to connect. If that ever happens, use
+  **Start over** in Setup: it gives the Mac a new identity, so everything old stops working.
 - **werift doesn't check DTLS handshake signatures.** The WebRTC library on the Mac checks that the browser's
   certificate matches the one announced for the session, but not the handshake signature proving the browser holds
-  its private key. Perch's design doesn't rely on that check: the browser fully verifies the Mac, every sign-in proof
+  its private key. Perch's design doesn't rely on that check: the browser fully verifies the Mac's certificate (and its pin, from Perch 0.2), every sign-in proof
   answers a random number sent inside one specific encrypted session and must come back inside it, and the Mac sends
   nothing private before sign-in. See [PROTOCOL.md, Binding](docs/PROTOCOL.md#binding).
 - **The backup sign-in is weaker than a passkey.** A fake site or someone watching could capture the password, so it

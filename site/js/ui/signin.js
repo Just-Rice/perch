@@ -32,8 +32,13 @@ export async function signIn(conn, ctx, ui) {
   ctx.onHi?.(hi);
 
   if (ctx.route === 'passkey') {
-    const cred = await passkeyStep(conn, ctx, ui, hi);
-    conn.send({ t: 'assert', response: cred.json });
+    if (ctx.quick && conn.caps?.includes('quick') && conn.pin) {
+      // One-tap: the passkey was already used before connecting, over this connection's own certificate.
+      conn.send({ t: 'assert', response: ctx.quick.response, quick: ctx.quick.proof });
+    } else {
+      const cred = await passkeyStep(conn, ctx, ui, hi);
+      conn.send({ t: 'assert', response: cred.json });
+    }
   } else if (ctx.route === 'backup') {
     await backupSteps(conn, ctx, ui);
   } else if (ctx.route === 'pair') {
@@ -126,8 +131,10 @@ async function pairSteps(conn, ctx, ui, hi) {
   const m = await conn.next(['pair-options', 'denied'], REPLY_MS);
   if (m.t === 'denied') throw deniedError(m);
   const o = m.options;
-  // The new passkey must be for this connection and carry this Mac's address; anything else means something is off.
-  if (!o || o.challenge !== toB64url(conn.bind) || o.user?.id !== toB64url(concat(pair.hostId, pair.sigKey))) {
+  // The new passkey must be for this connection and carry this Mac's address (and, from Macs that have one, the
+  // certificate pin the pairing link carried); anything else means something is off.
+  const handle = pair.pin ? concat(pair.hostId, pair.sigKey, pair.pin) : concat(pair.hostId, pair.sigKey);
+  if (!o || o.challenge !== toB64url(conn.bind) || o.user?.id !== toB64url(handle)) {
     throw new PerchError('wrong-mac');
   }
   let error = null;

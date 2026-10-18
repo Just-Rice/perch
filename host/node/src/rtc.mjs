@@ -4,8 +4,11 @@
 // a codec the Mac can't make), one sendonly Opus track, and the three data channels. ICE is not trickled: the offer
 // is sent once gathering has finished, so a single rendezvous message carries everything. The exact offer and
 // answer texts are kept because the sign-in proofs are bound to them (site/js/shared/bind.js).
-import { RTCPeerConnection, RTCSctpTransport, Connection, useH264, useOPUS, useNACK, usePLI, useREMB, useSdesMid, useAbsSendTime } from 'werift';
+import { RTCPeerConnection, RTCSctpTransport, Connection, createSelfSignedCertificate, SignatureAlgorithm, HashAlgorithm,
+  NamedCurveAlgorithm, useH264, useOPUS, useNACK, usePLI, useREMB, useSdesMid, useAbsSendTime } from 'werift';
 import { CONTROL_CHANNEL, INPUT_CHANNEL, POINTER_CHANNEL } from '../../../site/js/shared/proto.js';
+import { fingerprintBytes } from '../../../site/js/shared/bind.js';
+import { X509Certificate } from 'node:crypto';
 
 export const VIDEO_FMTP = 'profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1';
 // stereo/sprop-stereo make browsers decode both channels instead of folding the Mac's sound down to mono.
@@ -72,8 +75,20 @@ function dataChannelOpenFixed(channel) {
   this.dataChannelFlush();
 }
 
-export function peerConfig({ iceServers = [], iceLoopback = false } = {}) {
+// The Mac's DTLS certificate, made once and kept with the secrets: passkeys pin its fingerprint (one-tap sign-in), so
+// it must stay the same for as long as this Mac's identity does (Start over makes a new one with everything else).
+export async function ensureDtlsIdentity(store) {
+  if (store.dtlsKeys) return store.dtlsKeys;
+  const keys = await createSelfSignedCertificate(
+    { signature: SignatureAlgorithm.ecdsa_3, hash: HashAlgorithm.sha256_4 }, NamedCurveAlgorithm.secp256r1_23);
+  const fingerprint = `sha-256 ${new X509Certificate(keys.certPem).fingerprint256}`;
+  await store.setDtlsKeys(keys, fingerprintBytes(fingerprint));
+  return store.dtlsKeys;
+}
+
+export function peerConfig({ iceServers = [], iceLoopback = false, dtlsKeys = null } = {}) {
   return {
+    ...(dtlsKeys ? { dtls: { keys: { certPem: dtlsKeys.certPem, keyPem: dtlsKeys.keyPem, signatureHash: dtlsKeys.signatureHash } } } : {}),
     iceServers: iceServers.map(s => ({ ...s })),
     codecs: {
       video: [useH264({ rtcpFeedback: [useNACK(), usePLI(), useREMB()], parameters: VIDEO_FMTP })],
@@ -99,10 +114,10 @@ function waitForGathering(pc, timeoutMs) {
 }
 
 export class HostPeer {
-  constructor({ iceServers = [], iceLoopback = false, log = null } = {}) {
+  constructor({ iceServers = [], iceLoopback = false, dtlsKeys = null, log = null } = {}) {
     applyWeriftPatches();
     this.log = log;
-    this.pc = new RTCPeerConnection(peerConfig({ iceServers, iceLoopback }));
+    this.pc = new RTCPeerConnection(peerConfig({ iceServers, iceLoopback, dtlsKeys }));
     this.videoTransceiver = this.pc.addTransceiver('video', { direction: 'sendonly' });
     this.audioTransceiver = this.pc.addTransceiver('audio', { direction: 'sendonly' });
     this.channels = {

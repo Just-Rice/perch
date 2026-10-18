@@ -12,7 +12,7 @@ import {
 import {
   Rendezvous, hostTopic, nameTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey,
 } from '../../../site/js/shared/rendezvous.js';
-import { bindingHash, bindProof } from '../../../site/js/shared/bind.js';
+import { bindingHash, bindProof, quickChallenge, sdpFingerprint } from '../../../site/js/shared/bind.js';
 import { toB64url, fromB64url, randomBytes } from '../../../site/js/shared/bytes.js';
 import { PROTO, HOST_ID_BYTES, SIG_KEY_BYTES, PAIR_ID_BYTES } from '../../../site/js/shared/proto.js';
 import * as opaque from '@serenity-kit/opaque';
@@ -218,6 +218,16 @@ export class SoftViewer {
   async signInPasskey({ credentialId, code, overrides = {}, beforeCode }) {
     const resp = this.authenticator.get({ challenge: toB64url(this.bind), credentialId }, overrides);
     this.send({ t: 'assert', response: resp });
+    return this._code(code, beforeCode);
+  }
+
+  // One-tap sign-in (bind.js "quick"): the passkey signs this viewer's own certificate fingerprint, a time and a
+  // fresh r instead of the Mac's nonce. `fingerprint`, `r` and `ts` can be overridden to test refusals.
+  async signInQuick({ credentialId, code, r = randomBytes(16), ts = Date.now(), fingerprint, overrides = {}, beforeCode }) {
+    const fp = fingerprint ?? sdpFingerprint(this.answerSdp);
+    const challenge = await quickChallenge(r, ts, fp);
+    const resp = this.authenticator.get({ challenge: toB64url(challenge), credentialId }, overrides);
+    this.send({ t: 'assert', response: resp, quick: { r: toB64url(r), ts } });
     return this._code(code, beforeCode);
   }
 

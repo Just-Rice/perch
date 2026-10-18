@@ -18,7 +18,7 @@ const MAX_OFFER_RESENDS = 3;
 const FORGET_AFTER_MS = 5 * 60 * 1000;
 
 export class Signaling {
-  // hub: { hv, refusal(hello, kind) → null | {reason, retryAfter?}, unauthenticatedCount(), createSession(hello, kind) }
+  // hub: { hv, refusal(hello, kind) → null | {reason, retryAfter?}, unauthenticatedCount(kind), createSession(hello, kind) }
   constructor({ rendezvous, hub, log = null, now = () => Date.now() }) {
     this.rv = rendezvous;
     this.hub = hub;
@@ -26,8 +26,8 @@ export class Signaling {
     this.now = now;
     this.host = null;      // {topic, key}
     this.name = null;      // {topic, key, macName}
-    this.recent = [];      // times of accepted hellos, for the per-minute limit
-    this.lastRateReply = 0;
+    this.recentByKind = {}; // kind ('host' | 'name') -> times of accepted hellos, for the per-minute limit
+    this.lastRateReply = {}; // kind -> when we last answered 'rate'
     this.sids = new Map(); // sid -> {kind, topic, key, session?, offer?, resends, at}
     this.stats = { hellos: 0, offers: 0, refusals: {}, dropped: 0, answers: 0 };
   }
@@ -115,14 +115,17 @@ export class Signaling {
       return;
     }
     const t = this.now();
-    this.recent = this.recent.filter(x => t - x < 60000);
-    if (this.recent.length >= HELLOS_PER_MINUTE) {
+    // Each topic has its own budget: the name topic only needs the Mac's name, so a stranger flooding it must not use
+    // up what the owner's passkey devices (host topic, which needs the rendezvous key) rely on.
+    const recent = (this.recentByKind[kind] ??= []).filter(x => t - x < 60000);
+    this.recentByKind[kind] = recent;
+    if (recent.length >= HELLOS_PER_MINUTE) {
       // Answer at most once a second, so a flood of hellos can't make us flood the brokers in turn.
-      if (t - this.lastRateReply < 1000) return this._drop('rate');
-      this.lastRateReply = t;
-      return this._refuse(where, sid, 'rate', Math.max(1, Math.ceil((this.recent[0] + 60000 - t) / 1000)));
+      if (t - (this.lastRateReply[kind] ?? 0) < 1000) return this._drop('rate');
+      this.lastRateReply[kind] = t;
+      return this._refuse(where, sid, 'rate', Math.max(1, Math.ceil((recent[0] + 60000 - t) / 1000)));
     }
-    this.recent.push(t);
+    recent.push(t);
     this.stats.hellos++;
     const entry = { kind, topic: where.topic, key: where.key, session: null, offer: null, resends: 0, at: t };
     this.sids.set(sid, entry);
@@ -132,7 +135,7 @@ export class Signaling {
     const hello = { sid, pv, route, label: label || 'a browser', pairId: route === 'pair' ? msg.pairId : undefined };
     const no = this.hub.refusal(hello, kind);
     if (no) return this._refuse(where, sid, no.reason, no.retryAfter);
-    if (this.hub.unauthenticatedCount() >= MAX_UNAUTHENTICATED) return this._refuse(where, sid, 'busy', 10);
+    if (this.hub.unauthenticatedCount(kind) >= MAX_UNAUTHENTICATED) return this._refuse(where, sid, 'busy', 10);
 
     let session, sdp;
     try {
@@ -148,7 +151,9 @@ export class Signaling {
     // The owner's relay, if any, for viewers on networks that block direct connections (see relay.mjs).
     const iceServers = this.hub.relayIceServers ? await this.hub.relayIceServers() : [];
     if (session.state !== 'offered') return;
-    entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp, ...(iceServers.length ? { iceServers } : {}) };
+    // caps: what this Mac can do beyond protocol 1 ("quick" = one-tap passkey sign-in, see bind.js).
+    entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp, ...(this.hub.caps?.length ? { caps: this.hub.caps } : {}),
+      ...(iceServers.length ? { iceServers } : {}) };
     this.stats.offers++;
     await this._reply(where, sid, entry.offer);
   }

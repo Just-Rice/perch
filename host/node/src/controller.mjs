@@ -267,14 +267,20 @@ export class Controller {
     return null;
   }
 
-  unauthenticatedCount() {
+  // Sessions still signing in, counted per topic ('host': passkey and pairing, 'name': backup), so strangers who only
+  // know the Mac's name can't fill the slots the owner's own devices need.
+  unauthenticatedCount(kind) {
     let n = 0;
-    for (const s of this.sessions) if (s.state !== 'ready' && s.state !== 'ended') n++;
+    for (const s of this.sessions) {
+      if (s.state === 'ready' || s.state === 'ended') continue;
+      if (kind === undefined || (kind === 'name') === (s.route === 'backup')) n++;
+    }
     return n;
   }
 
   createSession(hello) {
-    const peer = new HostPeer({ iceServers: this.config.iceServers, iceLoopback: this.config.iceLoopback, log: this.log.child('rtc') });
+    const peer = new HostPeer({ iceServers: this.config.iceServers, iceLoopback: this.config.iceLoopback,
+      dtlsKeys: this.store.dtlsKeys, log: this.log.child('rtc') });
     const session = new Session({
       sid: hello.sid, route: hello.route, label: hello.label, peer, auth: this.auth, store: this.store, hub: this,
       log: this.log.child(`session ${hello.sid.slice(0, 6)}`), now: this.now, authTimeoutMs: this.authTimeoutMs,
@@ -436,6 +442,9 @@ export class Controller {
 
   // Relay logins for an offer (signaling.mjs); [] without a relay.
   relayIceServers() { return this.relay.iceServers(); }
+
+  // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
+  get caps() { return this.store.dtlsKeys ? ['quick'] : []; }
 
   async relaySet(keyId, apiToken) {
     const replacing = this.relay.configured;

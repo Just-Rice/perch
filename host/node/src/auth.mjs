@@ -8,7 +8,7 @@ import * as opaque from '@serenity-kit/opaque';
 import { verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
 import { randomBytes } from 'node:crypto';
 import { toB64url, fromB64url, equalBytes, concat, fromUtf8 } from '../../../site/js/shared/bytes.js';
-import { bindProof } from '../../../site/js/shared/bind.js';
+import { bindProof, QUICK_MAX_AGE_MS } from '../../../site/js/shared/bind.js';
 import { normalizeMacName } from '../../../site/js/shared/rendezvous.js';
 import { PAIR_ID_BYTES, PAIR_SECRET_BYTES, PAIR_TTL_MS } from '../../../site/js/shared/proto.js';
 import { checkCode, newSecret, otpauthUri, base32 } from './totp.mjs';
@@ -18,7 +18,7 @@ import { lockedFor, recordFailure, recordSuccess, MAX_FAILS } from './limits.mjs
 export const COSE_ALGS = [-7, -8, -257];
 export const MAX_BAD_PAIR_PROOFS = 3;
 const B64URL_RE = /^[A-Za-z0-9_-]*$/;
-const ROUTE_NAMES = { passkey: 'Passkey', backup: 'Backup' };
+const ROUTE_NAMES = { passkey: 'Passkey', backup: 'Backup', pair: 'Pairing' };
 
 export class AuthError extends Error {
   constructor(reason, detail = reason, extra = {}) {
@@ -111,8 +111,12 @@ export class Auth {
     // A valid passkey that signed some other connection's challenge: the SDP was changed on the way.
     if (cd.challenge !== toB64url(bind)) throw new AuthError('bad-proof', 'challenge is not this connection\'s binding');
     const uh = response.response.userHandle;
-    if (uh != null && !equalBytes(fromB64url(uh), this.store.userHandle)) {
-      throw new AuthError('bad-passkey', 'user handle is not this Mac\'s');
+    // Passkeys made before one-tap sign-in carry the shorter, 48-byte handle; both are this Mac's.
+    if (uh != null) {
+      const given = fromB64url(uh);
+      if (!equalBytes(given, this.store.userHandle) && !equalBytes(given, this.store.legacyUserHandle)) {
+        throw new AuthError('bad-passkey', 'user handle is not this Mac\'s');
+      }
     }
     let v;
     try {
@@ -169,13 +173,27 @@ export class Auth {
     };
   }
 
+  // --- one-tap sign-in: each signed (r, ts) works once, and only while fresh ---
+
+  useQuickNonce(r, ts) {
+    const now = this.now();
+    if (Math.abs(now - ts) > QUICK_MAX_AGE_MS) throw new AuthError('bad-proof', 'one-tap sign-in: too old (check the device clock)');
+    this.quickSeen ??= new Map();
+    for (const [k, exp] of this.quickSeen) if (exp < now) this.quickSeen.delete(k);
+    if (this.quickSeen.has(r)) throw new AuthError('bad-proof', 'one-tap sign-in: already used');
+    this.quickSeen.set(r, now + 2 * QUICK_MAX_AGE_MS);
+  }
+
   // --- pairing links ---
 
   createPairing() {
     if (!this.store.config.totp.set) throw new Error('Set up the authenticator app first.');
     const id = randomBytes(PAIR_ID_BYTES);
     const secret = randomBytes(PAIR_SECRET_BYTES);
-    const token = concat(this.store.hostId, this.store.sigKey, id, secret);
+    // ‖ the Mac's certificate pin, so the new device trusts only this Mac from its very first connection.
+    const pin = this.store.dtlsPin;
+    const token = pin ? concat(this.store.hostId, this.store.sigKey, id, secret, pin)
+      : concat(this.store.hostId, this.store.sigKey, id, secret);
     this.pairing = {
       id: toB64url(id),
       secret: new Uint8Array(secret),
@@ -316,7 +334,9 @@ export class Auth {
 
   // --- lockouts (limits.mjs), counted per route: pairing shares the passkey route's counter ---
 
-  static limitRoute(route) { return route === 'backup' ? 'backup' : 'passkey'; }
+  // Each way in has its own counter: wrong codes from someone holding a pairing link, or guesses at the backup
+  // password, never lock the owner's passkeys.
+  static limitRoute(route) { return route === 'backup' ? 'backup' : route === 'pair' ? 'pair' : 'passkey'; }
 
   lockedFor(route) {
     return lockedFor(this.store.limit(Auth.limitRoute(route)), this.now());

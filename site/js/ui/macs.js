@@ -37,7 +37,8 @@ export function validMac(m) {
     bytesLen(m.hostId, HOST_ID_BYTES) && bytesLen(m.sigKey, SIG_KEY_BYTES) &&
     typeof m.credentialId === 'string' && /^[A-Za-z0-9_-]{1,1400}$/.test(m.credentialId) &&
     (m.name === undefined || typeof m.name === 'string') &&
-    (m.label === undefined || typeof m.label === 'string');
+    (m.label === undefined || typeof m.label === 'string') &&
+    (m.pin === undefined || bytesLen(m.pin, 16));
 }
 
 const clean = m => ({
@@ -46,6 +47,8 @@ const clean = m => ({
   name: String(m.name || '').slice(0, 64),
   credentialId: m.credentialId,
   ...(m.label ? { label: String(m.label).slice(0, 64) } : {}),
+  // The Mac's certificate pin (b64url of 16 bytes), when its passkey or pairing link carried one.
+  ...(m.pin ? { pin: m.pin } : {}),
   lastUsed: Number.isFinite(m.lastUsed) ? m.lastUsed : 0,
 });
 

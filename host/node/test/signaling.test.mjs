@@ -31,7 +31,8 @@ async function setup({ refusal = () => null, relay = null } = {}) {
   const hub = {
     hv: '9.9.9',
     refusal,
-    unauthenticatedCount: () => sessions.filter(s => s.state !== 'ended' && s.state !== 'ready').length,
+    unauthenticatedCount: (kind) => sessions.filter(s => s.state !== 'ended' && s.state !== 'ready' &&
+      (kind === undefined || s.hello.kind === kind)).length,
     createSession: (hello, kind) => { const s = new FakeSession({ ...hello, kind }); sessions.push(s); return s; },
     ...(relay ? { relayIceServers: async () => relay } : {}),
   };
@@ -204,4 +205,21 @@ test('with a relay set up, the offer carries its logins', async () => {
   const h2 = hello();
   await plain.rv.deliver(plain.topic, h2);
   assert.equal('iceServers' in repliesTo(plain.rv, plain.topic, h2.sid)[0], false);
+});
+
+test('a flood on the name topic (only the Mac name needed) never blocks the owner\'s passkey devices', async () => {
+  const { rv, sig, sessions, topic, tick } = await setup();
+  const nt = await nameTopic('amber-otter-4821');
+  await sig.setName('amber-otter-4821');
+  // A stranger fills every backup slot and leaves the sessions hanging, then keeps sending hellos.
+  for (let i = 0; i < MAX_UNAUTHENTICATED; i++) await rv.deliver(nt, hello({ route: 'backup' }));
+  const blocked = hello({ route: 'backup' });
+  await rv.deliver(nt, blocked);
+  assert.equal(repliesTo(rv, nt, blocked.sid)[0].reason, 'busy');
+  for (let i = 0; i < HELLOS_PER_MINUTE + 5; i++) { await rv.deliver(nt, hello({ route: 'backup' })); tick(10); }
+  // The owner's passkey hello still gets an offer: its topic has its own slots and its own rate.
+  const owner = hello();
+  await rv.deliver(topic, owner);
+  assert.equal(repliesTo(rv, topic, owner.sid)[0].t, 'offer');
+  assert.equal(sessions.at(-1).hello.kind, 'host');
 });

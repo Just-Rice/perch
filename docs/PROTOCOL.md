@@ -26,8 +26,13 @@ login Keychain (generic password, service `io.github.just-rice.perch`, account `
 `{sigKey, totpSecret, opaqueServerSetup}` with byte values in base64url) — or in `$PERCH_HOME/secrets.json` when
 `PERCH_SECRETS=file` (tests).
 
-Every passkey made for a Mac has **user handle = `hostId ‖ sigKey`** (48 bytes). A synced passkey therefore carries
-everything a new device needs to find its Mac: the viewer reads the user handle from a first discoverable `get()`.
+Each Mac also has a fixed DTLS certificate (`secrets.dtls`, made once, replaced only by Start over); every WebRTC
+connection uses it. Its **pin** is the first 16 bytes of its SHA-256 fingerprint.
+
+Every passkey made for a Mac has **user handle = `hostId ‖ sigKey ‖ pin`** (64 bytes, WebAuthn's maximum; passkeys
+made by Perch 0.1 have the 48-byte `hostId ‖ sigKey`, which is still accepted). A synced passkey therefore carries
+everything a new device needs to find its Mac, and to recognise it: the viewer ignores any offer whose certificate
+doesn't match the pin, so someone else holding `sigKey` (an old pairing link, a removed device) can't pose as the Mac.
 
 ## Rendezvous
 
@@ -59,7 +64,8 @@ Messages (all carry `sid`, a random 16-byte base64url session id chosen by the v
 
 The viewer refuses a Mac whose `pv < MIN_PEER_PROTO` ("Update Perch on your Mac"); the Mac refuses a viewer whose
 `pv < minPv` ("version"), and the page then tells the user to reload. The Mac rate-limits hellos (20 a minute) and
-keeps at most 3 unauthenticated sessions; each must finish signing in within `AUTH_TIMEOUT_MS` (2 minutes).
+keeps at most 3 unauthenticated sessions, each per topic (see Limits); each must answer within 15 s and finish
+signing in within `AUTH_TIMEOUT_MS` (2 minutes).
 
 Brokers that want a (public) login carry it in their URL (`wss://public:public@public.cloud.shiftr.io/`); the login
 goes in MQTT's CONNECT and the WebSocket uses the plain URL. That broker listens on port 443, so viewers on networks
@@ -122,9 +128,11 @@ makes the two sides compute different values. Every sign-in proof is made over `
 werift checks that the certificate each viewer presents hashes to the fingerprint in the answer SDP
 (`werift/lib/webrtc/src/transport/dtls.js`, `verifyRemoteCertificateFingerprint`; a tampered fingerprint fails the
 connection). It does **not** check the DTLS handshake signatures, so it doesn't prove the viewer holds that
-certificate's private key. That doesn't weaken Perch's sign-in, for three reasons. Browsers do fully verify the Mac's
-certificate and signature, so a viewer only ever talks to the real Mac. Every proof answers the nonce the Mac sent
-inside one specific DTLS session, and must come back inside that same session. And the Mac sends nothing sensitive
+certificate's private key. That doesn't weaken Perch's sign-in, for three reasons. Browsers do fully verify the
+certificate the Mac announces and its signature, and with a pin (see Identities) the browser only accepts the Mac's
+own certificate. Every proof answers the nonce the Mac sent inside one specific DTLS session, and must come back
+inside that same session; a one-tap passkey instead signs the viewer's own certificate, which the viewer only ever
+uses with the pinned Mac, and its `r` works once — so a copy is useless elsewhere. And the Mac sends nothing sensitive
 before sign-in. Someone who completes a DTLS handshake with the Mac by replaying a viewer's public certificate gets a
 session of their own, and the real viewer will never sign that session's nonce. SECURITY.md records this as a known
 limitation.
@@ -166,9 +174,21 @@ Mac → viewer first: `{t:"hi", pv, hv, nonce, name, route}`.
 4. Mac verifies the registration over `bind`, then `{t:"totp"}` → `{t:"code"}`; on success it saves the device and
    sends `{t:"paired", name, credentialId}` followed by `ready`. A pairing link works once; three bad proofs burn it.
 
-**Limits.** Five failed attempts on a route (wrong code, wrong password, bad assertion) lock that route for 1 minute,
-doubling per further failure up to 1 hour; a success resets it. Backup and passkey routes are counted separately, so
-someone guessing a Mac name cannot lock the owner's passkey out. TOTP codes are accepted for the previous, current and
+**One-tap sign-in** (`caps: ["quick"]` in the offer; `site/js/shared/bind.js`). When a browser doesn't know which Mac
+a passkey is for, asking for it twice (once to read the user handle, once to sign the nonce) is avoided: the browser
+makes its WebRTC certificate first and the passkey signs `SHA-256("perch quick v1" ‖ r ‖ ts ‖ fingerprint)` with a fresh
+16-byte `r`, the time `ts` (ms) and the browser's own certificate fingerprint. The user handle names the Mac and its
+pin; the browser connects with that certificate, refuses offers that don't match the pin, and on `hi` sends
+`{t:"assert", response, quick: {r, ts}}`. The Mac requires that the answer SDP announces exactly one sha-256
+fingerprint, recomputes the challenge with it, and accepts each `r` once and `ts` within 3 minutes. Then the code, as
+usual.
+
+**Limits.** Five wrong 6-digit codes on a route lock that route for 1 minute, doubling per further failure up to 1
+hour; a success resets it. A failed passkey step never counts (a signature can't be guessed, and counting it would
+let anyone with `sigKey` lock the owner out); backup sign-in counts each password attempt. Passkey, pairing and backup
+have separate counters, so a stranger guessing at the backup route or someone with a pairing link can't lock the
+owner's passkeys. Hellos are limited per topic (host topic: passkey and pairing; name topic: backup), 20 a minute and
+3 sessions signing in at once each, and a session whose viewer hasn't answered the offer within 15 s is dropped. TOTP codes are accepted for the previous, current and
 next 30-second step, and each step only once.
 
 `ready`: `{t:"ready", name, hv, display: {id, width, height}, displays: [{id, name, width, height, main}],
@@ -238,8 +258,8 @@ The host serves Setup on `http://127.0.0.1:<random port>/` and only answers requ
 and — for POSTs — whose `Origin` matches. The app's "Open Setup…" menu item opens that URL. The API is under `/api/`;
 see `host/node/src/setup-server.mjs`.
 
-Pairing links look like `https://just-rice.github.io/perch/connect.html#pair=<b64url(hostId ‖ sigKey ‖ pairId ‖ pairSecret)>`
-and expire after 10 minutes.
+Pairing links look like `https://just-rice.github.io/perch/connect.html#pair=<b64url(hostId ‖ sigKey ‖ pairId ‖ pairSecret ‖ pin)>`
+(the pin is missing from links made by Perch 0.1) and expire after 10 minutes.
 
 ## Test mode
 

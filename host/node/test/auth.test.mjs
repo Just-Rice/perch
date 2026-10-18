@@ -249,7 +249,7 @@ test('authenticator codes: setup, each code once, a window of one step', async (
   assert.equal(ctl.auth.checkTotp(null), false);
 });
 
-test('lockouts: five failures lock a route, routes are separate, pairing counts as passkey, success resets', async () => {
+test('lockouts: five failures lock a route, every route (passkey, pairing, backup) is separate, success resets', async () => {
   const { auth, store, tick } = await setup();
   for (let i = 1; i < MAX_FAILS; i++) assert.equal(auth.fail('backup', 'x'), 0);
   assert.equal(auth.fail('backup', 'x'), 60000);
@@ -257,7 +257,11 @@ test('lockouts: five failures lock a route, routes are separate, pairing counts 
   assert.equal(auth.lockedFor('passkey'), 0, 'a guessed Mac name cannot lock the owner out');
   assert.equal(auth.fail('backup', 'x'), 120000, 'doubles');
   assert.ok(store.config.log.some(e => e.kind === 'lockout'));
+  // Wrong codes from someone holding a pairing link lock pairing only, never the owner's passkeys.
   for (let i = 0; i < MAX_FAILS; i++) auth.fail('pair', 'x');
+  assert.equal(auth.lockedFor('pair'), 60000);
+  assert.equal(auth.lockedFor('passkey'), 0);
+  for (let i = 0; i < MAX_FAILS; i++) auth.fail('passkey', 'x');
   assert.equal(auth.lockedFor('passkey'), 60000);
   tick(60001);
   assert.equal(auth.lockedFor('passkey'), 0);

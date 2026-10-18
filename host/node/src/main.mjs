@@ -4,6 +4,7 @@
 // Start-up: read the environment, open the store, get sign-in ready, listen on the rendezvous brokers (retrying in
 // the background, 'offline' until one answers), start the local Setup page, and keep the menu bar's status line
 // current. On the very first run it opens Setup in the browser.
+import { ensureDtlsIdentity } from './rtc.mjs';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -80,6 +81,7 @@ async function main() {
   const now = () => Date.now() + clockOffset;
   const auth = new Auth({ store, config, log: log.child('auth'), now });
   await auth.init();
+  await ensureDtlsIdentity(store);
 
   const rendezvous = new Rendezvous({ brokers: config.brokers, log: m => log.debug(m) });
   const controller = new Controller({ config, store, auth, rendezvous, app: ipc, log, now });

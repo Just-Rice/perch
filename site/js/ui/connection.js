@@ -9,6 +9,7 @@
 // After that, control messages are handed out with next(types): the sign-in steps in ui/signin.js read them one at a
 // time, and once signed in everything goes to onmessage for the viewer.
 import { cleanIceServers, hasRelay } from '../shared/relay.js';
+import { offerMatchesPin } from './quick.js';
 import { Rendezvous, hostTopic, nameTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey } from '../shared/rendezvous.js';
 import { bindingHash } from '../shared/bind.js';
 import { toB64url, fromB64url, randomBytes } from '../shared/bytes.js';
@@ -37,9 +38,11 @@ export class PerchError extends Error {
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export class Connection {
-  constructor({ route, hostId, sigKey, macName, pairId, label, brokers, iceServers, log = () => {}, onStage = () => {},
-    PeerConnection = globalThis.RTCPeerConnection }) {
-    Object.assign(this, { route, hostId, sigKey, macName, pairId, label, brokers, iceServers, log, onStage, PeerConnection });
+  // pin: the Mac's certificate pin (16 bytes), when known; certificate: an RTCCertificate to use (one-tap sign-in).
+  constructor({ route, hostId, sigKey, macName, pairId, label, brokers, iceServers, pin = null, certificate = null,
+    log = () => {}, onStage = () => {}, PeerConnection = globalThis.RTCPeerConnection }) {
+    Object.assign(this, { route, hostId, sigKey, macName, pairId, label, brokers, iceServers, pin, certificate, log, onStage,
+      PeerConnection });
     this.sid = toB64url(randomBytes(16));
     this.rdv = null;
     this.pc = null;
@@ -85,7 +88,14 @@ export class Connection {
     let gotReply;
     const reply = new Promise(resolve => { gotReply = resolve; });
     await this.rdv.listen(replyTopic(topic, this.sid), key, msg => {
-      if (msg.sid === this.sid && (msg.t === 'offer' || msg.t === 'refuse')) gotReply(msg);
+      if (msg.sid !== this.sid || (msg.t !== 'offer' && msg.t !== 'refuse')) return;
+      // With a pin, only the Mac holding that certificate counts: anyone else who can seal messages for this topic
+      // (an old pairing link, a removed device) is ignored, and we keep waiting for the real Mac.
+      if (this.pin && msg.t === 'offer' && !offerMatchesPin(msg.sdp, this.pin)) {
+        this.log('ignored an offer that is not from this Mac (certificate pin mismatch)');
+        return;
+      }
+      gotReply(msg);
     });
     await this.rdv.send(topic, key, {
       t: 'hello', sid: this.sid, pv: PROTO, route, label: this.label,
@@ -97,6 +107,7 @@ export class Connection {
     }
     if (!(Number(first.pv) >= MIN_PEER_PROTO) || typeof first.sdp !== 'string') throw this._fail(new PerchError('old-mac'));
     this.hv = first.hv;
+    this.caps = Array.isArray(first.caps) ? first.caps.filter(c => typeof c === 'string') : [];
 
     this.onStage('connecting');
     this.offerSdp = first.sdp;
@@ -179,7 +190,10 @@ export class Connection {
   async _answer() {
     let pc;
     try {
-      pc = this.pc = new this.PeerConnection({ iceServers: [...this.iceServers, ...(this.relayServers ?? [])] });
+      pc = this.pc = new this.PeerConnection({
+        iceServers: [...this.iceServers, ...(this.relayServers ?? [])],
+        ...(this.certificate ? { certificates: [this.certificate] } : {}),
+      });
     } catch (e) {
       throw this._fail(new PerchError('webrtc', { message: e.message }));
     }

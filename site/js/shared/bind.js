@@ -18,3 +18,43 @@ export async function bindingHash(nonce, offerSdp, answerSdp) {
 export function bindProof(key, label, bind) {
   return hmacSha256(key, utf8(`perch ${label} v1`), bind);
 }
+
+// --- one-tap sign-in ("quick"): the passkey is asked for before connecting, so it can't sign the Mac's nonce ---
+//
+// The browser makes its WebRTC certificate first and signs SHA-256("perch quick v1" ‖ r ‖ ts ‖ its fingerprint), with
+// a fresh 16-byte r and the time. The passkey's user handle also carries the first 16 bytes of the Mac's own (fixed)
+// DTLS certificate fingerprint, so the browser only ever sends that assertion over a connection whose other end proves
+// it holds that certificate, i.e. the real Mac. The Mac checks the signed fingerprint is the one in the answer it
+// received, that ts is recent and that r is new. See docs/PROTOCOL.md, "One-tap sign-in".
+
+export const QUICK_MAX_AGE_MS = 3 * 60 * 1000;
+
+export async function quickChallenge(r, ts, fingerprint) {
+  if (!(r instanceof Uint8Array) || r.length !== 16) throw new Error('quick r must be 16 bytes');
+  if (!Number.isSafeInteger(ts) || ts < 0) throw new Error('quick ts must be a time in ms');
+  if (typeof fingerprint !== 'string' || !fingerprint.startsWith('sha-256 ')) throw new Error('quick needs a sha-256 fingerprint');
+  const t = new Uint8Array(8);
+  new DataView(t.buffer).setBigUint64(0, BigInt(ts));
+  return sha256(utf8('perch quick v1'), r, t, utf8(fingerprint));
+}
+
+// The one certificate fingerprint an SDP announces, as "sha-256 AB:CD:…", or null unless every fingerprint line is
+// sha-256 and they all name the same certificate (browsers use one certificate for every m-line). Anything else
+// could let a second certificate slip in beside the signed one.
+export function sdpFingerprint(sdp) {
+  if (typeof sdp !== 'string') return null;
+  const seen = new Set();
+  for (const m of sdp.matchAll(/^a=fingerprint:(.*)$/gm)) {
+    const f = /^(\S+) ([0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){31})\s*$/.exec(m[1]);
+    if (!f || f[1].toLowerCase() !== 'sha-256') return null;
+    seen.add(f[2].toUpperCase());
+  }
+  return seen.size === 1 ? `sha-256 ${[...seen][0]}` : null;
+}
+
+// "sha-256 AB:CD:…" → its first `n` bytes (the pin carried in a passkey's user handle).
+export function fingerprintBytes(fingerprint, n = 16) {
+  const hex = String(fingerprint ?? '').replace(/^sha-256 /i, '').split(':');
+  if (hex.length < n || !hex.slice(0, n).every(h => /^[0-9A-Fa-f]{2}$/.test(h))) return null;
+  return Uint8Array.from(hex.slice(0, n), h => parseInt(h, 16));
+}

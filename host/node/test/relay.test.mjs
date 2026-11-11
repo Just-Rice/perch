@@ -74,15 +74,39 @@ test('when Cloudflare is down at connection time, the connection goes ahead with
   let clock = 1_000_000;
   const r = new Relay({ store: s, fetchImpl: good.fetchImpl, now: () => clock });
   await r.save(KEY.keyId, KEY.apiToken);
-  // The cached logins are handed out until they have only 12 hours left, then fetched again.
-  clock += 11 * 3600e3;
+  // Logins are reused for 6 hours, then renewed in the background while the old ones are still handed out.
+  clock += 5 * 3600e3;
   await r.iceServers();
   assert.equal(good.calls.length, 1);
   clock += 2 * 3600e3;
+  assert.equal((await r.iceServers()).length, 1, 'the old logins, at once');
+  await r.refreshing;
+  assert.equal(good.calls.length, 2, 'renewed in the background');
+  // Cloudflare down once the logins have under 12 hours left: the connection goes ahead without a relay.
+  clock += 13 * 3600e3;
   r.fetchImpl = fakeCloudflare({ fail: true }).fetchImpl;
   assert.deepEqual(await r.iceServers(), []);
   assert.equal(r.state().working, false);
   assert.match(r.state().error, /couldn’t reach Cloudflare/);
+});
+
+test('a slow Cloudflare never holds an offer up: no relay this time, logins ready for the next', async () => {
+  const s = await store();
+  await new Relay({ store: s, fetchImpl: fakeCloudflare().fetchImpl }).save(KEY.keyId, KEY.apiToken);
+  let release;
+  const slow = { calls: 0 };
+  const r = new Relay({ store: s, fetchImpl: async () => {
+    slow.calls++;
+    await new Promise(resolve => { release = resolve; });
+    return { ok: true, status: 201, json: async () => CLOUDFLARE };
+  } });
+  const t0 = Date.now();
+  assert.deepEqual(await r.iceServers({ waitMs: 50 }), []);
+  assert.ok(Date.now() - t0 < 1000);
+  release();
+  await r.refreshing;
+  assert.equal((await r.iceServers({ waitMs: 50 })).length, 1);
+  assert.equal(slow.calls, 1);
 });
 
 test('the shared checker only lets plain STUN/TURN entries through', () => {

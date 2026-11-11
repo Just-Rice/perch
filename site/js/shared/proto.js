@@ -42,13 +42,22 @@ export const PAIR_SECRET_BYTES = 32;
 export const PAIR_TTL_MS = 10 * 60 * 1000;
 export const AUTH_TIMEOUT_MS = 120 * 1000;
 
-// Video quality presets: longest edge in pixels, frames per second, starting and ceiling bitrate.
+// Video quality presets: longest edge in pixels, frames per second, starting and ceiling bitrate. `fast` (60 frames
+// a second) needs a Mac that lists "fps60" in its offer's caps; older ones ignore it.
 export const QUALITY = {
   smooth:   { maxEdge: 1280, fps: 30, kbps: 2500, maxKbps: 4000 },
   balanced: { maxEdge: 1920, fps: 30, kbps: 5000, maxKbps: 8000 },
-  sharp:    { maxEdge: 2880, fps: 30, kbps: 9000, maxKbps: 14000 },
+  sharp:    { maxEdge: 2880, fps: 30, kbps: 10000, maxKbps: 20000 },
+  fast:     { maxEdge: 1920, fps: 60, kbps: 8000, maxKbps: 16000 },
 };
 export const DEFAULT_QUALITY = 'balanced';
+
+// Picture sizes (longest edge) the Mac steps between, and roughly how many kbit/s a moving desktop needs at 30
+// frames a second before the encoder has to start dropping frames at that size. When the link can't carry the
+// current size the Mac sends a smaller picture at full frame rate instead of a big one that stutters; it also never
+// sends more pixels than the viewer's screen can show.
+export const EDGE_LADDER = [640, 960, 1280, 1600, 1920, 2560, 2880];
+export const EDGE_NEEDS_KBPS = { 640: 0, 960: 500, 1280: 900, 1600: 1500, 1920: 2200, 2560: 4000, 2880: 5000 };
 
 // Data channel labels (the Mac creates all three). `pointer` is unordered with no retransmits: moves only.
 export const CONTROL_CHANNEL = 'control';

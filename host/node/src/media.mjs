@@ -6,7 +6,7 @@
 // loss in receiver reports, its bandwidth estimate in REMB) and tells the app's encoder to aim higher or lower.
 // Audio is small and steady (one Opus packet every 20 ms), so it skips the pacer.
 import { RtpHeader, RtpPacket, RtcpRrPacket, RtcpSrPacket, RtcpPayloadSpecificFeedback } from 'werift';
-import { QUALITY, DEFAULT_QUALITY } from '../../../site/js/shared/proto.js';
+import { QUALITY, DEFAULT_QUALITY, EDGE_LADDER, EDGE_NEEDS_KBPS } from '../../../site/js/shared/proto.js';
 import { splitAnnexB, packetizeAccessUnit } from './h264.mjs';
 
 export const FLOOR_KBPS = 300;
@@ -24,9 +24,11 @@ const randomU16 = () => Math.floor(Math.random() * 65536);
 // bandwidth than we send), and creeps back up while the link stays clean. Reports a new target only when it moved by
 // more than 10%, so the encoder isn't reconfigured for every small wobble.
 export class BitrateController {
-  constructor({ preset = QUALITY[DEFAULT_QUALITY], now = () => Date.now(), onTarget = () => {} } = {}) {
+  // sentKbps: what is actually going out right now (measured), or null when unknown.
+  constructor({ preset = QUALITY[DEFAULT_QUALITY], now = () => Date.now(), onTarget = () => {}, sentKbps = () => null } = {}) {
     this.now = now;
     this.onTarget = onTarget;
+    this.sentKbps = sentKbps;
     this.setPreset(preset);
   }
 
@@ -65,11 +67,21 @@ export class BitrateController {
       this._set(this.target * (1 - 0.5 * fractionLost));
       this.lastDecrease = t;
     } else if (fractionLost < 0.02 && t - this.lastDecrease > 2000 && t - this.lastIncrease > 1000) {
-      let next = this.target * 1.08;
-      if (this.remb && t - this.rembAt < 5000) next = Math.min(next, Math.max(this.target, this.remb));
+      // Recover quickly up to the preset's own bitrate (a cut is usually a passing blip), then probe gently above it.
+      let next = this.target * (this.target < this.preset.kbps ? 1.25 : 1.08);
+      // The browser's estimate is a ceiling only while we are really using the link (see onRemb).
+      if (this.remb && t - this.rembAt < 5000 && !this._appLimited()) next = Math.min(next, Math.max(this.target, this.remb));
       this._set(next);
       this.lastIncrease = t;
     }
+  }
+
+  // True while much less is going out than the target allows: a still screen needs almost no data. The browser's
+  // bandwidth estimate (REMB) can't grow beyond about 1.5 times what it receives, so in that state a low estimate
+  // describes our own quietness, not the link.
+  _appLimited() {
+    const sent = this.sentKbps();
+    return sent !== null && sent < this.target * 0.6;
   }
 
   // REMB: the browser's estimate of how much it can receive, in bits per second.
@@ -79,15 +91,73 @@ export class BitrateController {
     this.rembAt = t;
     // Ignore the first two seconds: the browser's estimate starts low and ramps up as data arrives.
     if (t - this.startedAt < 2000) return;
-    if (this.remb < this.target * 0.9) {
-      this._set(this.remb * 0.9);
-      this.lastDecrease = t;
-    }
+    if (this.remb >= this.target * 0.9) return;
+    // After a still screen the estimate is low only because little was sent. Cutting the target to it would leave
+    // the next burst of movement starved for many seconds (dropped frames, a blurry picture). Only believe a low
+    // estimate when it is below what is actually being sent: that is real congestion.
+    const sent = this.sentKbps();
+    if (sent !== null && sent < this.target * 0.6 && this.remb > sent * 1.2) return;
+    this._set(this.remb * 0.9);
+    this.lastDecrease = t;
   }
 
   get link() {
     const slow = this.loss > 0.05 || this.rtt > 0.35 || this.target < this.preset.kbps * 0.5;
     return slow ? 'slow' : 'good';
+  }
+}
+
+// --- picture size ---
+
+// The smallest ladder size that is at least `px` (the viewer's screen), or the largest there is.
+export function ladderAtLeast(px) {
+  return EDGE_LADDER.find(e => e >= px) ?? EDGE_LADDER.at(-1);
+}
+
+// Chooses the picture size the link can carry at full frame rate. Fed the bitrate target every couple of seconds:
+// steps down after two readings in a row say the current size needs more than the link gives, and back up one step
+// at a time only after five readings in a row with a quarter to spare, so it doesn't flap.
+export class ResolutionGovernor {
+  constructor({ fps = 30 } = {}) {
+    this.setFps(fps);
+    this.cap = null;   // longest edge allowed right now, or null for "no limit from the link"
+    this.down = 0;
+    this.up = 0;
+  }
+
+  setFps(fps) { this.factor = fps > 30 ? 1.5 : 1; }
+
+  reset() { this.cap = null; this.down = this.up = 0; }
+
+  need(edge) { return (EDGE_NEEDS_KBPS[edge] ?? 0) * this.factor; }
+
+  // `ceiling`: the largest size wanted anyway (the quality preset and the viewer's screen). Returns the new cap when
+  // it changed (null = back to no limit), otherwise undefined.
+  update(targetKbps, ceiling) {
+    const steps = EDGE_LADDER.filter(e => e <= ceiling);
+    if (!steps.length) return undefined;
+    const top = steps.at(-1);
+    const current = Math.min(this.cap ?? top, top);
+    const fit = steps.filter(e => this.need(e) <= targetKbps).at(-1) ?? steps[0];
+    if (fit < current) {
+      this.up = 0;
+      if (++this.down < 2) return undefined;
+      this.down = 0;
+      this.cap = fit;
+      return this.cap;
+    }
+    this.down = 0;
+    if (this.cap !== null && current < top) {
+      const next = steps[steps.indexOf(current) + 1] ?? top;
+      if (this.need(next) * 1.25 <= targetKbps) {
+        if (++this.up < 5) return undefined;
+        this.up = 0;
+        this.cap = next >= top ? null : next;
+        return this.cap;
+      }
+    }
+    this.up = 0;
+    return undefined;
   }
 }
 
@@ -126,7 +196,8 @@ export class Pacer {
       if (t - head.at > allowance) {
         this.clear();
         this.drops++;
-        this.onOverflow();
+        // A keyframe arriving now is itself the fresh start; anything else needs one asked for.
+        this.onOverflow(!!frame.keyframe);
         if (!frame.keyframe) return false;
       }
     }
@@ -212,11 +283,19 @@ export class MediaSender {
     this.waitingForKeyframe = true;
     this.lastKeyframeAsk = -Infinity;
     this.quality = QUALITY[quality] ? quality : DEFAULT_QUALITY;
-    this.bitrate = new BitrateController({ preset: QUALITY[this.quality], now, onTarget: kbps => onBitrate(kbps) });
+    this.recent = [];   // [time, bytes] of video packets sent in the last second
+    this.recentBytes = 0;
+    this.bitrate = new BitrateController({
+      preset: QUALITY[this.quality], now, onTarget: kbps => onBitrate(kbps), sentKbps: () => this.sentKbps(),
+    });
     this.pacer = new Pacer({
       rateKbps: () => this.bitrate.target,
       send: (p, f) => this._sendVideoPacket(p, f),
-      onOverflow: () => { this.waitingForKeyframe = true; this.askKeyframe('queue overflow'); },
+      onOverflow: (freshKeyframe) => {
+        if (freshKeyframe) return;
+        this.waitingForKeyframe = true;
+        this.askKeyframe('queue overflow');
+      },
     });
     this.vclock = new VideoClock();
     this.aclock = new AudioClock();
@@ -280,6 +359,8 @@ export class MediaSender {
     this.vseq = (this.vseq + 1) & 0xffff;
     const header = new RtpHeader({ payloadType: 96, sequenceNumber: this.vseq, timestamp: f.ts, marker: p.marker, ssrc: 0 });
     this.counters.bytes += p.payload.length;
+    this.recent.push([this.now(), p.payload.length]);
+    this.recentBytes += p.payload.length;
     this.totals.videoPackets++;
     if (p.marker) { this.counters.frames++; this.totals.videoFrames++; }
     this.video.sendRtp(new RtpPacket(header, p.payload)).catch?.(() => {});
@@ -307,6 +388,16 @@ export class MediaSender {
     } catch (e) {
       this.log?.debug('rtcp:', e.message);
     }
+  }
+
+  // Video actually sent over the last second, in kbit/s (null until sending has started).
+  sentKbps() {
+    if (!this.enabled) return null;
+    const cutoff = this.now() - 1000;
+    let i = 0;
+    while (i < this.recent.length && this.recent[i][0] < cutoff) this.recentBytes -= this.recent[i++][1];
+    if (i) this.recent.splice(0, i);
+    return this.recentBytes * 8 / 1000;
   }
 
   // What the status message shows: measured send rate and frame rate since the last call, target and link quality.

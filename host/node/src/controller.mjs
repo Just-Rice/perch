@@ -6,7 +6,7 @@
 // may be async; errors are thrown as Error with a plain-language message safe to show the user.
 import { QUALITY, DEFAULT_QUALITY, PAIR_TTL_MS, AUTH_TIMEOUT_MS } from '../../../site/js/shared/proto.js';
 import { newMacName as makeMacName, suggestPassword } from './names.mjs';
-import { HostPeer } from './rtc.mjs';
+import { HostPeer, ensureDtlsIdentity } from './rtc.mjs';
 import { Session } from './session.mjs';
 import { Relay } from './relay.mjs';
 import { Signaling } from './signaling.mjs';
@@ -64,6 +64,7 @@ export class Controller {
   async start() {
     await this.signaling.setHost(this.store.hostId, this.store.sigKey);
     await this._applyListening();
+    this.relay.warm(); // fetch relay logins now, so the first viewer's offer doesn't wait for them
     this.started = true;
     this._changed();
   }
@@ -172,12 +173,24 @@ export class Controller {
 
   handleEvent(ev) {
     switch (ev.e) {
-      case 'permissions':
+      case 'permissions': {
+        const hadScreen = this.permissions.screen;
         this.permissions = { screen: !!ev.screen, accessibility: !!ev.accessibility };
+        // Screen Recording was just allowed while someone is waiting for a picture: start it now.
+        if (!hadScreen && this.permissions.screen && this.active) this._sendCapture(this.active);
         this.active?.sendStatus();
         break;
+      }
       case 'displays':
         this.displays = cleanDisplays(ev.displays);
+        if (this.active) {
+          // The display being shown was unplugged: carry on with the main one instead of a frozen picture.
+          if (!this.hasDisplay(this.active.display)) {
+            this.active.display = this._display(null).id;
+            this._sendCapture(this.active);
+          }
+          this.active.sendStatus({ displays: this.displays.map(d => ({ ...d })), display: this.active.display });
+        }
         break;
       case 'capture-started':
         this.capture = { display: ev.display, width: ev.width | 0, height: ev.height | 0, fps: ev.fps | 0 };
@@ -303,7 +316,11 @@ export class Controller {
     const preset = QUALITY[session.quality] ?? QUALITY[DEFAULT_QUALITY];
     this.captureOn = true;
     this.app.command('capture', {
-      on: true, display: this._display(session.display).id, maxEdge: preset.maxEdge, fps: preset.fps, kbps: preset.kbps, audio: true,
+      on: true, display: this._display(session.display).id,
+      // The size the link and the viewer's screen call for, and the bitrate the link is carrying right now (not the
+      // preset's starting value, which would undo what bitrate control has learned).
+      maxEdge: session.captureEdge?.() ?? preset.maxEdge, fps: preset.fps,
+      kbps: session.media?.bitrate.target ?? preset.kbps, audio: true,
     });
   }
 
@@ -444,7 +461,7 @@ export class Controller {
   relayIceServers() { return this.relay.iceServers(); }
 
   // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
-  get caps() { return this.store.dtlsKeys ? ['quick'] : []; }
+  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view']; }
 
   async relaySet(keyId, apiToken) {
     const replacing = this.relay.configured;
@@ -535,6 +552,10 @@ export class Controller {
     this.auth.pendingTotp = null;
     await this.store.reset();
     await this.auth.init();
+    // The new identity needs its own connection certificate straight away: without one, new passkeys would carry no
+    // pin and one-tap sign-in would stay off until Perch was next restarted.
+    await ensureDtlsIdentity(this.store);
+    this.relay.forget();
     await this.signaling.setHost(this.store.hostId, this.store.sigKey);
     await this._applyListening();
     this.store.activity('settings', 'Perch was reset: new name and keys, no paired devices');

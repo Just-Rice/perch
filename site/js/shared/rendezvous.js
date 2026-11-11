@@ -68,6 +68,9 @@ export function brokerLogin(url) {
   return [u.href, login];
 }
 
+const WAKE_CHECK_MS = 5000;
+const WAKE_GAP_MS = 20000;
+
 // --- the multi-broker client ---
 
 export class Rendezvous {
@@ -95,6 +98,7 @@ export class Rendezvous {
 
   // Resolves once at least one broker is connected; keeps (re)connecting to the rest in the background.
   start(timeoutMs = 10000) {
+    this._watchForSleep();
     return new Promise((resolve, reject) => {
       let failures = 0;
       const timer = setTimeout(() => reject(new Error('could not reach any rendezvous server')), timeoutMs);
@@ -138,8 +142,40 @@ export class Rendezvous {
     return n;
   }
 
+  // After the computer has slept (or changed network) the broker connections are dead, but nothing says so until a
+  // ping goes unanswered half a minute later. A timer that fires much later than it should means we were asleep:
+  // reconnect everything at once, so a Mac that has just woken up can be reached within a couple of seconds.
+  _watchForSleep() {
+    clearInterval(this.sleepTimer);
+    let last = this.now();
+    this.sleepTimer = setInterval(() => {
+      const t = this.now();
+      if (t - last > WAKE_GAP_MS) {
+        this.log(`rendezvous: the clock jumped ${Math.round((t - last) / 1000)} s (sleep?); reconnecting`);
+        this.reconnectAll();
+      }
+      last = t;
+    }, WAKE_CHECK_MS);
+    this.sleepTimer.unref?.();
+  }
+
+  reconnectAll() {
+    if (this.closed) return;
+    for (const [url, slot] of this.clients) {
+      clearTimeout(slot.timer);
+      slot.retry = 0;
+      if (slot.client) {
+        slot.client.onclose = () => {};
+        slot.client.close();
+      }
+      this._dial(url);
+    }
+    this.onstatus(this.status());
+  }
+
   close() {
     this.closed = true;
+    clearInterval(this.sleepTimer);
     for (const c of this.clients.values()) {
       clearTimeout(c.timer);
       if (c.client) c.client.onclose = () => {};

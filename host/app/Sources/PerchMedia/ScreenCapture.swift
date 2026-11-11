@@ -28,11 +28,13 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     public var log: (String) -> Void = { _ in }
 
     private var stream: SCStream?
+    private var config: SCStreamConfiguration?
+    private var displayPointWidth = 0
     private let videoQueue: DispatchQueue
     private let audioQueue: DispatchQueue
 
     /// How long start() waits for a sleeping display to wake up and become capturable.
-    public static let displayWakeTimeout: TimeInterval = 6
+    public static let displayWakeTimeout: TimeInterval = 10
 
     public init(videoQueue: DispatchQueue, audioQueue: DispatchQueue) {
         self.videoQueue = videoQueue
@@ -65,6 +67,18 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         if audio { try s.addStreamOutput(self, type: .audio, sampleHandlerQueue: audioQueue) }
         try await s.startCapture()
         stream = s
+        config = c
+        displayPointWidth = display.width
+    }
+
+    /// Changes the picture size of the running stream (no restart: sound carries on, and the change takes a few
+    /// frames). Buffers of the old size may still arrive for a moment; the caller skips those.
+    public func update(width: Int, height: Int) async throws {
+        guard let s = stream, let c = config else { return }
+        c.width = width
+        c.height = height
+        c.captureResolution = width > displayPointWidth ? .best : .nominal
+        try await s.updateConfiguration(c)
     }
 
     public func stop() async {
@@ -81,6 +95,7 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         let deadline = Date().addingTimeInterval(Self.displayWakeTimeout)
         var wake: IOPMAssertionID = 0
         var asked = false
+        var tries = 0
         defer { if wake != 0 { IOPMAssertionRelease(wake) } }
         let started = Date()
         while true {
@@ -96,6 +111,12 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
             if !asked {
                 asked = true
                 log("display \(id) isn't capturable yet (asleep: \(CGDisplayIsAsleep(id) != 0)); waking it")
+            }
+            // Ask again about once a second, with a fresh request each time: one that lands while the display is
+            // still on its way to sleep is swallowed (seen on a locked Mac: the display never woke in 6 s).
+            tries += 1
+            if tries % 4 == 1 {
+                if wake != 0 { IOPMAssertionRelease(wake); wake = 0 }
                 let r = IOPMAssertionDeclareUserActivity("Perch is showing this Mac's screen to a viewer" as CFString,
                                                          kIOPMUserActiveLocal, &wake)
                 if r != kIOReturnSuccess { log("could not wake the display (IOReturn \(r))"); wake = 0 }

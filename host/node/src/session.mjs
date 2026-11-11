@@ -8,11 +8,11 @@ import { randomBytes } from 'node:crypto';
 import { bindingHash, bindProof, quickChallenge, sdpFingerprint } from '../../../site/js/shared/bind.js';
 import { toB64url, fromB64url, equalBytes } from '../../../site/js/shared/bytes.js';
 import { PROTO, AUTH_TIMEOUT_MS, QUALITY } from '../../../site/js/shared/proto.js';
+import { AuthError } from './auth.mjs';
+import { MediaSender, ResolutionGovernor, ladderAtLeast } from './media.mjs';
+import { validateInput, RateLimiter, POINTER_RATE, INPUT_RATE, CONTROL_RATE } from './input.mjs';
 
 const ANSWER_TIMEOUT_MS = 15000; // offer sent, no answer yet
-import { AuthError } from './auth.mjs';
-import { MediaSender } from './media.mjs';
-import { validateInput, RateLimiter, POINTER_RATE, INPUT_RATE, CONTROL_RATE } from './input.mjs';
 
 export const MAX_CONTROL_BYTES = 64 * 1024;
 export const MAX_INPUT_BYTES = 4096;
@@ -42,6 +42,8 @@ export class Session {
     this.holdsPairing = false;
     this.backupAttempt = null;  // the backup attempt counted at opaque1, taken back once the password is proven
     this.lastInputAt = 0;
+    this.viewEdge = null;       // the longest edge of the picture on the viewer's screen, in its pixels (if it said)
+    this.governor = new ResolutionGovernor();
     this.lastSample = null;     // the last status period's measured send rate and frame rate
     this.endReason = null;
     this.chain = Promise.resolve();
@@ -279,8 +281,8 @@ export class Session {
     }
     this.auth.succeed(this.route);
     if (this.route === 'pair') {
-      // The owner may have cancelled the link while this viewer was typing the code.
-      if (this.auth.pairing?.holder !== this) return this._deny('link-expired');
+      // The owner may have cancelled the link (or it ran out) while this viewer was typing the code.
+      if (!this.auth.pairingInfo() || this.auth.pairing?.holder !== this) return this._deny('link-expired');
       const dev = { ...this.newDevice, label: this.newDeviceLabel, lastUsedAt: new Date(this.now()).toISOString() };
       this.store.addDevice(dev);
       this.auth.consumePairing(this);
@@ -306,6 +308,7 @@ export class Session {
     this.log?.info(`signed in (${this.route})`);
     const info = this.hub.sessionSignedIn(this);
     this.quality = info.quality;
+    this.governor.setFps((QUALITY[this.quality] ?? QUALITY.balanced).fps);
     this.display = info.display.id;
     this.media = new MediaSender({
       video: this.peer.videoSender,
@@ -319,9 +322,26 @@ export class Session {
     this.media.start();
     // Rates are measured over each status period. A status sent early because something changed (capture started,
     // a permission, the lock) repeats the last measurement: measuring over a few milliseconds would show nonsense.
-    this._timer(() => { this.lastSample = this.media.sample(); this.sendStatus(); }, STATUS_EVERY_MS, true);
+    this._timer(() => {
+      this.lastSample = this.media.sample();
+      // A link that can't carry this picture size at full frame rate gets a smaller picture (and the size comes back
+      // when the link does).
+      if (this.governor.update(this.media.bitrate.target, this.wantedEdge()) !== undefined) this.hub.captureChanged(this);
+      this.sendStatus();
+    }, STATUS_EVERY_MS, true);
     this._watchIdle();
     if (!this.hub.permissions.screen) this.sendError('no-screen-permission', 'The Mac has not allowed Perch to record the screen yet.');
+  }
+
+  // The largest picture worth sending: what the quality preset allows, and no more than the viewer's screen shows.
+  wantedEdge() {
+    const preset = QUALITY[this.quality] ?? QUALITY.balanced;
+    return this.viewEdge ? Math.min(preset.maxEdge, ladderAtLeast(this.viewEdge)) : preset.maxEdge;
+  }
+
+  // What to capture at right now: wantedEdge, less if the link can't carry it.
+  captureEdge() {
+    return Math.min(this.wantedEdge(), this.governor.cap ?? Infinity);
   }
 
   _watchIdle() {
@@ -344,8 +364,18 @@ export class Session {
         if (typeof msg.preset !== 'string' || !Object.hasOwn(QUALITY, msg.preset) || msg.preset === this.quality) return;
         this.quality = msg.preset;
         this.media.setQuality(msg.preset);
+        this.governor.reset();
+        this.governor.setFps(QUALITY[msg.preset].fps);
         this.hub.captureChanged(this);
         return;
+      case 'view': {
+        // How big the picture is on the viewer's screen: no point sending more pixels than that.
+        if (!Number.isFinite(msg.edge)) return;
+        const before = this.captureEdge();
+        this.viewEdge = Math.min(8192, Math.max(320, Math.round(msg.edge)));
+        if (this.captureEdge() !== before) this.hub.captureChanged(this);
+        return;
+      }
       case 'display':
         if (!this.hub.hasDisplay(msg.id) || msg.id === this.display) return;
         this.display = msg.id;
@@ -374,13 +404,14 @@ export class Session {
     if (this.hub.input(this, clean)) this.stats.inputForwarded++;
   }
 
-  sendStatus() {
+  // `extra`: fields sent only when they change (the list of displays and which one is shown).
+  sendStatus(extra = {}) {
     if (this.state !== 'ready') return;
     const s = this.lastSample ?? { kbps: 0, fps: 0 };
     const cap = this.hub.capture ?? {};
     this._send({
       t: 'status', locked: !!this.hub.locked, link: this.media.bitrate.link, kbps: s.kbps, fps: s.fps,
-      width: cap.width ?? 0, height: cap.height ?? 0, input: !!this.hub.permissions.accessibility,
+      width: cap.width ?? 0, height: cap.height ?? 0, input: !!this.hub.permissions.accessibility, ...extra,
     });
   }
 

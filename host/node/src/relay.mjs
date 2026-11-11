@@ -7,6 +7,7 @@ import { cleanIceServers, hasRelay } from '../../../site/js/shared/relay.js';
 const API = 'https://rtc.live.cloudflare.com/v1/turn/keys';
 const TTL_S = 24 * 3600;            // how long each set of logins lasts
 const REFRESH_LEFT_MS = 12 * 3600e3; // hand out logins with at least this long left, so long sessions keep working
+const REFRESH_AFTER_MS = 6 * 3600e3; // ...and fetch new ones in the background once they are this old
 const KEY_ID_RE = /^[A-Za-z0-9_-]{8,128}$/;
 const TOKEN_RE = /^[A-Za-z0-9._~+/=-]{16,512}$/;
 
@@ -47,22 +48,42 @@ export class Relay {
   }
 
   // Relay logins for a new connection's offer, or [] when there is no relay or Cloudflare can't be reached right now
-  // (the connection then simply goes ahead without one).
-  async iceServers() {
+  // (the connection then simply goes ahead without one). Logins are kept and reused; a fetch never holds an offer
+  // up for more than `waitMs`, and carries on in the background so the next offer has them.
+  async iceServers({ waitMs = 4000 } = {}) {
     if (!this.configured) return [];
     const now = this.now();
-    if (this.cache && now < this.cache.until) return this.cache.list;
-    try {
-      const list = await this.mint();
-      this.cache = { list, until: now + TTL_S * 1000 - REFRESH_LEFT_MS };
-      this.lastOkAt = now;
-      this.lastError = null;
+    if (this.cache && now < this.cache.until) {
+      if (now >= this.cache.refreshAt) this._refresh();
+      return this.cache.list;
+    }
+    let timer;
+    const giveUp = new Promise(resolve => { timer = setTimeout(() => resolve([]), waitMs); });
+    return Promise.race([this._refresh(), giveUp]).finally(() => clearTimeout(timer));
+  }
+
+  // Fetch now so the first viewer doesn't wait (called at startup).
+  warm() { if (this.configured) this._refresh(); }
+
+  forget() { this.cache = null; this.lastError = null; this.lastOkAt = null; }
+
+  _remember(list) {
+    const now = this.now();
+    this.cache = { list, until: now + TTL_S * 1000 - REFRESH_LEFT_MS, refreshAt: now + REFRESH_AFTER_MS };
+    this.lastOkAt = now;
+    this.lastError = null;
+  }
+
+  _refresh() {
+    this.refreshing ??= this.mint().then(list => {
+      this._remember(list);
       return list;
-    } catch (e) {
+    }, e => {
       this.lastError = e.message;
       this.log?.warn(`relay: ${e.message}`);
-      return [];
-    }
+      return this.cache && this.now() < this.cache.until ? this.cache.list : [];
+    }).finally(() => { this.refreshing = null; });
+    return this.refreshing;
   }
 
   // Saves a relay key after checking with Cloudflare that it works. Throws with a plain message if not.
@@ -73,16 +94,12 @@ export class Relay {
     if (!TOKEN_RE.test(apiToken)) throw new Error('That API token doesn’t look right: copy it again from Cloudflare.');
     const list = await this.mint({ keyId, apiToken });
     await this.store.setRelayLogin({ keyId, apiToken });
-    this.cache = { list, until: this.now() + TTL_S * 1000 - REFRESH_LEFT_MS };
-    this.lastOkAt = this.now();
-    this.lastError = null;
+    this._remember(list);
   }
 
   async remove() {
     await this.store.setRelayLogin(null);
-    this.cache = null;
-    this.lastError = null;
-    this.lastOkAt = null;
+    this.forget();
   }
 
   state() {

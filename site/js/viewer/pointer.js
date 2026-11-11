@@ -138,7 +138,9 @@ export class PointerInput {
   _touch(kind, e) {
     e.preventDefault();
     if (kind === 'down') {
-      this.surface.focus({ preventScroll: true });
+      // While the phone keyboard is up, leave focus in its text box: moving it to the picture would close the
+      // keyboard on every tap (tap a text field on the Mac, and the keyboard you were about to type with is gone).
+      if (!document.activeElement?.classList?.contains('softkbd')) this.surface.focus({ preventScroll: true });
       try { this.surface.setPointerCapture(e.pointerId); } catch {}
     }
     const g = this.gestures;

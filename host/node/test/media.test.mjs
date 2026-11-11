@@ -2,6 +2,7 @@
 // pacer, bitrate control and the per-session sender.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { ResolutionGovernor, ladderAtLeast } from '../src/media.mjs';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -140,7 +141,19 @@ test('pacer: when far behind it drops what is queued and asks for a keyframe', (
   assert.equal(overflows, 1);
   assert.equal(pacer.queue.length, 0);
   assert.equal(pacer.push(frame(true)), true, 'a keyframe is always taken');
+  // A keyframe that arrives when the queue is far behind is itself the fresh start: the caller is told so, and must
+  // not go on waiting for (and asking for) yet another keyframe.
+  const fresh = [];
+  const p2 = new Pacer({ rateKbps: () => FLOOR_KBPS, send: () => {}, now: clock.now, onOverflow: k => fresh.push(k) });
+  p2.push(frame(false));
+  clearInterval(p2.timer);
+  p2.timer = null;
+  clock.tick(400);
+  assert.equal(p2.push(frame(true)), true);
+  assert.deepEqual(fresh, [true]);
+  assert.equal(p2.queue.length, 1, 'only the keyframe is queued');
   pacer.stop();
+  p2.stop();
 });
 
 test('bitrate: backs off on loss and on REMB, creeps up when clean, stays within the floor and the ceiling', () => {
@@ -172,6 +185,33 @@ test('bitrate: backs off on loss and on REMB, creeps up when clean, stays within
   b.setPreset(QUALITY.smooth);
   b.onRemb(100_000);
   assert.equal(b.target, QUALITY.smooth.kbps);
+});
+
+test('bitrate: a low estimate after a still screen is not believed, and a real cut recovers quickly', () => {
+  const clock = fakeClock();
+  let sent = 5000;
+  const b = new BitrateController({ preset: QUALITY.balanced, now: clock.now, sentKbps: () => sent });
+  clock.tick(5000);
+  // The screen has been still: 200 kbit/s going out, so the browser's estimate has sunk to about 1.5 times that.
+  sent = 200;
+  b.onRemb(320_000);
+  assert.equal(b.target, 5000, 'the estimate only reflects how little was sent');
+  for (let i = 0; i < 5; i++) { clock.tick(1500); b.onRemb(320_000); b.onReport({ fractionLost: 0 }); }
+  assert.ok(b.target >= 5000, 'and it does not hold the target down either');
+  // Real congestion while quiet: the estimate is below even what is being sent.
+  b.onRemb(150_000);
+  assert.equal(b.target, FLOOR_KBPS);
+  // Movement again on a link that is fine: back to the preset's bitrate within about 15 seconds, not half a minute.
+  sent = 300;
+  let steps = 0;
+  while (b.target < QUALITY.balanced.kbps && steps < 60) {
+    clock.tick(1100);
+    sent = b.target * 0.95;
+    b.onRemb(sent * 1500);
+    b.onReport({ fractionLost: 0 });
+    steps++;
+  }
+  assert.ok(steps <= 14, `recovered in ${steps} steps`);
 });
 
 // Something shaped like werift's RTCRtpSender, for the sender tests.
@@ -230,8 +270,15 @@ test('sender: nothing before start, waits for a keyframe, throttles keyframe req
   assert.equal(bitrates.length, 0);
   video.rtcp({ type: RtcpRrPacket.type, reports: [{ ssrc: 1111, fractionLost: 128 }] });
   assert.deepEqual(bitrates, [1875]);
-  // REMB (payload-specific feedback, format 15).
+  // REMB (payload-specific feedback, format 15). Nothing has been sent for seconds, so a low estimate only reflects
+  // that; with video flowing again, an estimate below what is being sent is real congestion and is obeyed.
   t += 3000;
+  video.rtcp({ type: RtcpPayloadSpecificFeedback.type, feedback: { count: 15, bitrate: 900_000n } });
+  assert.deepEqual(bitrates, [1875], 'not believed while nothing is going out');
+  assert.equal(m.sentKbps(), 0);
+  m.recent.push([t, 250_000]);
+  m.recentBytes += 250_000;
+  assert.equal(m.sentKbps(), 2000);
   video.rtcp({ type: RtcpPayloadSpecificFeedback.type, feedback: { count: 15, bitrate: 900_000n } });
   assert.deepEqual(bitrates, [1875, 810]);
 
@@ -245,4 +292,38 @@ test('sender: nothing before start, waits for a keyframe, throttles keyframe req
   const n = video.sent.length;
   m.pushVideo(frame(61));
   assert.equal(video.sent.length, n, 'nothing after stop()');
+});
+
+test('picture size: steps down when the link can\'t carry it, back up slowly, never past the viewer\'s screen', () => {
+  assert.equal(ladderAtLeast(1170), 1280);
+  assert.equal(ladderAtLeast(1920), 1920);
+  assert.equal(ladderAtLeast(5000), 2880);
+  const g = new ResolutionGovernor({ fps: 30 });
+  // Plenty of bitrate for 1920: no limit.
+  for (let i = 0; i < 10; i++) assert.equal(g.update(5000, 1920), undefined);
+  assert.equal(g.cap, null);
+  // The link drops to 1 Mbit/s: one reading is not enough, two are; 1280 is what 1 Mbit/s carries.
+  assert.equal(g.update(1000, 1920), undefined);
+  assert.equal(g.update(1000, 1920), 1280);
+  // A brief dip and recovery in between doesn't count.
+  assert.equal(g.update(600, 1920), undefined);
+  assert.equal(g.update(1000, 1920), undefined);
+  assert.equal(g.update(600, 1920), undefined);
+  assert.equal(g.update(600, 1920), 960);
+  // Back up one step at a time, only after five good readings in a row with room to spare.
+  for (let i = 0; i < 4; i++) assert.equal(g.update(6000, 1920), undefined);
+  assert.equal(g.update(6000, 1920), 1280);
+  for (let i = 0; i < 4; i++) g.update(6000, 1920);
+  assert.equal(g.update(6000, 1920), 1600);
+  for (let i = 0; i < 4; i++) g.update(6000, 1920);
+  assert.equal(g.update(6000, 1920), null, 'at the top again: no limit');
+  // Barely enough for the next size is not enough to step up (it would step straight back down).
+  const h = new ResolutionGovernor();
+  h.update(1000, 1920); h.update(1000, 1920);
+  for (let i = 0; i < 20; i++) assert.equal(h.update(1600, 1920), undefined, 'needs a quarter to spare for 1600');
+  assert.equal(h.cap, 1280);
+  // 60 frames a second needs half as much again.
+  const f = new ResolutionGovernor({ fps: 60 });
+  f.update(3000, 1920);
+  assert.equal(f.update(3000, 1920), 1600);
 });

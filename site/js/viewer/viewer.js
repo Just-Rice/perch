@@ -102,7 +102,9 @@ export class Viewer {
       this._on(vv, 'scroll', fit);
       fit();
     }
-    this._on(window, 'resize', () => this.setView(this.view));
+    this._on(window, 'resize', () => { this.setView(this.view); this._reportView(); });
+    this._on(this.video, 'resize', () => this._reportView()); // the picture's own size or shape changed
+    this._reportView();
     this._on(document, 'fullscreenchange', () => this._fullscreenChanged());
     this._on(document, 'webkitfullscreenchange', () => this._fullscreenChanged());
     this.surface.focus({ preventScroll: true });
@@ -133,6 +135,7 @@ export class Viewer {
     this.listeners = [];
     this._clearTimers();
     clearTimeout(this.hideTimer);
+    clearTimeout(this.viewTimer);
     if (this.session) { this.session.onmessage = this.session.onstream = this.session.onlink = () => {}; }
     if (this.video) { this.video.pause(); this.video.srcObject = null; }
     this.setView(IDENTITY);
@@ -152,6 +155,7 @@ export class Viewer {
     this.view = clampView(v, box);
     this.zoomEl.style.transform = viewTransform(this.view);
     const zoomed = isZoomed(this.view);
+    if (this.pointer) this._reportView();
     this.root.classList.toggle('zoomed', zoomed);
     this.$('optZoom').disabled = !zoomed;
   }
@@ -203,6 +207,7 @@ export class Viewer {
       }
     }
     if (st.width > 0 && st.height > 0) { this.display.width = st.width; this.display.height = st.height; }
+    if (Array.isArray(st.displays)) this._setDisplays(st.displays, st.display);
   }
 
   // --- regular checks ---
@@ -297,18 +302,14 @@ export class Viewer {
 
     on('tbQuality', 'change', e => this._setQuality(e.target.value));
 
-    const displays = Array.isArray(this.ready.displays) ? this.ready.displays : [];
+    // 60 frames a second, on Macs that offer it.
+    const fast = $('tbQuality').querySelector('option[value="fast"]');
+    fast.hidden = fast.disabled = !this.session.caps?.includes('fps60');
+
     const sel = $('tbDisplay');
-    sel.replaceChildren(...displays.map((d, i) => {
-      const o = document.createElement('option');
-      o.value = String(d.id);
-      o.textContent = d.name || `Display ${i + 1}`;
-      return o;
-    }));
-    sel.value = String(this.display.id ?? displays[0]?.id ?? '');
-    $('tbDisplayWrap').hidden = displays.length < 2;
+    this._setDisplays(Array.isArray(this.ready.displays) ? this.ready.displays : [], this.display.id);
     on('tbDisplay', 'change', () => {
-      const d = displays.find(x => String(x.id) === sel.value);
+      const d = this.displays.find(x => String(x.id) === sel.value);
       if (!d) return;
       this.display = { id: d.id, width: d.width, height: d.height };
       this.session.send({ t: 'display', id: d.id });
@@ -371,6 +372,47 @@ export class Viewer {
       if (e.pointerType !== 'touch' && e.clientY < SHOW_ZONE_PX) this._showToolbar();
     });
     this._on(this.surface, 'pointerdown', () => this._toggleMenu(false));
+  }
+
+  // The display picker. Called again when the Mac says its displays changed (one was unplugged or plugged in).
+  _setDisplays(displays, shownId) {
+    this.displays = displays;
+    const sel = this.$('tbDisplay');
+    sel.replaceChildren(...displays.map((d, i) => {
+      const o = document.createElement('option');
+      o.value = String(d.id);
+      o.textContent = d.name || `Display ${i + 1}`;
+      return o;
+    }));
+    const shown = displays.find(d => d.id === shownId) ?? displays[0];
+    if (shown) {
+      sel.value = String(shown.id);
+      if (this.display.id !== shown.id) {
+        this.display = { id: shown.id, width: shown.width, height: shown.height };
+        this.setView(IDENTITY);
+      }
+    }
+    this.$('tbDisplayWrap').hidden = displays.length < 2;
+  }
+
+  // Tells the Mac how big its picture is on this screen, in real pixels, so it doesn't send more than can be shown
+  // (a phone needs far fewer than a desktop monitor, and fewer pixels means a smoother picture on the same link).
+  // Zooming in asks for up to twice as many. Sent a moment after things settle, and only when it changed.
+  _reportView() {
+    if (!this.session.caps?.includes('view')) return;
+    clearTimeout(this.viewTimer);
+    this.viewTimer = setTimeout(() => {
+      if (this.over) return;
+      const box = this.surface.getBoundingClientRect();
+      const [vw, vh] = this.pointer.pictureSize();
+      if (!(box.width > 0 && box.height > 0 && vw > 0 && vh > 0)) return;
+      const shown = Math.min(box.width / vw, box.height / vh); // CSS pixels per picture pixel
+      const zoom = Math.min(2, Math.max(1, this.view.scale ?? 1));
+      const edge = Math.round(Math.max(vw, vh) * shown * (window.devicePixelRatio || 1) * zoom);
+      if (this.lastViewEdge && Math.abs(edge - this.lastViewEdge) < this.lastViewEdge * 0.08) return;
+      this.lastViewEdge = edge;
+      this.session.send({ t: 'view', edge });
+    }, 600);
   }
 
   _setQuality(preset) {

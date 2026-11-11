@@ -106,6 +106,15 @@ makes keyframes on its own, so the Mac makes one when the session starts, on eve
 once a second when no new one arrived. werift has no H.264 packetizer; the host has its own (RFC 6184 single NAL,
 STAP-A, FU-A at 1200-byte payloads). NACK retransmission and RTCP sender reports are werift's.
 
+Picture size and bitrate (`host/node/src/media.mjs`). The bitrate target follows the browser's receiver reports
+(loss) and its bandwidth estimate (REMB); a low estimate is ignored while little is being sent (a still screen),
+because the estimate can't exceed about 1.5 times what the browser receives. The picture's longest edge is the
+smallest of: the preset's `maxEdge`, the viewer's screen (`view`), and what the link carries at full frame rate
+(`EDGE_LADDER` / `EDGE_NEEDS_KBPS`: step down after two low readings, up one step after five good ones). A size
+change on the same display resizes the running stream and swaps the encoder (no restart); `capture` commands carry
+the current bitrate target. After the last new picture the Mac repeats it several times a second for 1.5 s so the
+encoder can sharpen it, and a picture dropped by rate control is tried again within 40 ms.
+
 Audio: ScreenCaptureKit delivers 20 ms of 48 kHz Float32 stereo per buffer; the Mac encodes each buffer as one Opus
 packet with AudioToolbox (64 kbit/s) and the host sends it with RTP timestamp steps of 960.
 
@@ -196,10 +205,13 @@ quality, audio, input, locked}` — `input` false means Accessibility permission
 
 ## Control channel: during a session
 
-viewer → Mac: `{t:"quality", preset}` (`smooth | balanced | sharp`), `{t:"display", id}`, `{t:"keyframe"}`,
-`{t:"ping", n, ts}`, `{t:"bye"}`.
+viewer → Mac: `{t:"quality", preset}` (`smooth | balanced | sharp | fast`; `fast` is 60 frames a second, offered by
+Macs with `fps60` in the offer's `caps`), `{t:"display", id}`, `{t:"keyframe"}`, `{t:"view", edge}` (the longest edge
+of the picture on the viewer's screen in device pixels, for Macs with `view` in `caps`: the Mac never sends a bigger
+picture than that), `{t:"ping", n, ts}`, `{t:"bye"}`.
 
-Mac → viewer: `{t:"pong", n, ts}`, `{t:"status", locked, link: "good"|"slow", kbps, fps, width, height, input}`,
+Mac → viewer: `{t:"pong", n, ts}`, `{t:"status", locked, link: "good"|"slow", kbps, fps, width, height, input}`
+(plus `displays` and `display` when the Mac's displays change),
 `{t:"error", code, message}` (codes: `no-screen-permission`, `capture-failed`), `{t:"bye", reason}`
 (`signed-in-elsewhere | paused | quit | idle | removed | disconnected`).
 

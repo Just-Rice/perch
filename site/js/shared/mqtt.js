@@ -26,7 +26,7 @@ const packet = (first, body) => concat(Uint8Array.of(first), remainingLength(bod
 
 export class MqttClient {
   // `username`/`password`: some public brokers ask for a fixed public login (e.g. shiftr.io's "public"/"public").
-  constructor(url, { WebSocketImpl = globalThis.WebSocket, keepalive = 30, maxPacket = 1 << 20, username = null, password = null } = {}) {
+  constructor(url, { WebSocketImpl = globalThis.WebSocket, keepalive = 20, maxPacket = 1 << 20, username = null, password = null } = {}) {
     this.url = url;
     this.username = username;
     this.password = password;

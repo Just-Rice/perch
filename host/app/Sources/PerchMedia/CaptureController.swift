@@ -70,10 +70,10 @@ final class AudioPipeline {
 /// One running capture: a source, an encoder and the timers that keep pictures coming while the screen is still.
 /// Sendable by construction: its picture state is only touched on the video queue, audio state on the audio queue.
 final class CaptureSession: @unchecked Sendable {
-    let request: CaptureRequest
+    private(set) var request: CaptureRequest
     let display: DisplayInfo
-    let width: Int
-    let height: Int
+    private(set) var width: Int
+    private(set) var height: Int
     let synthetic: Bool
     let gate = KeyframeGate()
     var onVideo: ((EncodedFrame) -> Void)?
@@ -84,19 +84,29 @@ final class CaptureSession: @unchecked Sendable {
 
     private let videoQueue: DispatchQueue
     private let audioQueue: DispatchQueue
-    private let encoder: H264Encoder
+    private var encoder: H264Encoder
     private var capturer: ScreenCapturer?
     private var audio: AudioPipeline?
     private var videoTimers: [DispatchSourceTimer] = []
     private var toneTimer: DispatchSourceTimer?
     private var lastPixelBuffer: CVPixelBuffer?
     private var lastEncode: UInt64 = 0
+    private var lastNewPicture: UInt64 = 0
     private let videoClock = MonotonicClock()
+    /// Set (on VideoToolbox's thread) when rate control threw away the newest picture, cleared when one gets through.
+    private let dropLock = NSLock()
+    private var newestWasDropped = false
 
     /// With nothing new on screen, send the last picture again this often so the viewer's stream stays alive.
     static let repeatAfterMicros: UInt64 = 1_000_000
     /// A keyframe that rate control dropped is retried this soon, even on a still screen.
     static let keyframeRetryMicros: UInt64 = 100_000
+    /// The newest picture was dropped by rate control: the viewer is looking at an older one, so try again this soon.
+    static let dropRetryMicros: UInt64 = 40_000
+    /// Just after movement stops the last picture is rough (it was encoded in a hurry). For this long, send it again
+    /// several times a second: each repeat costs little and lets the encoder sharpen what the viewer is reading.
+    static let sharpenForMicros: UInt64 = 1_500_000
+    static let sharpenEveryMicros: UInt64 = 120_000
 
     init(request: CaptureRequest, display: DisplayInfo, synthetic: Bool, videoQueue: DispatchQueue, audioQueue: DispatchQueue) throws {
         self.request = request
@@ -109,10 +119,47 @@ final class CaptureSession: @unchecked Sendable {
         height = size.height
         encoder = try H264Encoder(width: width, height: height, fps: request.fps, bitsPerSecond: request.kbps * 1000)
         encoder.warmUp(ptsMicros: hostMicros())
-        encoder.onFrame = { [weak self] frame in
-            guard let self, self.gate.admit(frame, canSend: self.canSend()) else { return }
+        wire(encoder)
+    }
+
+    private func wire(_ e: H264Encoder) {
+        e.onFrame = { [weak self] frame in
+            guard let self else { return }
+            self.dropLock.withLock { self.newestWasDropped = false }
+            guard self.gate.admit(frame, canSend: self.canSend()) else { return }
             self.onVideo?(frame)
         }
+        e.onDrop = { [weak self] _, _ in
+            guard let self else { return }
+            self.dropLock.withLock { self.newestWasDropped = true }
+        }
+    }
+
+    /// Changes the picture size while capture keeps running: a new encoder, the stream told its new size, and a
+    /// keyframe to start from. Much lighter than stopping and starting (no gap in the sound, no display lookup).
+    func resize(width w: Int, height h: Int, kbps: Int) async throws {
+        let fresh = try H264Encoder(width: w, height: h, fps: request.fps, bitsPerSecond: kbps * 1000)
+        fresh.warmUp(ptsMicros: hostMicros())
+        wire(fresh)
+        videoQueue.sync {
+            let old = encoder
+            old.onFrame = nil
+            old.onDrop = nil
+            encoder = fresh
+            width = w
+            height = h
+            request.kbps = kbps
+            lastPixelBuffer = nil // the old size; a picture of the new size arrives in a moment
+            gate.request()
+            old.invalidate()
+            if synthetic {
+                videoTimers.forEach { $0.cancel() }
+                videoTimers = []
+                startPattern()
+                startRepeats()
+            }
+        }
+        if !synthetic { try await capturer?.update(width: w, height: h) }
     }
 
     func start() async throws {
@@ -164,7 +211,10 @@ final class CaptureSession: @unchecked Sendable {
     // MARK: video queue
 
     private func frameArrived(_ pb: CVPixelBuffer, pts: UInt64) {
+        // Right after a size change a few pictures of the old size are still on their way: skip them.
+        guard CVPixelBufferGetWidth(pb) == width, CVPixelBufferGetHeight(pb) == height else { return }
         lastPixelBuffer = pb
+        lastNewPicture = hostMicros()
         encode(pb, pts: pts)
     }
 
@@ -175,12 +225,18 @@ final class CaptureSession: @unchecked Sendable {
 
     private func startRepeats() {
         let t = DispatchSource.makeTimerSource(queue: videoQueue)
-        t.schedule(deadline: .now() + .milliseconds(100), repeating: .milliseconds(100), leeway: .milliseconds(10))
+        t.schedule(deadline: .now() + .milliseconds(40), repeating: .milliseconds(40), leeway: .milliseconds(5))
         t.setEventHandler { [weak self] in
             guard let self, let pb = self.lastPixelBuffer else { return }
-            let idle = hostMicros() &- self.lastEncode
-            if idle >= Self.repeatAfterMicros || (self.gate.isAwaiting && idle >= Self.keyframeRetryMicros) {
-                self.encode(pb, pts: hostMicros())
+            let now = hostMicros()
+            let idle = now &- self.lastEncode
+            let dropped = self.dropLock.withLock { self.newestWasDropped }
+            let sharpening = now &- self.lastNewPicture < Self.sharpenForMicros
+            if idle >= Self.repeatAfterMicros
+                || (self.gate.isAwaiting && idle >= Self.keyframeRetryMicros)
+                || (dropped && idle >= Self.dropRetryMicros)
+                || (sharpening && idle >= Self.sharpenEveryMicros) {
+                self.encode(pb, pts: now)
             }
         }
         t.resume()
@@ -255,6 +311,11 @@ public final class CaptureController: @unchecked Sendable {
     private var generation = 0
     private var current: CaptureSession?
     private var pendingKbps: Int?
+    /// What the host last asked for, so capture can be restarted by itself when the system stops it.
+    private var lastRequest: CaptureRequest?
+    private var startedAt = Date.distantPast
+    private var restartsInARow = 0
+    static let maxRestarts = 3
     /// Commands run one at a time, in order. Main thread only.
     private var chain: Task<Void, Never>?
 
@@ -267,13 +328,14 @@ public final class CaptureController: @unchecked Sendable {
     /// Starts capture, or changes what is being captured. Main thread.
     public func capture(_ request: CaptureRequest) {
         let gen = nextGeneration()
-        lock.withLock { pendingKbps = nil }
+        lock.withLock { pendingKbps = nil; lastRequest = request; restartsInARow = 0 }
         enqueue { [self] in await start(request, generation: gen) }
     }
 
     /// Stops capture. `notify` false is for when there is no host left to tell. Main thread.
     public func stop(reason: String, notify: Bool = true) {
         let gen = nextGeneration()
+        lock.withLock { lastRequest = nil }
         enqueue { [self] in
             guard isLatest(gen) else { return }
             await teardown()
@@ -324,6 +386,18 @@ public final class CaptureController: @unchecked Sendable {
             emitStarted(cur)
             return
         }
+        if let cur = lock.withLock({ current }), cur.display.id == display.id,
+           cur.request.fps == request.fps, cur.request.audio == request.audio {
+            // Same display, new size (the viewer's window changed, or the link got faster or slower).
+            do {
+                try await cur.resize(width: size.width, height: size.height, kbps: request.kbps)
+                log("capture resized to \(size.width)x\(size.height), \(request.kbps) kbit/s")
+                emitStarted(cur)
+                return
+            } catch {
+                log("could not resize capture (\(error)); restarting it")
+            }
+        }
         if !synthetic && !CGPreflightScreenCaptureAccess() {
             await teardown()
             onEvent?(["e": "capture-error", "code": "no-screen-permission",
@@ -344,7 +418,7 @@ public final class CaptureController: @unchecked Sendable {
                 DispatchQueue.main.async { if let self, let s { self.failed(s, error) } }
             }
             try await s.start()
-            let kbps = lock.withLock { () -> Int? in current = s; return pendingKbps }
+            let kbps = lock.withLock { () -> Int? in current = s; startedAt = Date(); return pendingKbps }
             if let kbps { s.setBitrate(kbps: kbps) }
             log("capture started: display \(display.id) at \(s.width)x\(s.height), \(request.fps) fps, \(request.kbps) kbit/s, audio \(request.audio)")
             emitStarted(s)
@@ -366,6 +440,22 @@ public final class CaptureController: @unchecked Sendable {
             guard lock.withLock({ current === session }) else { return }
             log("capture stopped by the system: \(error)")
             await teardown()
+            // Most often the display went to sleep (a locked Mac switches it off after a few seconds). The viewer
+            // is still there, so wake it and carry on rather than leave them with an error; give up only if that
+            // keeps failing, or the permission was taken away.
+            let retry = lock.withLock { () -> (CaptureRequest, Int)? in
+                guard let r = lastRequest, Self.errorCode(error) != "no-screen-permission" else { return nil }
+                if Date().timeIntervalSince(startedAt) > 10 { restartsInARow = 0 }
+                guard restartsInARow < Self.maxRestarts else { return nil }
+                restartsInARow += 1
+                return (r, generation)
+            }
+            if let (request, gen) = retry {
+                log("restarting capture (attempt \(lock.withLock { restartsInARow }) of \(Self.maxRestarts))")
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                await start(request, generation: gen)
+                return
+            }
             onEvent?(["e": "capture-error", "code": Self.errorCode(error), "message": Self.message(error)])
             onEvent?(["e": "capture-stopped", "reason": "error"])
         }

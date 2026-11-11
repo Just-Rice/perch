@@ -198,6 +198,12 @@ export class Connection {
       throw this._fail(new PerchError('webrtc', { message: e.message }));
     }
     pc.ontrack = ev => {
+      // A remote desktop wants the newest picture now, not a smooth one a little later: ask the browser to keep
+      // almost nothing buffered (it otherwise holds back up to a few hundred milliseconds of video).
+      try {
+        if ('jitterBufferTarget' in ev.receiver) ev.receiver.jitterBufferTarget = ev.track.kind === 'audio' ? 40 : 0;
+        else if ('playoutDelayHint' in ev.receiver) ev.receiver.playoutDelayHint = ev.track.kind === 'audio' ? 0.04 : 0;
+      } catch { /* a browser that refuses just keeps its default */ }
       if (!this.stream) this.stream = new MediaStream();
       if (!this.stream.getTracks().includes(ev.track)) this.stream.addTrack(ev.track);
       try { this.onstream(this.stream, ev.track); } catch (e) { this.log(e); }

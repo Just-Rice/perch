@@ -137,20 +137,19 @@ export class Signaling {
     if (no) return this._refuse(where, sid, no.reason, no.retryAfter);
     if (this.hub.unauthenticatedCount(kind) >= MAX_UNAUTHENTICATED) return this._refuse(where, sid, 'busy', 10);
 
-    let session, sdp;
+    let session, sdp, iceServers = [];
     try {
       session = this.hub.createSession(hello, kind);
       entry.session = session;
-      sdp = await session.offer();
+      // The owner's relay logins, if any (relay.mjs), are fetched while the offer is being made.
+      const relay = this.hub.relayIceServers ? Promise.resolve(this.hub.relayIceServers()).catch(() => []) : [];
+      [sdp, iceServers] = await Promise.all([session.offer(), relay]);
     } catch (e) {
       this.log?.error('could not make an offer:', e);
       session?.end('error', { sendBye: false });
       return this._refuse(where, sid, 'busy', 5);
     }
     if (session.state !== 'offered') return; // ended while gathering (paused, timed out...)
-    // The owner's relay, if any, for viewers on networks that block direct connections (see relay.mjs).
-    const iceServers = this.hub.relayIceServers ? await this.hub.relayIceServers() : [];
-    if (session.state !== 'offered') return;
     // caps: what this Mac can do beyond protocol 1 ("quick" = one-tap passkey sign-in, see bind.js).
     entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp, ...(this.hub.caps?.length ? { caps: this.hub.caps } : {}),
       ...(iceServers.length ? { iceServers } : {}) };

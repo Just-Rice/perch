@@ -520,7 +520,7 @@ test('quality, display and keyframe requests reach the app; junk during sign-in 
   let since = app.commands.length;
   v.send({ t: 'quality', preset: 'sharp' });
   const sharp = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
-  assert.deepEqual([sharp.maxEdge, sharp.kbps, sharp.display], [2880, 9000, 1]);
+  assert.deepEqual([sharp.maxEdge, sharp.kbps, sharp.display], [2880, 10000, 1]);
 
   since = app.commands.length;
   v.send({ t: 'display', id: 99 });          // no such display: ignored
@@ -692,6 +692,14 @@ test('reset forgets everything: old passkeys and addresses stop working', async 
   await assert.rejects(viewer(t).open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey, timeoutMs: 1500 }), /no offer/);
   const r = await refusal(viewer(t).open({ route: 'passkey', hostId: after.hostId, sigKey: after.sigKey }));
   assert.equal(r.reason, 'not-set-up');
+  // The new identity has its own connection certificate at once: pairing links carry its pin and one-tap sign-in
+  // is offered, without waiting for a restart.
+  await app.setupTotp();
+  const { link } = await app.call('pairStart');
+  assert.equal(Buffer.from(new URL(link).hash.replace('#pair=', ''), 'base64url').length, 16 + 32 + 16 + 32 + 16, 'link with a pin');
+  const again = await pair(t, app);
+  assert.equal(again.end.t, 'ready');
+  assert.ok(again.v.firstReply.caps.includes('quick'));
 });
 
 test('one-tap sign-in: the passkey signs the viewer\'s own certificate up front; replays, old times and other certificates are refused', async (t) => {
@@ -700,7 +708,7 @@ test('one-tap sign-in: the passkey signs the viewer\'s own certificate up front;
   // A good one: the Mac offers "quick", and a passkey over (r, ts, this viewer's fingerprint) is accepted.
   const v = viewer(t, { authenticator: ctx.authn, label: 'One-tap viewer' });
   await v.open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey });
-  assert.deepEqual(v.firstReply.caps, ['quick']);
+  assert.ok(v.firstReply.caps.includes('quick'));
   const r = randomBytes(16);
   const end = await v.signInQuick({ credentialId: ctx.credentialId, code: () => app.freshCode(), r });
   assert.equal(end.t, 'ready', JSON.stringify(end));
@@ -733,4 +741,27 @@ test('passkeys made before one-tap sign-in (48-byte user handle) still sign in',
   const legacy = Buffer.from([...ctx.hostId, ...ctx.sigKey]).toString('base64url');
   const { end } = await passkey(t, ctx, { overrides: { userHandle: legacy } });
   assert.equal(end.t, 'ready', JSON.stringify(end));
+});
+
+test('the picture is no bigger than the viewer\'s screen, and capture keeps the bitrate the link is carrying', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  const { v, end } = await passkey(t, ctx);
+  assert.equal(end.t, 'ready');
+  const first = app.commands.filter(c => c.c === 'capture' && c.on).at(-1);
+  assert.deepEqual([first.maxEdge, first.fps, first.kbps], [1920, 30, 5000]);
+  // A phone held upright shows the Mac's picture about 1170 pixels wide.
+  let since = app.commands.length;
+  v.send({ t: 'view', edge: 1170 });
+  const phone = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.equal(phone.maxEdge, 1280);
+  // Junk and repeats change nothing.
+  since = app.commands.length;
+  v.send({ t: 'view', edge: 'big' });
+  v.send({ t: 'view', edge: 1200 });
+  v.send({ t: 'quality', preset: 'fast' });
+  const fast = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.deepEqual([fast.maxEdge, fast.fps, fast.kbps], [1280, 60, 8000], '60 frames a second, still phone-sized');
+  assert.equal(app.commands.slice(since).filter(c => c.c === 'capture').length, 1);
+  assert.ok(v.firstReply.caps.includes('fps60') && v.firstReply.caps.includes('view'));
 });

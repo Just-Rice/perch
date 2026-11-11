@@ -139,6 +139,7 @@ final class Power {
     private var awake: IOPMAssertionID = 0
     private var display: IOPMAssertionID = 0
     private var activity: IOPMAssertionID = 0
+    private var tickle: DispatchSourceTimer?
 
     var keepingAwake: Bool { awake != 0 }
     var holdingDisplay: Bool { display != 0 }
@@ -163,13 +164,38 @@ final class Power {
                                                     "Someone is viewing this Mac with Perch" as CFString, &display)
                 if r != kIOReturnSuccess { Log.shared.warn("could not keep the display on (IOReturn \(r))"); display = 0 }
             }
-            // Wakes a sleeping display, as if someone touched the keyboard.
-            let r = IOPMAssertionDeclareUserActivity("Perch viewer connected" as CFString, kIOPMUserActiveLocal, &activity)
-            if r != kIOReturnSuccess { Log.shared.warn("could not wake the display (IOReturn \(r))") }
+            declareActivity()
+            startTickle()
         } else {
+            tickle?.cancel()
+            tickle = nil
             if display != 0 { IOPMAssertionRelease(display); display = 0 }
             if activity != 0 { IOPMAssertionRelease(activity); activity = 0 }
         }
+    }
+
+    /// Wakes a sleeping display, as if someone touched the keyboard. A fresh assertion each time: declaring again
+    /// on one that is still alive doesn't count as new activity.
+    private func declareActivity() {
+        if activity != 0 { IOPMAssertionRelease(activity); activity = 0 }
+        let r = IOPMAssertionDeclareUserActivity("Perch viewer connected" as CFString, kIOPMUserActiveLocal, &activity)
+        if r != kIOReturnSuccess { Log.shared.warn("could not wake the display (IOReturn \(r))"); activity = 0 }
+    }
+
+    /// On the lock screen macOS switches the display off about ten seconds after the last sign of life, whatever
+    /// assertions are held (measured on macOS 27: PreventUserIdleDisplaySleep alone lost the display after 10 s).
+    /// Someone connecting to their locked Mac needs it to stay on, so while a viewer is connected and the Mac is
+    /// locked or its display is asleep, say "someone is here" every couple of seconds.
+    private func startTickle() {
+        guard tickle == nil else { return }
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(200))
+        t.setEventHandler { [weak self] in
+            guard let self, self.display != 0 else { return }
+            if CGDisplayIsAsleep(CGMainDisplayID()) != 0 || LockState.isLocked { self.declareActivity() }
+        }
+        t.resume()
+        tickle = t
     }
 
     func releaseAll() {

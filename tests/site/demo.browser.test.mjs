@@ -94,9 +94,9 @@ test('desktop: mouse moves, clicks, double clicks, right clicks and scrolling', 
 
   // Right click: button 2, and the browser's own menu doesn't open.
   n = await count(page);
-  const menuPrevented = page.eval(`new Promise(r => document.getElementById('surface').addEventListener('contextmenu', e => r(e.defaultPrevented), { once: true }))`);
+  await page.eval(`(() => { window.__menuPrevented = new Promise(r => document.getElementById('surface').addEventListener('contextmenu', e => r(e.defaultPrevented), { once: true })); })()`);
   await page.click(null, { x: 500, y: 300, button: 'right' });
-  assert.equal(await menuPrevented, true);
+  assert.equal(await page.eval(`window.__menuPrevented`), true);
   await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`);
   assert.deepEqual((await messages(page, n)).filter(m => m.t === 'b').map(m => [m.b, m.d]), [[2, true], [2, false]]);
 
@@ -134,9 +134,11 @@ test('desktop: keys go to the Mac with the protocol\'s code, key and modifier bi
 
   // Tab and Escape would move focus or leave full screen in the page; the Mac gets them instead.
   // The viewer takes keys at the window in the capture phase and stops them there, so listen in that same phase.
-  const tabPrevented = page.eval(`new Promise(r => addEventListener('keydown', e => r(e.defaultPrevented), { once: true, capture: true }))`);
+  // Set the listener up and wait until it is in place before pressing the key: started side by side, the key press
+  // sometimes got to the page first and the listener then waited for a key that had already gone by.
+  await page.eval(`(() => { window.__tabPrevented = new Promise(r => addEventListener('keydown', e => r(e.defaultPrevented), { once: true, capture: true })); })()`);
   await page.key('Tab', 'Tab');
-  assert.equal(await tabPrevented, true);
+  assert.equal(await page.eval(`window.__tabPrevented`), true);
 
   // A key held when the window loses focus: the viewer tells the Mac to let go of everything.
   n = await count(page);
@@ -375,6 +377,11 @@ test('phone: taps, double taps, long press, two-finger scroll, pinch zoom, the p
   n = await count(page);
   await page.type('ok');
   await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'txt')`, { what: 'typed text from the button' });
+  // Tapping the Mac's picture (to put the cursor in a text field there) must not close the keyboard.
+  n = await count(page);
+  await page.tap(195, 300);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'the tap as a click' });
+  assert.equal(await page.eval(`document.activeElement === document.getElementById('softkbd')`), true, 'keyboard still open after a tap');
   await page.shot('viewer-demo-keysbar-phone');
   await page.setView({ view: PHONE_LANDSCAPE });
   await page.shot('viewer-demo-keysbar-phone-landscape');

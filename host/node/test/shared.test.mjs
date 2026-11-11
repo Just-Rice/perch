@@ -167,3 +167,32 @@ test('Rendezvous de-duplicates the same message arriving from several brokers', 
 test('utf8 helper encodes non-ASCII text', () => {
   assert.deepEqual([...utf8('é')], [0xc3, 0xa9]);
 });
+
+test('Rendezvous reconnects every broker at once after the clock jumps (the computer slept)', async () => {
+  const broker = new FakeBroker();
+  const WS = broker.socketClass();
+  let t = 1_000_000;
+  const logs = [];
+  const r = new Rendezvous({ brokers: ['wss://fake/1', 'wss://fake/2'], WebSocketImpl: WS, now: () => t, log: m => logs.push(m) });
+  await r.start();
+  for (let i = 0; i < 100 && r.connectedCount < 2; i++) await new Promise(res => setTimeout(res, 10));
+  const before = new Set(broker.sockets);
+  const topic = await hostTopic(randomBytes(16));
+  const key = await hostEnvelopeKey(randomBytes(32));
+  const got = [];
+  await r.listen(topic, key, m => got.push(m));
+  // Asleep for five minutes: the old sockets are useless, and brand-new ones take their place.
+  t += 5 * 60_000;
+  r.reconnectAll();
+  for (let i = 0; i < 100 && r.connectedCount < 2; i++) await new Promise(res => setTimeout(res, 10));
+  assert.equal(r.connectedCount, 2);
+  assert.ok([...broker.sockets].every(s => !before.has(s)), 'new connections');
+  // The topics are listened to again on the new connections.
+  const other = new Rendezvous({ brokers: ['wss://fake/1'], WebSocketImpl: WS, now: () => t });
+  await other.start();
+  await other.send(topic, key, { t: 'hello', sid: 'after-wake' });
+  for (let i = 0; i < 100 && !got.length; i++) await new Promise(res => setTimeout(res, 10));
+  assert.equal(got[0]?.sid, 'after-wake');
+  r.close();
+  other.close();
+});

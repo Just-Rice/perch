@@ -79,5 +79,6 @@ export class RateLimiter {
 // Limits per viewer. Pointer moves come at the display's refresh rate (up to 120 Hz on ProMotion screens, more with
 // coalesced events); keys and clicks are far rarer, but typing bursts and key repeat need room.
 export const POINTER_RATE = { rate: 250, burst: 60 };
-export const INPUT_RATE = { rate: 100, burst: 100 };
+// Scrolling sends one message per screen refresh, and phones refresh at up to 120 Hz.
+export const INPUT_RATE = { rate: 250, burst: 250 };
 export const CONTROL_RATE = { rate: 20, burst: 40 };

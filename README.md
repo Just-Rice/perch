@@ -36,7 +36,8 @@ Applications and open it. When macOS refuses, go to System Settings › Privacy 
 
 **Needs:**
 
-- **The Mac:** Apple silicon (M1 or later), macOS 14 Sonoma or later. Intel isn't supported yet.
+- **The Mac:** macOS 14 Sonoma or later, on Apple silicon (M1 or later) or Intel. The Intel version is new and has
+  only been tested in emulation so far.
 - **The viewing device:** a recent Safari, Chrome, Edge or Firefox.
 - **While you use it**, the Mac must be on, awake and logged in.
 

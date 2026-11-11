@@ -4,7 +4,7 @@
 #   curl -fsSL https://just-rice.github.io/perch/install.sh | bash
 #
 # What it does, in order:
-#   1. checks this is an Apple silicon Mac on macOS 14 or later;
+#   1. checks this Mac runs macOS 14 or later, and whether it has Apple silicon or an Intel chip;
 #   2. asks GitHub for the latest Perch release (or the version in $PERCH_VERSION);
 #   3. downloads Perch.zip and its checksum, and stops unless they match;
 #   4. checks the app's code signature is intact;
@@ -39,7 +39,8 @@ fail() { printf 'Perch install failed: %s\n' "$*" >&2; exit 1; }
 
 # 1. This Mac.
 [ "$(uname -s)" = "Darwin" ] || fail "Perch runs on macOS only."
-[ "$(uname -m)" = "arm64" ] || fail "Perch needs a Mac with Apple silicon (M1 or later). Intel Macs aren't supported yet."
+# Apple silicon or Intel? (Asked of the hardware, not the shell: a Terminal running under Rosetta would say Intel.)
+if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then SUFFIX=""; else SUFFIX="-intel"; fi
 MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
 [ "$MACOS_MAJOR" -ge 14 ] 2>/dev/null || fail "Perch needs macOS 14 Sonoma or later (this Mac has $(sw_vers -productVersion))."
 
@@ -63,8 +64,11 @@ asset_url() {
     grep -E "^${URL_RE}//[^ ]*/$1\$" | head -n 1; } || true
 }
 TAG="$( { printf '%s' "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/'; } || true)"
-ZIP_URL="$(asset_url 'Perch-[0-9][0-9.]*\.zip')"
-SUM_URL="$(asset_url 'Perch-[0-9][0-9.]*\.zip\.sha256')"
+ZIP_URL="$(asset_url "Perch-[0-9][0-9.]*${SUFFIX}\\.zip")"
+SUM_URL="$(asset_url "Perch-[0-9][0-9.]*${SUFFIX}\\.zip\\.sha256")"
+if [ -n "$TAG" ] && [ -z "$ZIP_URL" ] && [ -n "$SUFFIX" ]; then
+  fail "Perch ${TAG#v} has no version for Intel Macs. Intel support starts with Perch 0.3."
+fi
 [ -n "$TAG" ] && [ -n "$ZIP_URL" ] && [ -n "$SUM_URL" ] || fail "the latest release doesn't have the files this installer expects."
 say "Installing Perch ${TAG#v}…"
 

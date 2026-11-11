@@ -56,6 +56,13 @@ jobs:
           NODE_BIN="$(host/app/test/fetch-node.sh "$RUNNER_TEMP/node" "$NODE_FOR_APP")"
           host/scripts/make-app.sh --skip-build --host-bundle host/node/dist --node "$NODE_BIN" --out "$RUNNER_TEMP/out"
 
+      - name: Build and assemble the Intel version
+        run: |
+          softwareupdate --install-rosetta --agree-to-license >/dev/null 2>&1 || true
+          NODE_BIN="$(PERCH_NODE_ARCH=x64 host/app/test/fetch-node.sh "$RUNNER_TEMP/node" "$NODE_FOR_APP")"
+          host/scripts/make-app.sh --intel --host-bundle host/node/dist --node "$NODE_BIN" --out "$RUNNER_TEMP/out-intel"
+          host/app/.build-intel/release/Perch --selftest | tail -1
+
       - name: Sign with Perch's certificate
         env:
           P12: ${{ secrets.PERCH_SIGNING_P12 }}
@@ -64,6 +71,7 @@ jobs:
           if [ -z "$P12" ]; then echo "No signing secrets: the app stays signed ad hoc."; exit 0; fi
           printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/perch-signing.p12"
           host/scripts/sign-with-p12.sh "$RUNNER_TEMP/perch-signing.p12" "$P12_PASSWORD" "$RUNNER_TEMP/out/Perch.app" --options runtime
+          host/scripts/sign-with-p12.sh "$RUNNER_TEMP/perch-signing.p12" "$P12_PASSWORD" "$RUNNER_TEMP/out-intel/Perch.app" --options runtime
           rm -f "$RUNNER_TEMP/perch-signing.p12"
 
       - name: Zip and checksum
@@ -73,6 +81,11 @@ jobs:
           shasum -a 256 "Perch-$VERSION.zip" > "Perch-$VERSION.zip.sha256"
           cat "Perch-$VERSION.zip.sha256"
           codesign -d -r- Perch.app 2>&1 | grep designated || true
+          # The Intel version, beside it: Perch-<version>-intel.zip
+          cd "$RUNNER_TEMP/out-intel"
+          ditto -c -k --keepParent Perch.app "$RUNNER_TEMP/out/Perch-$VERSION-intel.zip"
+          cd "$RUNNER_TEMP/out"
+          shasum -a 256 "Perch-$VERSION-intel.zip" > "Perch-$VERSION-intel.zip.sha256"
 
       - name: Publish the release
         env:
@@ -80,5 +93,6 @@ jobs:
         run: |
           cd "$RUNNER_TEMP/out"
           gh release create "$GITHUB_REF_NAME" "Perch-$VERSION.zip" "Perch-$VERSION.zip.sha256" \
+            "Perch-$VERSION-intel.zip" "Perch-$VERSION-intel.zip.sha256" \
             --repo "$GITHUB_REPOSITORY" --title "Perch $VERSION" --generate-notes \
             --notes "Install or update: \`curl -fsSL https://just-rice.github.io/perch/install.sh | bash\`"

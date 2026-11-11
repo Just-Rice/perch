@@ -17,7 +17,8 @@ if [ -z "$VERSION" ]; then
   VERSION="$(printf '%s\n' "$INDEX" | grep '"lts":"' | grep 'osx-arm64-tar' | head -n 1 | sed 's/.*"version":"\(v[0-9.]*\)".*/\1/' || true)"
   [ -n "$VERSION" ] || { echo "fetch-node: couldn't find the latest LTS release" >&2; exit 1; }
 fi
-NAME="node-$VERSION-darwin-arm64"
+# PERCH_NODE_ARCH=x64 fetches the Intel build (for the Intel version of Perch.app).
+NAME="node-$VERSION-darwin-${PERCH_NODE_ARCH:-arm64}"
 mkdir -p "$DIR"
 if [ ! -x "$DIR/$NAME/bin/node" ]; then
   # The .tar.xz is about half the size of the .tar.gz; macOS's tar reads both.

@@ -39,6 +39,8 @@ public final class H264Encoder {
     public let width: Int
     public let height: Int
     public private(set) var profile: String?
+    /// False when this Mac has no low-latency encoder and the ordinary one is used instead.
+    public private(set) var lowLatency = true
     /// Called on a VideoToolbox thread for each encoded frame.
     public var onFrame: ((EncodedFrame) -> Void)?
     /// Called on a VideoToolbox thread when a frame was dropped by rate control or failed.
@@ -52,10 +54,19 @@ public final class H264Encoder {
         self.height = height
         let spec = [kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true] as CFDictionary
         var s: VTCompressionSession?
-        let st = VTCompressionSessionCreate(allocator: kCFAllocatorDefault, width: Int32(width), height: Int32(height),
+        var st = VTCompressionSessionCreate(allocator: kCFAllocatorDefault, width: Int32(width), height: Int32(height),
                                             codecType: kCMVideoCodecType_H264, encoderSpecification: spec,
                                             imageBufferAttributes: nil, compressedDataAllocator: nil,
                                             outputCallback: nil, refcon: nil, compressionSessionOut: &s)
+        if st != noErr || s == nil {
+            // Some Macs (older Intel ones, virtual machines) have no low-latency encoder: use the ordinary one. It
+            // treats the bitrate as a softer target, which the pacer and bitrate control already allow for.
+            lowLatency = false
+            st = VTCompressionSessionCreate(allocator: kCFAllocatorDefault, width: Int32(width), height: Int32(height),
+                                            codecType: kCMVideoCodecType_H264, encoderSpecification: nil,
+                                            imageBufferAttributes: nil, compressedDataAllocator: nil,
+                                            outputCallback: nil, refcon: nil, compressionSessionOut: &s)
+        }
         guard st == noErr, let session = s else { throw H264EncoderError.createFailed(st) }
         self.session = session
 

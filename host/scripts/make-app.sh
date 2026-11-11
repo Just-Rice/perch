@@ -2,7 +2,7 @@
 # Builds Perch.app from host/app with the Command Line Tools alone (no Xcode):
 #
 #   host/scripts/make-app.sh [--host-bundle <dir>] [--node <path>] [--out <dir>]
-#                            [--identity <sha1> --keychain <path>] [--skip-build]
+#                            [--identity <sha1> --keychain <path>] [--skip-build] [--intel]
 #
 #   --host-bundle <dir>  the bundled Node host (must contain perch-host.mjs); copied to Contents/Resources/host/
 #   --node <path>        a Node.js binary to ship as Contents/Helpers/node. It must be a self-contained build, such
@@ -12,6 +12,7 @@
 #   --identity <sha1>    sign with this code-signing identity instead of ad hoc ("-"), e.g. the self-signed Perch
 #   --keychain <path>    certificate in a throwaway keychain (see sign-with-p12.sh for how one is made)
 #   --skip-build         use the binary already in host/app/.build/release
+#   --intel              build for Intel Macs (x86_64) instead of Apple silicon; give it an Intel Node.js with --node
 #
 # Layout: Contents/MacOS/Perch, Contents/Info.plist, Contents/Resources/{AppIcon.icns, host/},
 # Contents/Helpers/node. Signing goes inside out without --deep (node first, then the app), with the hardened
@@ -27,6 +28,7 @@ NODE=""
 IDENTITY="-"
 KEYCHAIN=""
 BUILD=1
+INTEL=0
 
 die() { printf 'make-app: %s\n' "$*" >&2; exit 1; }
 say() { printf 'make-app: %s\n' "$*"; }
@@ -39,6 +41,7 @@ while [ $# -gt 0 ]; do
     --identity) IDENTITY="${2:?--identity needs a SHA-1}"; shift ;;
     --keychain) KEYCHAIN="${2:?--keychain needs a path}"; shift ;;
     --skip-build) BUILD=0 ;;
+    --intel) INTEL=1 ;;
     -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown option $1 (try --help)" ;;
   esac
@@ -56,11 +59,14 @@ CODE_VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' "$PKG/Sources/
   die "Info.plist says $VERSION but Sources/Perch/Options.swift says $CODE_VERSION; make them the same"
 
 # 1. Build.
+# The Intel version is built into its own folder (.build-intel), so it never replaces the Apple silicon build.
+BUILD_ARGS=(-c release)
+[ "$INTEL" = 1 ] && BUILD_ARGS+=(--triple x86_64-apple-macosx14.0 --scratch-path .build-intel)
 if [ "$BUILD" = 1 ]; then
-  say "building Perch $VERSION (release)…"
-  (cd "$PKG" && swift build -c release)
+  say "building Perch $VERSION (release$([ "$INTEL" = 1 ] && echo ", Intel"))…"
+  (cd "$PKG" && swift build "${BUILD_ARGS[@]}")
 fi
-BIN="$(cd "$PKG" && swift build -c release --show-bin-path)/Perch"
+BIN="$(cd "$PKG" && swift build "${BUILD_ARGS[@]}" --show-bin-path)/Perch"
 [ -x "$BIN" ] || die "no binary at $BIN (build first, or drop --skip-build)"
 
 # 2. Assemble next to the destination, then swap it in, so a failed build never leaves half an app behind.

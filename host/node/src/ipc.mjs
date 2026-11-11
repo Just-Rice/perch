@@ -7,7 +7,7 @@
 import { EventEmitter } from 'node:events';
 
 export const T = Object.freeze({
-  HELLO: 0x01, VIDEO: 0x02, AUDIO: 0x03, EVENT: 0x04, COMMAND: 0x10, INPUT: 0x11,
+  HELLO: 0x01, VIDEO: 0x02, AUDIO: 0x03, EVENT: 0x04, COMMAND: 0x10, INPUT: 0x11, MIC: 0x12,
 });
 const KNOWN = new Set(Object.values(T));
 
@@ -195,5 +195,13 @@ export class HostIpc extends EventEmitter {
   // An input message that has already been validated (src/input.mjs).
   input(msg) {
     return this._write(encodeJson(T.INPUT, msg));
+  }
+
+  // One Opus packet of the viewer's microphone: u16 BE sequence number · the packet.
+  mic(seq, packet) {
+    const p = Buffer.allocUnsafe(2 + packet.length);
+    p.writeUInt16BE(seq & 0xffff, 0);
+    packet.copy(p, 2);
+    return this._write(encodeFrame(T.MIC, p));
   }
 }

@@ -12,6 +12,7 @@ public enum FrameType: UInt8 {
     case event = 0x04    // app → host, JSON
     case command = 0x10  // host → app, JSON
     case input = 0x11    // host → app, JSON input message
+    case mic = 0x12      // host → app, u16 BE sequence number · one Opus packet of the viewer's microphone
 }
 
 public enum IPC {

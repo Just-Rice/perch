@@ -96,8 +96,9 @@ test('pairing a new device, then the Mac on screen with sound, and input reachin
   assert.deepEqual(page.problems(), []);
 });
 
-test('signing in again with the remembered Mac: passkey, then code', async () => {
-  const page = await openPage(stack, `${stack.base}connect.html?${testParams()}`, { name: 'signin' });
+test('signing in again with the remembered Mac: passkey, then code; then talking through the Mac', async () => {
+  // tonemic: a generated tone stands in for the microphone (nobody is here to answer a microphone prompt).
+  const page = await openPage(stack, `${stack.base}connect.html?${testParams()}&tonemic=1`, { name: 'signin' });
   await page.waitScreen('home');
   await page.waitFor(`document.querySelectorAll('#macList button').length > 0`, { what: 'the remembered Mac' });
   await page.click('#macList button');
@@ -107,6 +108,30 @@ test('signing in again with the remembered Mac: passkey, then code', async () =>
   await enterCode(page);
   await assertPlaying(page);
   assert.equal((await app.call('state')).session?.route, 'passkey');
+
+  // Talk through the Mac: the browser's microphone (a generated tone here) reaches the app as Opus packets, only
+  // while it is switched on.
+  assert.equal(app.mic.length, 0);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  assert.equal(await page.eval(`document.getElementById('optMic').hidden`), false, 'the microphone is offered');
+  let since = app.commands.length;
+  await page.click('#optMic');
+  await page.waitFor(`!!document.querySelector('#banners [data-id="mic"]') && document.getElementById('optMic').getAttribute('aria-pressed') === 'true'`,
+    { timeoutMs: 10000, what: 'the microphone-on note' });
+  assert.equal((await app.waitForCommand(c => c.c === 'mic', { since })).on, true);
+  await app.waitFor(() => app.mic.length >= 40, { what: 'microphone packets at the Mac', timeoutMs: 10000 });
+  const seqs = app.mic.slice(0, 40).map(p => p.seq);
+  assert.ok(seqs.every((q, i) => i === 0 || ((q - seqs[i - 1]) & 0xffff) === 1), 'packets arrive in order');
+  assert.ok(app.mic.every(p => p.bytes > 0 && p.bytes < 1500));
+  since = app.commands.length;
+  await page.click('#banners [data-id="mic"] button');   // "Turn off" on the note
+  assert.equal((await app.waitForCommand(c => c.c === 'mic', { since })).on, false);
+  await sleep(300);
+  const settled = app.mic.length;
+  await sleep(500);
+  assert.equal(app.mic.length, settled, 'nothing more once it is off');
+  assert.equal(await page.eval(`!!document.querySelector('#banners [data-id="mic"]')`), false);
   assert.deepEqual(page.problems(), []);
 });
 

@@ -227,6 +227,8 @@ async function runSession(app, target) {
     brokers: env.brokers, iceServers: env.iceServers, log: app.log, onStage: s => ui.stage(s),
   });
   app.conn = conn;
+  // Tests on this computer can't answer a microphone prompt, so they may ask for a generated tone instead.
+  if (env.test && env.params.get('tonemic') === '1') conn.micSource = toneMicrophone;
   let saved = mac || null;
   const ctx = {
     route, rpId: env.rpId, label: app.label, credentialId: mac?.credentialId, password: target.password, pair,
@@ -340,4 +342,15 @@ function startViewer(app, conn, hi, ready, again) {
   };
   viewer.mount();
   conn.goLive();
+}
+
+// A steady tone in place of a real microphone (tests only: see where it is used).
+async function toneMicrophone() {
+  const ctx = new AudioContext();
+  const osc = ctx.createOscillator();
+  const out = ctx.createMediaStreamDestination();
+  osc.frequency.value = 440;
+  osc.connect(out);
+  osc.start();
+  return out.stream;
 }

@@ -116,6 +116,7 @@ export class Viewer {
   ended(m, { canReconnect = true } = {}) {
     if (this.over) return;
     this.over = true;
+    this._micOff();
     this.keys?.releaseAll();
     this._clearTimers();
     this.$('endedTitle').textContent = m.title;
@@ -137,7 +138,8 @@ export class Viewer {
     this._clearTimers();
     clearTimeout(this.hideTimer);
     clearTimeout(this.viewTimer);
-    if (this.session) { this.session.onmessage = this.session.onstream = this.session.onlink = () => {}; }
+    this._micOff();
+    if (this.session) { this.session.onmessage = this.session.onstream = this.session.onlink = this.session.onmicended = () => {}; }
     if (this.video) { this.video.pause(); this.video.srcObject = null; }
     this.setView(IDENTITY);
     this.banners?.clear();
@@ -170,6 +172,13 @@ export class Viewer {
       this._applyStatus(m);
     } else if (m.t === 'windows') {
       this._setWindows(Array.isArray(m.list) ? m.list : []);
+    } else if (m.t === 'mic') {
+      // The Mac couldn't play the microphone (its sound output went away), or stopped it.
+      if (m.on === false && this.micOn) {
+        this._micOff();
+        this.banners.show('mic', { kind: 'warn', icon: 'warn', title: "Your Mac couldn't play your microphone.",
+          body: 'Check the sound output chosen in Perch\'s Setup on the Mac.', dismissible: true });
+      }
     } else if (m.t === 'fit') {
       if (m.ok === false) {
         this.banners.show('fit', { kind: 'warn', icon: 'warn', title: "That window can't be reshaped.",
@@ -226,6 +235,48 @@ export class Viewer {
     if (Array.isArray(st.displays)) this._setDisplays(st.displays, st.display);
     // Which window is being shown, if any. Just after choosing one here the Mac's older notes still say otherwise.
     if ('window' in st && performance.now() >= (this.windowChosenAt ?? -Infinity) + 1500) this._showWindow(st.window ?? null);
+  }
+
+  // --- the microphone: what you say here is played on the Mac ---
+
+  async _toggleMic() {
+    if (this.micOn) {
+      this._micOff();
+      this.session.send({ t: 'mic', on: false });
+      return;
+    }
+    if (this.micBusy) return;
+    this.micBusy = true;
+    this._toggleMenu(false);
+    try {
+      await this.session.startMic();
+    } catch (e) {
+      const refused = e?.name === 'NotAllowedError' || e?.name === 'SecurityError';
+      this.banners.show('mic', { kind: 'warn', icon: 'warn',
+        title: refused ? "The microphone isn't allowed here." : "Couldn't start the microphone.",
+        body: refused ? "Allow the microphone for this site in your browser's settings, then try again."
+          : 'Check that this device has a microphone and nothing else is using it.', dismissible: true });
+      return;
+    } finally {
+      this.micBusy = false;
+    }
+    if (this.over) { this.session.stopMic?.(); return; }
+    this.micOn = true;
+    this.session.send({ t: 'mic', on: true });
+    this.$('optMic').setAttribute('aria-pressed', 'true');
+    this.$('optMic').lastChild.textContent = 'Stop talking through your Mac';
+    this.banners.show('mic', { kind: 'info', icon: 'mic', title: 'Your microphone is on.',
+      body: 'Your Mac is playing what you say.', action: { label: 'Turn off', onClick: () => this._toggleMic() } });
+  }
+
+  // Off on this side (the Mac is told separately, when it doesn't already know).
+  _micOff() {
+    if (!this.micOn) return;
+    this.micOn = false;
+    this.session.stopMic?.();
+    this.$('optMic').setAttribute('aria-pressed', 'false');
+    this.$('optMic').lastChild.textContent = 'Talk through your Mac';
+    this.banners.hide('mic');
   }
 
   // --- one window ---
@@ -439,6 +490,15 @@ export class Viewer {
       this.prefs.set('swapCtrlCmd', e.target.checked);
     });
     on('optZoom', 'click', () => { this.setView(IDENTITY); this._toggleMenu(false); });
+    // Talking through the Mac, where the Mac, the browser and the connection all can.
+    this.micOn = false;
+    $('optMic').hidden = this.guest || !this.session.canMic;
+    on('optMic', 'click', () => this._toggleMic());
+    this.session.onmicended = () => {
+      if (!this.micOn) return;
+      this._micOff();
+      this.session.send({ t: 'mic', on: false });
+    };
     // One window at a time, on Macs that offer it.
     const canWindow = !this.guest && !!this.session.caps?.includes('window');
     $('windowWrap').hidden = !canWindow;

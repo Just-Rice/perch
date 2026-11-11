@@ -10,6 +10,7 @@ sound, the mouse and keyboard. Free and open source, with no account and no serv
 - **Two-step sign-in checked by your Mac:** a passkey, then a 6-digit code. One tap after the first time.
 - **Private:** black out the Mac's own screen while you're connected, and lock it when you leave.
 - **One window at a time:** show a single window instead of the whole desktop, reshaped to fit your phone.
+- **Talk through your Mac:** your microphone, played on the Mac's speakers or (with a loopback device) into a call.
 - **Guest links:** let someone watch your screen for a while, without being able to touch anything.
 - **Strict Wi-Fi:** an optional relay (a free Cloudflare account of your own) for school and office networks.
 - **Apple silicon and Intel Macs.**

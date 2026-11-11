@@ -1,7 +1,8 @@
 // The Mac's side of each WebRTC connection, built on werift. See docs/PROTOCOL.md, "WebRTC".
 //
 // The Mac is always the offerer: one sendonly H.264 video track (nothing else is offered, so the browser can't pick
-// a codec the Mac can't make), one sendonly Opus track, and the three data channels. ICE is not trickled: the offer
+// a codec the Mac can't make), one Opus track (the Mac's sound out; the viewer's microphone back, when they turn it
+// on), and the three data channels. ICE is not trickled: the offer
 // is sent once gathering has finished, so a single rendezvous message carries everything. The exact offer and
 // answer texts are kept because the sign-in proofs are bound to them (site/js/shared/bind.js).
 import { RTCPeerConnection, RTCSctpTransport, Connection, createSelfSignedCertificate, SignatureAlgorithm, HashAlgorithm,
@@ -119,7 +120,13 @@ export class HostPeer {
     this.log = log;
     this.pc = new RTCPeerConnection(peerConfig({ iceServers, iceLoopback, dtlsKeys }));
     this.videoTransceiver = this.pc.addTransceiver('video', { direction: 'sendonly' });
-    this.audioTransceiver = this.pc.addTransceiver('audio', { direction: 'sendonly' });
+    // Both ways: the Mac's sound goes out, and the viewer's microphone can come back on the same line.
+    this.audioTransceiver = this.pc.addTransceiver('audio', { direction: 'sendrecv' });
+    /** Called with each RTP packet of the viewer's microphone (set by the session). */
+    this.onMicRtp = null;
+    this.audioTransceiver.onTrack.subscribe(track => {
+      track.onReceiveRtp.subscribe(rtp => { try { this.onMicRtp?.(rtp); } catch (e) { this.log?.warn(`mic packet: ${e.message}`); } });
+    });
     this.channels = {
       control: this.pc.createDataChannel(CONTROL_CHANNEL, { ordered: true }),
       input: this.pc.createDataChannel(INPUT_CHANNEL, { ordered: true }),

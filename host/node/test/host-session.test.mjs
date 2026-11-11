@@ -511,6 +511,57 @@ test('a changed SDP on the way makes every proof fail, and nothing is sent', asy
 
 // --- during a session ---
 
+test('microphone: packets reach the app only from the signed-in owner while it is switched on', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  const { v, end } = await passkey(t, ctx);
+  assert.equal(end.t, 'ready');
+  assert.ok(v.firstReply.caps.includes('mic'));
+
+  // Off: whatever arrives on the sound line is dropped.
+  await v.sendMicPackets(5);
+  await sleep(200);
+  assert.equal(app.mic.length, 0, 'nothing is passed on while the microphone is off');
+
+  let since = app.commands.length;
+  v.send({ t: 'mic', on: true });
+  const on = await app.waitForCommand(c => c.c === 'mic', { since });
+  assert.deepEqual([on.on, 'device' in on], [true, false], 'the Mac\'s own output unless Setup chose another');
+  await v.sendMicPackets(20, { startSeq: 65530 });
+  for (let i = 0; i < 40 && app.mic.length < 20; i++) await sleep(50);
+  assert.deepEqual(app.mic.map(p => p.seq), Array.from({ length: 20 }, (_, i) => (65530 + i) & 0xffff), 'in order, sequence numbers kept');
+  assert.ok(app.mic.every(p => p.bytes === 60));
+  assert.match((await app.call('state')).activity[0].text, /Microphone on/);
+
+  since = app.commands.length;
+  v.send({ t: 'mic', on: false });
+  assert.equal((await app.waitForCommand(c => c.c === 'mic', { since })).on, false);
+  const before = app.mic.length;
+  await v.sendMicPackets(5);
+  await sleep(200);
+  assert.equal(app.mic.length, before);
+
+  // An output chosen in Setup is passed along; one that has gone switches the viewer's microphone off again.
+  app.event({ e: 'audio-outputs', list: [{ uid: 'BuiltIn', name: 'MacBook Speakers', main: true }, { uid: 'gone', name: 'Old Headphones' }] });
+  await sleep(100);
+  assert.deepEqual((await app.call('state')).audioOutputs.map(d => d.uid), ['BuiltIn', 'gone']);
+  await assert.rejects(app.call('updateSettings', { micOutput: 'nope' }), /sound outputs/);
+  await app.call('updateSettings', { micOutput: 'gone' });
+  since = app.commands.length;
+  v.send({ t: 'mic', on: true });
+  assert.equal((await app.waitForCommand(c => c.c === 'mic', { since })).device, 'gone');
+  const off = await v.next(['mic']);
+  assert.deepEqual([off.on, typeof off.error], [false, 'string']);
+
+  // Ending the session stops playback on the Mac.
+  await app.call('updateSettings', { micOutput: '' });
+  v.send({ t: 'mic', on: true });
+  await sleep(150);
+  since = app.commands.length;
+  v.close();
+  assert.equal((await app.waitForCommand(c => c.c === 'mic', { since })).on, false);
+});
+
 test('one window: the list, choosing it, reshaping it, and going back to the whole screen', async (t) => {
   const ctx = await pairedHost(t);
   const { app } = ctx;

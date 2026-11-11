@@ -142,6 +142,7 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .menu .fine { color: #9aa3b2; margin: 0 0 4px; font-size: .86rem; }
 .menu .btn { background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .16); color: inherit; justify-content: flex-start; }
 .menu .btn[disabled] { opacity: .45; }
+.menu .btn[aria-pressed="true"] { background: rgba(45, 212, 191, .22); border-color: #2dd4bf; color: #5eead4; }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0; font-weight: 600; cursor: pointer; }
 .check input { width: 22px; height: 22px; accent-color: #2dd4bf; }
 .check[hidden], .menu .fine[hidden] { display: none; }

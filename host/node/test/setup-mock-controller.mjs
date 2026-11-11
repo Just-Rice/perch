@@ -28,7 +28,8 @@ export async function createMockController({ version = '0.1.0', test = true, mac
     offline: false,
     permissions: { screen: false, accessibility: false },
     displays: [{ id: 1, name: 'Built-in Display', width: 3024, height: 1964, main: true }],
-    settings: { loginItem: true, keepAwake: true, backupOn: false, idleMinutes: 60, paused: false, quality: DEFAULT_QUALITY },
+    settings: { loginItem: true, keepAwake: true, backupOn: false, idleMinutes: 60, paused: false, quality: DEFAULT_QUALITY, micOutput: '' },
+    audioOutputs: [],
     loginItem: { on: true, status: 'enabled' },
     totp: { secret: null, setAt: null, lastStep: -1 },
     pendingTotp: null,
@@ -77,6 +78,7 @@ export async function createMockController({ version = '0.1.0', test = true, mac
         permissions: { ...s.permissions },
         displays: s.displays.map(d => ({ ...d })),
         settings: { ...s.settings },
+        audioOutputs: s.audioOutputs.map(d => ({ ...d })),
         loginItem: { ...s.loginItem },
         totp: { set: !!s.totp.secret, setAt: s.totp.setAt },
         backup: { set: !!s.backup.record, on: !!s.backup.record && s.settings.backupOn, setAt: s.backup.setAt },
@@ -197,6 +199,7 @@ export async function createMockController({ version = '0.1.0', test = true, mac
         if (!(k in next)) throw new Error(`Unknown setting ${k}.`);
         if (k === 'idleMinutes') { if (!IDLE_CHOICES.includes(v)) throw new Error('Choose one of the listed times.'); }
         else if (k === 'quality') { if (!QUALITIES.includes(v)) throw new Error('Choose Smooth, Balanced or Sharp.'); }
+        else if (k === 'micOutput') { if (typeof v !== 'string') throw new Error('Choose a sound output.'); }
         else if (typeof v !== 'boolean') throw new Error(`Bad value for ${k}.`);
         if (k === 'backupOn' && v && !s.backup.record) throw new Error('Set a backup password first.');
         next[k] = v;

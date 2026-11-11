@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 const MODE = process.env.PERCH_FAKE_MODE || 'synthetic';
 const KEEP = process.env.PERCH_FAKE_KEEP === '1' && MODE !== 'real';
 const APP_LOG = process.env.PERCH_HOME ? path.join(process.env.PERCH_HOME, 'app.log') : null;
-const T = { HELLO: 0x01, VIDEO: 0x02, AUDIO: 0x03, EVENT: 0x04, COMMAND: 0x10, INPUT: 0x11 };
+const T = { HELLO: 0x01, VIDEO: 0x02, AUDIO: 0x03, EVENT: 0x04, COMMAND: 0x10, INPUT: 0x11, MIC: 0x12 };
 const MARKER = `fake-host marker ${process.pid}-${Math.random().toString(36).slice(2)}`;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -672,6 +672,60 @@ async function inputChecks(h) {
   check('input: the session ending releases held keys', rel.ev.source === 'app' && deepEqual(rel.out, [{ type: 'keyUp', keyCode: 8, flags: 0 }]), JSON.stringify(rel));
 }
 
+// The viewer's microphone: Opus packets in, decoded by the app (and, in the real app only, played). The packets used
+// here are the app's own test tone, sent straight back to it. Test runs never make a sound: they decode, count and
+// report a `mic-level` event instead.
+async function micChecks(h) {
+  let since = got.events.length;
+  command('permissions');
+  await event('permissions', { since });
+  const outs = got.events.filter(x => x.ev.e === 'audio-outputs').at(-1)?.ev.list;
+  check('audio-outputs: a list of {uid, name, main} follows HELLO', Array.isArray(outs) && outs.every(o =>
+    typeof o.uid === 'string' && o.uid && typeof o.name === 'string' && typeof o.main === 'boolean'), JSON.stringify(outs)?.slice(0, 200));
+  if (h.synthetic !== true) return;
+  check('audio-outputs: the pretend output', deepEqual(outs, [{ uid: 'test-speakers', name: 'Test Speakers', main: true }]), JSON.stringify(outs));
+
+  const micFrame = (seq, packet) => { const b = Buffer.alloc(2 + packet.length); b.writeUInt16BE(seq & 0xffff, 0); packet.copy(b, 2); return frame(T.MIC, b); };
+  since = got.events.length;
+  command('mic', { on: true });
+  let m = await event('mic', { since });
+  check('mic: refused when nobody is connected', m.on === false && m.ok === false && typeof m.error === 'string', JSON.stringify(m));
+
+  // Collect a second of the app's own tone to use as the "microphone".
+  command('session', { active: true, viewer: 'Chrome on Pixel', route: 'passkey' });
+  since = got.events.length;
+  const aStart = got.audio.length;
+  command('capture', { on: true, maxEdge: 640, fps: 10, kbps: 500, audio: true });
+  await event('capture-started', { since });
+  await until(() => got.audio.length - aStart >= 60, 5000, 'a second of the test tone');
+  const tone = got.audio.slice(aStart + 5, aStart + 60).map(a => Buffer.from(a.data));
+
+  since = got.events.length;
+  command('mic', { on: true, device: 'test-speakers' });
+  m = await event('mic', { since });
+  check('mic on: {on: true, ok: true}', m.on === true && m.ok === true, JSON.stringify(m));
+  tone.forEach((p, i) => sendRaw(micFrame(65520 + i, p)));
+  sendRaw(micFrame(65520 + 3, tone[3])); // a repeat: dropped
+  const level = await event('mic-level', { since, ms: 4000 });
+  check('mic: 50 packets decoded in order across the sequence wrap-around', level.packets === 50 && level.frames >= 49 * 960 && level.frames <= 50 * 960, JSON.stringify(level));
+  check('mic: what the app decoded is the tone that was sent', level.rms > 0.02 && level.rms < 0.5, `rms ${level.rms?.toFixed?.(3)}`);
+  check('mic: nothing was played out loud in a test run', appLog().includes('(not played in a test run)'));
+
+  // Ending the session switches the microphone off without being asked.
+  since = got.events.length;
+  command('capture', { on: false });
+  await event('capture-stopped', { since });
+  command('session', { active: false });
+  await settled();
+  check('session over: the microphone goes off with it', appLog().includes('microphone off (session ended)'));
+  tone.slice(0, 5).forEach((p, i) => sendRaw(micFrame(100 + i, p)));
+  since = got.events.length;
+  command('mic', { on: false });
+  m = await event('mic', { since });
+  check('mic off: {on: false, ok: true}', m.on === false && m.ok === true, JSON.stringify(m));
+  check('no frame the app could not read', got.bad.length === 0, got.bad.join(', '));
+}
+
 // One window: the list, a picture that is just that window, input that lands inside it, reshaping it, and what
 // happens when it goes away. The pretend window in synthetic mode is 800x600 points at (200, 100).
 async function windowChecks(h) {
@@ -914,6 +968,7 @@ async function main() {
   await section('capture', () => captureChecks(h));
   await section('input', () => inputChecks(h));
   await section('windows', () => windowChecks(h));
+  await section('microphone', () => micChecks(h));
   logChecks();
   await finish();
 }

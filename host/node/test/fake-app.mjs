@@ -101,6 +101,7 @@ export class FakeApp extends EventEmitter {
     Object.assign(this, { child, home, ownHome, streamAlways, permissions, displays });
     this.commands = [];
     this.inputs = [];
+    this.mic = [];   // microphone packets the host passed on: {seq, bytes}
     this.log = '';
     this.exited = null;
     this.clockOffset = 0;
@@ -172,6 +173,8 @@ export class FakeApp extends EventEmitter {
       this.inputs.push({ ev, at: Date.now() });
       this.event({ e: 'input-echo', ev });
       this.emit('input', ev);
+    } else if (type === T.MIC) {
+      this.mic.push({ seq: payload.readUInt16BE(0), bytes: payload.length - 2 });
     } else {
       this.emit('ipc-error', new Error(`the host sent frame type ${type}`));
     }
@@ -196,6 +199,11 @@ export class FakeApp extends EventEmitter {
         break;
       case 'keyframe':
         this.player.keyframe();
+        break;
+      case 'mic':
+        // The pretend app can't play on a device called "gone".
+        if (cmd.on && cmd.device === 'gone') this.event({ e: 'mic', on: false, ok: false, error: 'That sound output is not connected.' });
+        else this.event({ e: 'mic', on: !!cmd.on, ok: true });
         break;
       case 'windows':
         this.event({ e: 'windows', list: [{ id: 7, app: 'Test App', title: 'Test Window', width: 800, height: 600 }] });

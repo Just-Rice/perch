@@ -24,6 +24,19 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
     private var lastHostStatus: Int32?
 
     private let curtain = Curtain()
+    /// Plays the viewer's microphone. Made on first use: only the real app ever makes a sound.
+    private lazy var mic: MicPlayer = {
+        let m = MicPlayer(dryRun: !systemChangesAllowed)
+        m.onFailure = { [weak self] why in
+            Log.shared.warn("microphone playback stopped: \(why)")
+            self?.sendEvent(["e": "mic", "on": false, "ok": false, "error": why])
+        }
+        m.onLevel = { [weak self] s in
+            self?.sendEvent(["e": "mic-level", "packets": s.packets, "frames": s.frames, "late": s.late, "rms": s.rms])
+        }
+        return m
+    }()
+    private var micOn = false
     private var sessionViewer: String?
     private var sessionActive = false
     private var shuttingDown = false
@@ -82,6 +95,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         watch.onLock = { [weak self] locked in self?.sendEvent(["e": "lock", "locked": locked]) }
         watch.onDisplays = { [weak self] d in self?.sendEvent(["e": "displays", "displays": d.map(\.json)]) }
         watch.start()
+        if !options.synthetic { AudioOutputs.watch { [weak self] in self?.sendAudioOutputs() } }
 
         if !options.noUI {
             let m = StatusMenu()
@@ -166,6 +180,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         _ = send(.hello, IPC.json(hello))
         // The protocol's HELLO has no lock state, so say it straight away.
         sendEvent(["e": "lock", "locked": LockState.isLocked])
+        sendAudioOutputs()
     }
 
     private func hostCouldNotStart(_ message: String) {
@@ -204,6 +219,8 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         switch FrameType(rawValue: type) {
         case .input?:
             input.handle(payload)
+        case .mic?:
+            mic.push(payload)
         case .command?:
             DispatchQueue.main.async { [weak self] in self?.handleCommand(payload) }
         default:
@@ -230,6 +247,8 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
             case false?: capture.stop(reason: "requested")
             case nil: warn("capture without on")
             }
+        case "mic":
+            setMic(JSONValue.bool(cmd["on"]) == true, device: JSONValue.string(cmd["device"]))
         case "windows":
             sendEvent(["e": "windows", "list": Windows.list(synthetic: options.synthetic).map(\.json)])
         case "window-fit":
@@ -283,6 +302,41 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
     }
 
     /// A warning in the log, also sent to the host so it shows up in its log next to whatever caused it.
+    /// Starts or stops playing the viewer's microphone on this Mac. Only while a session is on.
+    private func setMic(_ on: Bool, device: String?) {
+        guard on else {
+            if micOn {
+                micOn = false
+                mic.stop()
+                Log.shared.info("microphone off")
+            }
+            sendEvent(["e": "mic", "on": false, "ok": true])
+            return
+        }
+        guard sessionActive else {
+            sendEvent(["e": "mic", "on": false, "ok": false, "error": "Nobody is connected."])
+            return
+        }
+        do {
+            try mic.start(deviceUID: device)
+            micOn = true
+            Log.shared.info("microphone on\(device.map { ", playing on \($0)" } ?? "")\(systemChangesAllowed ? "" : " (not played in a test run)")")
+            sendEvent(["e": "mic", "on": true, "ok": true])
+        } catch {
+            micOn = false
+            Log.shared.warn("could not play the microphone: \(error)")
+            sendEvent(["e": "mic", "on": false, "ok": false, "error": "\(error)"])
+        }
+    }
+
+    /// The Mac's sound outputs, for the picker in Setup. Synthetic runs list one pretend output, the same everywhere.
+    private func sendAudioOutputs() {
+        let list: [[String: Any]] = options.synthetic
+            ? [["uid": "test-speakers", "name": "Test Speakers", "main": true]]
+            : AudioOutputs.list().map(\.json)
+        sendEvent(["e": "audio-outputs", "list": list])
+    }
+
     // Accessibility calls wait on the other app, so they stay off the main thread.
     private let windowQueue = DispatchQueue(label: "perch.windows", qos: .userInitiated)
 
@@ -378,6 +432,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
     private func endSession() {
         curtain.lower()
         input.releaseAll()
+        if micOn { micOn = false; mic.stop(); Log.shared.info("microphone off (session ended)") }
         guard sessionActive else { return }
         sessionActive = false
         sessionViewer = nil

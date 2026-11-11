@@ -8,7 +8,7 @@ export function openInBlankTab(target = new URL('connect.html', location.href).h
   const tab = window.open('about:blank', '_blank');
   if (!tab) return { ok: false, reason: 'blocked' };
   const allow = 'fullscreen; autoplay; publickey-credentials-get; publickey-credentials-create; ' +
-    'clipboard-read; clipboard-write; keyboard-map; screen-wake-lock';
+    'clipboard-read; clipboard-write; keyboard-map; screen-wake-lock; microphone';
   try {
     const doc = tab.document;
     const head = doc.head || doc.documentElement.appendChild(doc.createElement('head'));

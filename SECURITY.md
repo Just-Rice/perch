@@ -45,6 +45,9 @@ volunteer project, so please allow a few days.
 - **Guest links.** A guest link lets anyone who has it watch your screen and hear its sound until it runs out or you
   stop it. They can never control the Mac, and the link says nothing about how to reach the Mac otherwise. Treat it
   like a live window onto your screen: send it only to the person you mean, and close private things first.
+- **Your microphone on the Mac.** A signed-in owner (never a guest) can have their microphone played on the Mac.
+  That makes sound at the Mac, on the output chosen in Setup; it gives the viewer nothing new to see or hear. The
+  Mac only accepts the sound while the viewer has switched it on, and limits how much it will take.
 - **Sites you add yourself.** In Setup you can let your Mac accept sign-ins from other sites, for running your own
   copy of the Perch website. Whoever controls a site on that list can see what you type there and control the Mac
   while you're signed in, so add only a site you run or fully trust. Never add a web proxy or "unblocker": it sits

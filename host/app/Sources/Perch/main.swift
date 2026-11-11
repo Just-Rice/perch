@@ -25,6 +25,9 @@ if let dir = options.renderMenuIcons {
 if options.curtainCheck {
     exit(CurtainCheck.run())
 }
+if options.micCheck {
+    exit(MicCheck.run())
+}
 if options.unregisterLoginItem {
     // Only Perch.app itself can be a login item, so this does something only when run from inside the bundle.
     let e = LoginItem.set(false, allowed: true, bundled: Bundle.main.bundlePath.hasSuffix(".app"))

@@ -7,7 +7,7 @@
 // offer before this viewer sees it, `tamper.answer` changes the answer after this viewer sent it. Either way the two
 // sides end up binding over different texts, and every sign-in proof must fail.
 import {
-  RTCPeerConnection, useH264, useOPUS, useNACK, usePLI, useREMB, useSdesMid, useAbsSendTime,
+  RTCPeerConnection, useH264, useOPUS, useNACK, usePLI, useREMB, useSdesMid, useAbsSendTime, RtpHeader, RtpPacket,
 } from 'werift';
 import { guestTopic, guestEnvelopeKey,
   Rendezvous, hostTopic, nameTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey,
@@ -87,6 +87,9 @@ export class SoftViewer {
     this.offerSdp = tamper.offer ? tamper.offer(first.sdp) : first.sdp;
     this.pc = this._peer();
     await this.pc.setRemoteDescription({ type: 'offer', sdp: this.offerSdp });
+    // As the website does: be ready to send a microphone back on the sound line.
+    this.audioTransceiver = this.pc.getTransceivers().find(t => t.kind === 'audio');
+    if (/^a=sendrecv/m.test(this.offerSdp.split(/^m=/m).find(m => m.startsWith('audio')) ?? '')) this.audioTransceiver?.setDirection('sendrecv');
     await this.pc.setLocalDescription(await this.pc.createAnswer());
     await waitForGathering(this.pc, 3000);
     this.answerSdp = this.pc.localDescription.sdp;
@@ -184,6 +187,14 @@ export class SoftViewer {
       }, timeoutMs);
       this.waiters.push(w);
     });
+  }
+
+  // `count` pretend microphone packets (any bytes will do: the stand-in app doesn't decode them).
+  async sendMicPackets(count, { size = 60, startSeq = 1000 } = {}) {
+    for (let i = 0; i < count; i++) {
+      const header = new RtpHeader({ payloadType: 111, sequenceNumber: (startSeq + i) & 0xffff, timestamp: i * 960, marker: i === 0, ssrc: 0 });
+      await this.audioTransceiver.sender.sendRtp(new RtpPacket(header, Buffer.alloc(size, 0x40 + (i & 0xf))));
+    }
   }
 
   send(obj) { this.channels.control.send(JSON.stringify(obj)); }

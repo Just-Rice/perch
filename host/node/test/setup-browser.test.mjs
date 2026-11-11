@@ -560,6 +560,20 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     }
     assert.equal(mock.raw.settings.idleMinutes, 120);
 
+    // Where "talk through this Mac" plays: hidden until the app has listed the Mac's sound outputs.
+    assert.equal(await evaluate(page, `document.getElementById('micOutputRow').hidden`), true);
+    mock.raw.audioOutputs = [{ uid: 'BuiltIn', name: 'MacBook Air Speakers', main: true }, { uid: 'BlackHole2ch', name: 'BlackHole 2ch', main: false }];
+    mock.changed();
+    await waitFor(page, `!document.getElementById('micOutputRow').hidden && document.getElementById('setMicOutput').options.length === 3`);
+    assert.deepEqual(await evaluate(page, `[...document.getElementById('setMicOutput').options].map(o => o.textContent)`),
+      ['Whatever this Mac is playing sound on', 'MacBook Air Speakers', 'BlackHole 2ch']);
+    await evaluate(page, `(() => { const s = document.getElementById('setMicOutput'); s.focus(); s.value = 'BlackHole2ch'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await until(() => lastPatch()?.micOutput === 'BlackHole2ch', 'the sound output saved');
+    // Unplugged later: the choice still shows, marked as not connected.
+    mock.raw.audioOutputs = [mock.raw.audioOutputs[0]];
+    mock.changed();
+    await waitFor(page, `[...document.getElementById('setMicOutput').options].some(o => o.textContent === 'An output that is not connected' && o.selected)`);
+
     await click(page, 'label.choice:has(input[value=sharp])');
     await until(() => lastPatch()?.quality === 'sharp', 'quality sharp');
     assert.equal(await evaluate(page, `document.querySelector('#setQuality input[value=sharp]').checked`), true);

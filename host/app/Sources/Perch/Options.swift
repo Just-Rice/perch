@@ -23,6 +23,7 @@ struct Options {
     var unregisterLoginItem = false
     /// Check on this Mac that the privacy curtain is left out of the picture, then exit.
     var curtainCheck = false
+    var micCheck = false
     var help = false
     var ignored: [String] = []
 
@@ -42,6 +43,7 @@ struct Options {
       --render-menu-icons <d> write the menu bar icons to <d> as PNGs and exit
       --unregister-login-item stop Perch starting at login and exit (used by the uninstaller)
       --curtain-check         check that the privacy curtain is hidden from viewers (shows a small square briefly)
+      --mic-check             check that a viewer's microphone can be played here (plays one second of silence)
     """
 
     static func parse(_ args: [String]) -> Options {
@@ -65,6 +67,7 @@ struct Options {
             case "--render-menu-icons": o.renderMenuIcons = value()
             case "--unregister-login-item": o.unregisterLoginItem = true
             case "--curtain-check": o.curtainCheck = true
+            case "--mic-check": o.micCheck = true
             case "-h", "--help": o.help = true
             // Launch Services and debuggers sometimes add their own arguments; never fail because of them.
             default: o.ignored.append(args[i])

@@ -11,7 +11,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const lines = (sdp, re) => sdp.split(/\r?\n/).filter(l => re.test(l));
 const section = (sdp, kind) => sdp.split(/\r?\nm=/).find(s => s.startsWith(kind)) ?? '';
 
-test('the offer: H.264 only with nack, pli and REMB; Opus; sendonly; one data section; host candidates only', async () => {
+test('the offer: H.264 only with nack, pli and REMB, sendonly; Opus both ways (for the microphone); one data section; host candidates only', async () => {
   const peer = new HostPeer({ iceServers: [], iceLoopback: true });
   try {
     const sdp = await peer.createOffer();
@@ -28,7 +28,7 @@ test('the offer: H.264 only with nack, pli and REMB; Opus; sendonly; one data se
     const audio = section(sdp, 'audio');
     assert.match(audio, /a=rtpmap:\d+ OPUS\/48000\/2/i);
     assert.match(audio, /minptime=10;useinbandfec=1/);
-    assert.match(audio, /a=sendonly/);
+    assert.match(audio, /a=sendrecv/);   // the Mac's sound out, the viewer's microphone back
     assert.match(sdp, /m=application 9 UDP\/DTLS\/SCTP webrtc-datachannel/);
     const cands = lines(sdp, /^a=candidate:/);
     assert.ok(cands.length > 0);

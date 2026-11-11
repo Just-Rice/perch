@@ -27,6 +27,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   paused: false,
   lockOnDisconnect: false,   // lock the Mac when a viewer's session ends
   curtain: false,            // black out the Mac's own screen while a viewer is connected
+  micOutput: '',             // where a viewer's microphone is played: '' = the Mac's current output, or a device UID
   quality: DEFAULT_QUALITY,
 });
 

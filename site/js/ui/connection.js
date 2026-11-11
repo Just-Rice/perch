@@ -60,6 +60,10 @@ export class Connection {
     this.waiters = [];       // {types, resolve, reject, timer}
     this.onmessage = () => {};
     this.onstream = () => {};
+    this.onmicended = () => {}; // the microphone stopped by itself (unplugged, permission taken away)
+    this.audioLine = null;
+    this.micTrack = null;
+    this.micSource = null;      // tests: a function giving a MediaStream to use instead of the real microphone
     this.onclose = () => {};   // (PerchError) once, when the connection ends for any reason but close()
     this.onlink = () => {};    // ('connected' | 'disconnected')
     let rejectFailed;
@@ -177,6 +181,40 @@ export class Connection {
   async getStats() { return this.pc ? this.pc.getStats() : new Map(); }
 
   // Ends the connection from this side. With bye, tells the Mac first so it can tidy up straight away.
+  // --- the viewer's microphone, played on the Mac ---
+
+  get canMic() { return !!this.audioLine && !!navigator.mediaDevices?.getUserMedia && !!this.caps?.includes('mic'); }
+
+  // Asks the browser for the microphone and starts sending it. Throws what getUserMedia throws (NotAllowedError
+  // when the viewer or the browser says no).
+  async startMic() {
+    if (!this.canMic) throw new Error('This connection has no microphone line.');
+    if (this.micTrack) return;
+    const stream = await (this.micSource ?? (() => navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }, video: false,
+    })))();
+    const track = stream.getAudioTracks()[0];
+    if (!track) throw new Error('The browser gave no microphone.');
+    try {
+      await this.audioLine.sender.replaceTrack(track);
+    } catch (e) {
+      track.stop();
+      throw e;
+    }
+    this.micTrack = track;
+    // Unplugged, or the permission was taken away mid-call.
+    track.onended = () => { if (this.micTrack === track) { this.stopMic(); try { this.onmicended(); } catch {} } };
+  }
+
+  stopMic() {
+    const track = this.micTrack;
+    this.micTrack = null;
+    if (!track) return;
+    track.onended = null;
+    try { this.audioLine?.sender.replaceTrack(null)?.catch?.(() => {}); } catch {}
+    try { track.stop(); } catch {}
+  }
+
   async close({ bye = true } = {}) {
     if (this.closed) return;
     const ctl = this.channels[CONTROL_CHANNEL];
@@ -216,6 +254,12 @@ export class Connection {
     pc.onconnectionstatechange = () => this._linkState(pc.connectionState);
     try {
       await pc.setRemoteDescription({ type: 'offer', sdp: this.offerSdp });
+      // Be ready to send a microphone back on the sound line. Nothing is sent until the viewer turns it on
+      // (startMic); with a Mac that only sends sound, the answer simply stays receive-only.
+      try {
+        this.audioLine = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio') ?? null;
+        if (this.audioLine) this.audioLine.direction = 'sendrecv';
+      } catch { this.audioLine = null; }
       await pc.setLocalDescription(await pc.createAnswer());
     } catch (e) {
       throw this._fail(new PerchError('webrtc', { message: e.message }));
@@ -315,6 +359,7 @@ export class Connection {
     try { this.rdv?.close(); } catch {}
     this.rdv = null;
     for (const ch of Object.values(this.channels)) { ch.onmessage = ch.onclose = null; try { ch.close(); } catch {} }
+    try { this.stopMic(); } catch {}
     try { this.pc?.close(); } catch {}
     if (err.kind !== 'cancelled') {
       try { this.onclose(err, byeMsg); } catch (e) { this.log(e); }

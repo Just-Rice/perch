@@ -30,6 +30,8 @@ let package = Package(
                 .linkedFramework("CoreVideo"),
                 .linkedFramework("AppKit"),
                 .linkedFramework("IOKit"), // waking a sleeping display before capturing it
+                .linkedFramework("AVFoundation"), // playing the viewer's microphone
+                .linkedFramework("CoreAudio"),
             ]
         ),
         // The app itself: menu bar, host process, permissions, power, notifications, login item, self-test.

@@ -8,6 +8,7 @@ export function settings(ctx) {
   const error = $('settingsError');
   const saved = $('settingsSaved');
   const idle = $('setIdle');
+  const micOutput = $('setMicOutput');
   const pending = new Set(); // settings being saved right now: live updates don't overwrite them meanwhile
   let savedTimer = null;
 
@@ -40,6 +41,10 @@ export function settings(ctx) {
     const before = String(ctx.state?.settings?.idleMinutes ?? '');
     save('idleMinutes', Number(idle.value), () => { idle.value = before; });
   });
+  micOutput.addEventListener('change', () => {
+    const before = ctx.state?.settings?.micOutput ?? '';
+    save('micOutput', micOutput.value, () => { micOutput.value = before; });
+  });
   for (const radio of document.querySelectorAll('#setQuality input[type=radio]')) {
     radio.addEventListener('change', () => {
       if (!radio.checked) return;
@@ -62,6 +67,19 @@ export function settings(ctx) {
       if (![...idle.options].some(o => o.value === v)) idle.append(new Option(IDLE_LABEL(s.idleMinutes), v));
       idle.value = v;
     }
+    // The Mac's sound outputs, for "talk through this Mac". Only rebuilt when the list really changed, so an open
+    // menu isn't yanked away by a live update.
+    const outs = Array.isArray(st.audioOutputs) ? st.audioOutputs : [];
+    $('micOutputRow').hidden = outs.length === 0;
+    const chosen = typeof s.micOutput === 'string' ? s.micOutput : '';
+    const want = outs.map(o => [o.uid, o.name]);
+    // One that was chosen and has since been unplugged still shows, marked as such.
+    if (chosen && !outs.some(o => o.uid === chosen)) want.push([chosen, 'An output that is not connected']);
+    const shown = [...micOutput.options].slice(1).map(o => `${o.value}\t${o.textContent}`).join('\n');
+    if (want.map(([uid, name]) => `${uid}\t${name}`).join('\n') !== shown) {
+      micOutput.replaceChildren(micOutput.options[0], ...want.map(([uid, name]) => new Option(name, uid)));
+    }
+    if (!pending.has('micOutput')) micOutput.value = chosen;
     if (!pending.has('quality')) {
       for (const r of document.querySelectorAll('#setQuality input[type=radio]')) r.checked = r.value === s.quality;
     }

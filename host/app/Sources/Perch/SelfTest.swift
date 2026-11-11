@@ -23,6 +23,7 @@ enum SelfTest {
         annexBConversion()
         h264Encode()
         opus()
+        micPlayer()
         inputPlanning()
         cgEvents()
         sizing()
@@ -65,7 +66,7 @@ enum SelfTest {
 
     private static func ipcFraming() {
         var rng = SystemRandomNumberGenerator()
-        let types: [FrameType] = [.hello, .video, .audio, .event, .command, .input]
+        let types: [FrameType] = [.hello, .video, .audio, .event, .command, .input, .mic]
         var sent: [(UInt8, Data)] = []
         var stream = Data()
         for i in 0..<200 {
@@ -176,6 +177,36 @@ enum SelfTest {
     }
 
     // MARK: Opus
+
+    /// The viewer's microphone: packets in order are decoded and counted, late and repeated ones are dropped, and a
+    /// dry run (every test) never opens a sound output.
+    private static func micPlayer() {
+        guard let enc = try? OpusEncoder() else { check("mic: encoder for the test", false); return }
+        let tone = ToneGenerator(frequency: 440, amplitude: 0.2)
+        var packets: [Data] = []
+        for _ in 0..<50 { packets += enc.encode(tone.next(frames: 960)) }
+        func frame(_ seq: UInt16, _ packet: Data) -> Data { Data([UInt8(seq >> 8), UInt8(seq & 0xff)]) + packet }
+        let player = MicPlayer(dryRun: true)
+        player.push(frame(1, packets[0]))
+        check("mic: nothing is taken before it is switched on", player.current.packets == 0)
+        do { try player.start(deviceUID: "no-such-output") } catch { check("mic: a dry run starts without any output", false, "\(error)"); return }
+        // Sequence numbers that wrap round, as they do on a long call.
+        let first: UInt16 = 65_500
+        for (i, p) in packets.enumerated() { player.push(frame(first &+ UInt16(i), p)) }
+        player.push(frame(first &+ 10, packets[10]))   // a repeat
+        player.push(frame(first &+ 48, packets[48]))   // late
+        player.push(Data([0, 1]))                      // no packet at all
+        let s = player.current
+        check("mic: 50 packets in order are decoded, wrap-around included", s.packets == 50 && s.frames >= 49 * 960 && s.frames <= 50 * 960, "\(s)")
+        check("mic: repeated and late packets are dropped", s.late == 2, "\(s.late)")
+        check("mic: what was decoded is the tone", abs(s.rms - 0.1414) < 0.04, String(format: "rms %.3f", s.rms))
+        player.stop()
+        player.push(frame(first &+ 60, packets[1]))
+        check("mic: off means off", !player.isOn && player.current.packets == 50)
+        let outs = AudioOutputs.list()
+        check("sound outputs: each has an id and a name, at most one is the Mac's own choice",
+              outs.allSatisfy { !$0.uid.isEmpty && !$0.name.isEmpty } && outs.filter(\.isDefault).count <= 1, "\(outs.map(\.name))")
+    }
 
     private static func opus() {
         let enc: OpusEncoder, dec: OpusDecoder

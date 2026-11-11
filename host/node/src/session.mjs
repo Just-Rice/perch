@@ -50,6 +50,7 @@ export class Session {
     this.controlRate = new RateLimiter(CONTROL_RATE);
     this.inputRate = new RateLimiter(INPUT_RATE);
     this.pointerRate = new RateLimiter(POINTER_RATE);
+    this.micRate = new RateLimiter({ rate: 120, burst: 120 });
     this.stats = { inputDroppedBeforeSignIn: 0, inputForwarded: 0, inputRejected: 0 };
     this.timers = new Set();
     this.subs = [];
@@ -76,6 +77,7 @@ export class Session {
     this.subs.push(control.onMessage.subscribe(d => this._onControl(d)));
     this.subs.push(input.onMessage.subscribe(d => this._onInput(d, 'input')));
     this.subs.push(pointer.onMessage.subscribe(d => this._onInput(d, 'pointer')));
+    peer.onMicRtp = rtp => this._onMic(rtp);
     const unwatch = peer.onConnectionState(s => {
       if (s === 'failed' || s === 'closed') this.end('disconnected', { sendBye: false });
     });
@@ -424,6 +426,12 @@ export class Session {
         this.hub.captureChanged(this);
         return;
       }
+      case 'mic':
+        // The viewer turned their microphone on or off: the Mac plays what they say.
+        if (typeof msg.on !== 'boolean' || msg.on === !!this.micOn) return;
+        this.micOn = msg.on;
+        this.hub.micChanged(this, msg.on);
+        return;
       case 'fit':
         // Reshape the window being shown to this viewer's screen (w by h, any unit: only the shape matters).
         if (this.window == null || !(msg.w >= 1 && msg.w <= 20000) || !(msg.h >= 1 && msg.h <= 20000)) return;
@@ -435,6 +443,15 @@ export class Session {
       default:
         return; // newer viewers may send things this host doesn't know; ignore them
     }
+  }
+
+  // The viewer's microphone, one Opus packet at a time. Only from the signed-in owner, only while they have it on,
+  // and never more than a voice needs (50 packets a second is normal).
+  _onMic(rtp) {
+    if (this.state !== 'ready' || this.guest || !this.micOn) return;
+    const payload = rtp?.payload;
+    if (!payload || payload.length === 0 || payload.length > 1500 || !this.micRate.take()) { this.stats.micDropped = (this.stats.micDropped ?? 0) + 1; return; }
+    this.hub.mic(this, rtp.header.sequenceNumber, payload);
   }
 
   _onInput(data, channel) {
@@ -467,6 +484,7 @@ export class Session {
 
   sendWindows(list) { if (this.state === 'ready' && !this.guest) this._send({ t: 'windows', list }); }
   sendFit(ok) { if (this.state === 'ready' && !this.guest) this._send({ t: 'fit', ok: !!ok }); }
+  sendMic(on, error) { if (this.state === 'ready' && !this.guest) this._send({ t: 'mic', on: !!on, ...(error ? { error } : {}) }); }
 
   sendError(code, message) {
     if (this.state === 'ready') this._send({ t: 'error', code, message });

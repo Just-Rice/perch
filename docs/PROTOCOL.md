@@ -90,7 +90,8 @@ The Mac is the offerer. Its offer has:
 
 - a video transceiver, `sendonly`, **H.264 only**: `profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1`,
   RTCP feedback `nack`, `nack pli`, `goog-remb`;
-- an audio transceiver, `sendonly`, Opus 48 kHz stereo (`minptime=10;useinbandfec=1`);
+- an audio transceiver, `sendrecv`, Opus 48 kHz stereo (`minptime=10;useinbandfec=1`): the Mac's sound out, and
+  the viewer's microphone back when they turn it on (see `mic` below);
 - three data channels it creates, all JSON text: `control` (ordered, reliable), `input` (ordered, reliable: buttons,
   keys, scrolling, text) and `pointer` (unordered, `maxRetransmits: 0`: pointer moves only, so a lost or late move
   never holds up anything and is simply superseded by the next one).
@@ -237,6 +238,13 @@ viewer sees is always what their clicks reach. Pointer positions stay 0..1 acros
 to the front when chosen. When it closes, is minimised or leaves the desktop, the Mac goes back to the whole display
 (`status.window` becomes `null`). Choosing another display forgets the window.
 
+For Macs with `mic` in `caps` (never for guests): the sound line of the offer is `sendrecv`, and a viewer that
+answers `sendrecv` may send its microphone back on it as Opus. `{t:"mic", on}` says the viewer has turned it on or
+off; only while it is on does the Mac pass the packets to the app, which plays them on the sound output chosen in
+Setup (`settings.micOutput`, a device UID, or `""` for the Mac's current output). `{t:"mic", on: false, error?}`
+from the Mac means it could not play it (the output is gone) and the viewer should stop sending. What Perch plays is
+left out of the sound it sends, so the viewer doesn't hear themselves.
+
 Mac → viewer: `{t:"pong", n, ts}`, `{t:"status", locked, link: "good"|"slow", kbps, fps, width, height, input, window}`
 (`window`: the id of the one window being shown, or `null`; plus `displays` and `display` when the Mac's displays
 change),
@@ -276,8 +284,11 @@ stdout (host → app). stderr is the host's log. Every frame is `[u32 big-endian
 | `0x04` EVENT | app → host | JSON event (below) |
 | `0x10` COMMAND | host → app | JSON command (below) |
 | `0x11` INPUT | host → app | JSON input message from the table above, already validated |
+| `0x12` MIC | host → app | `u16 BE sequence number` · one Opus packet of the viewer's microphone |
 
 Events (`e`): `permissions {screen, accessibility}`, `displays {displays}`, `capture-started {display, width, height, fps, window?}`,
+`audio-outputs {list: [{uid, name, main}]}` (after HELLO and whenever the Mac's sound outputs change),
+`mic {on, ok, error?}`, `mic-level {packets, frames, late, rms}` (test runs only, which decode but never play),
 `windows {list}`, `window-gone {window}` (the window being shown left the screen; the app is already showing the
 whole display), `window-fit {window, ok, error?}`,
 `capture-stopped {reason}`, `capture-error {code, message}`, `lock {locked}`, `login-item {on, status, error?}`,
@@ -287,7 +298,8 @@ login-item-on | login-item-off | check-updates | update | quit`), `input-echo {e
 
 Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?}` (`window`: show only the part of the
 display that window covers, following it), `windows {}` (asks for a `windows` event), `window-fit {window, w, h}`
-(reshape it to `w:h` through Accessibility; never done in test runs), `keyframe {}`, `bitrate {kbps}`,
+(reshape it to `w:h` through Accessibility; never done in test runs), `mic {on, device?}` (start or stop playing
+MIC frames; only during a session), `keyframe {}`, `bitrate {kbps}`,
 `session {active, viewer?, route?, curtain?}` (menu light, notification, keeps the display awake while active;
 `curtain: true` blacks out the Mac's own displays with windows left out of the capture, lifted by three Esc presses
 at the Mac), `lock {}` (lock the screen; sent when a session ends and the owner chose "lock when a session ends"),

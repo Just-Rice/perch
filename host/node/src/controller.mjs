@@ -34,6 +34,13 @@ function cleanDisplays(list) {
   }));
 }
 
+function cleanOutputs(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(d => d && typeof d.uid === 'string' && d.uid && d.uid.length <= 200).slice(0, 32).map(d => ({
+    uid: d.uid, name: typeof d.name === 'string' ? d.name.slice(0, 80) : d.uid, main: !!d.main,
+  }));
+}
+
 // What the app says about the windows on screen, trimmed to what a viewer's picker needs.
 function cleanWindows(list) {
   if (!Array.isArray(list)) return [];
@@ -67,6 +74,7 @@ export class Controller {
     this.appInfo = null;
     this.permissions = { screen: false, accessibility: false };
     this.displays = [];
+    this.audioOutputs = [];    // the Mac's sound outputs, as the app lists them
     this.loginItemState = { on: false, status: 'unknown' };
     this.locked = false;
     this.capture = null;
@@ -148,6 +156,7 @@ export class Controller {
       totp: { set: !!s.config.totp.set, setAt: s.config.totp.setAt ?? null },
       backup: { set: !!s.config.backup.record, on: !!s.settings.backupOn, setAt: s.config.backup.setAt ?? null },
       relay: this.relay.state(),
+      audioOutputs: this.audioOutputs.map(d => ({ ...d })),
       devices: s.devices.map(d => ({ ...publicDevice(d), site: this.auth.deviceRpId(d) })),
       sites: this.auth.sites().map(x => ({ origin: x.origin, url: x.url, builtIn: !!x.builtIn, addedAt: x.addedAt ?? null })),
       pairing: this.auth.pairingInfo(),
@@ -227,6 +236,18 @@ export class Controller {
         break;
       case 'window-fit':
         this.active?.sendFit(ev.ok === true);
+        break;
+      case 'audio-outputs':
+        // Where the viewer's voice can be played: the Mac's sound outputs, for the picker in Setup.
+        this.audioOutputs = cleanOutputs(ev.list);
+        this._changed();
+        break;
+      case 'mic':
+        // The app couldn't play the microphone (no such output any more): tell the viewer it is off.
+        if (ev.ok === false && this.active?.micOn) {
+          this.active.micOn = false;
+          this.active.sendMic(false, typeof ev.error === 'string' ? ev.error.slice(0, 200) : undefined);
+        }
         break;
       case 'capture-stopped':
         this.capture = null;
@@ -374,6 +395,18 @@ export class Controller {
     this.app.command('windows', {});
   }
 
+  // The owner's viewer turned its microphone on or off. The app plays it on the output chosen in Setup.
+  micChanged(session, on) {
+    if (session !== this.active) return;
+    this.app.command('mic', { on, ...(this.store.settings.micOutput ? { device: this.store.settings.micOutput } : {}) });
+    this.store.activity('session', on ? `Microphone on: ${session.label}` : 'Microphone off');
+    this._changed();
+  }
+
+  mic(session, seq, packet) {
+    if (session === this.active) this.app.mic(seq, packet);
+  }
+
   fitWindow(session, w, h) {
     if (session === this.active && session.window) this.app.command('window-fit', { window: session.window, w, h });
   }
@@ -444,6 +477,8 @@ export class Controller {
 
   sessionEnded(session, reason, wasReady) {
     this.sessions.delete(session);
+    // Whoever was talking through the Mac has gone: stop playing.
+    if (session.micOn) { session.micOn = false; this.app.command('mic', { on: false }); }
     if (this.guests.delete(session)) {
       this.store.activity('guest', `A guest stopped watching: ${session.label}`);
       if (!this.active && this.guests.size === 0) {
@@ -636,7 +671,7 @@ export class Controller {
   relayIceServers() { return this.relay.iceServers(); }
 
   // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
-  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window']; }
+  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic']; }
 
   async relaySet(keyId, apiToken) {
     const replacing = this.relay.configured;
@@ -676,6 +711,10 @@ export class Controller {
           break;
         case 'quality':
           if (typeof v !== 'string' || !Object.hasOwn(QUALITY, v)) throw new Error(`Quality must be one of ${Object.keys(QUALITY).join(', ')}.`);
+          break;
+        case 'micOutput':
+          // '' is the Mac's own current output; otherwise one of the outputs the app listed.
+          if (typeof v !== 'string' || (v !== '' && !this.audioOutputs.some(d => d.uid === v))) throw new Error('Choose one of this Mac\'s sound outputs.');
           break;
         default:
           throw new Error(`There is no setting called ${k}.`);

@@ -6,6 +6,9 @@
 body.connect { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
 body.connect .app { flex: 1; display: flex; flex-direction: column; }
 body.connect main { flex: 1; padding-bottom: 32px; }
+/* The sign-in steps sit in one centred column, like a sign-in page, instead of hugging the left on a wide screen. */
+body.connect main.narrow { width: min(480px, 100% - 32px); }
+@media (min-width: 700px) { body.connect main.narrow { padding-top: 4vh; } }
 body.viewing { overflow: hidden; }
 
 /* Starting up, and the "can't run inside another website" refusal */
@@ -17,36 +20,45 @@ body.viewing { overflow: hidden; }
 /* Screens */
 .screen { padding-top: 8px; }
 .screen h1 { font-size: clamp(1.6rem, 4.5vw, 2.1rem); line-height: 1.15; margin: 8px 0 12px; letter-spacing: -.01em; }
-.screen h1:focus { outline: none; }
-.screen h1:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; border-radius: 6px; }
+/* Headings get focus from the page itself, so screen readers announce each new step; they can't be tabbed to, so a
+   focus ring around them would only be noise. */
+.screen h1:focus, .screen h1:focus-visible { outline: none; }
 .screen .lead { color: var(--muted); font-size: 1.06rem; margin: 0 0 20px; max-width: 36em; }
 .screen .lead b { color: var(--text); }
 .screen .list { color: var(--muted); }
 .fine { color: var(--muted); font-size: .92rem; margin: 8px 0; }
 h2.label { font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; }
 
-.stack { display: flex; flex-direction: column; gap: 10px; max-width: 420px; margin: 16px 0; }
+.stack { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
 .btn.big { min-height: 52px; font-size: 1.05rem; width: 100%; }
 .btn.small { padding: .4em .8em; font-size: .92rem; }
 .btn .icon { flex: none; }
 .btn.quiet:hover { background: var(--surface-2); }
 .more-links { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 12px; }
 .more-links .btn.quiet { padding-left: .4em; padding-right: .6em; }
+.more-links .row { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; margin-left: -.4em; }
 
 /* Known Macs */
-.macs { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 10px; max-width: 520px; }
-.mac { display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 4px 6px 4px 4px; }
+.macs { list-style: none; padding: 0; margin: 0 0 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+.mac {
+  display: flex; align-items: center; gap: 6px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 4px 6px 4px 4px; box-shadow: var(--shadow);
+}
+.mac:hover, .mac:focus-within { border-color: var(--accent); }
 .mac-go {
   flex: 1; min-width: 0; display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 10px;
   border: 0; border-radius: 10px; background: transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer;
 }
-.mac-go:hover { background: var(--surface-2); }
-.mac-go .icon:first-child { color: var(--accent); }
+.mac-go .icon:first-child {
+  color: var(--accent); background: var(--accent-soft); border-radius: 12px; padding: 9px; width: 42px; height: 42px;
+  box-sizing: border-box;
+}
 .mac-go .icon:last-child { color: var(--muted); margin-left: auto; }
 .mac-text { display: flex; flex-direction: column; min-width: 0; }
-.mac-name { font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mac-name { font-weight: 650; overflow-wrap: anywhere; line-height: 1.3; }
 .mac-when { color: var(--muted); font-size: .88rem; }
-.mac-forget { flex: none; color: var(--muted); }
+.btn.quiet.mac-forget { flex: none; color: var(--muted); font-weight: 550; }
+.btn.quiet.mac-forget:hover { color: var(--bad); background: var(--bad-soft); }
 
 /* Connecting steps */
 .steps { list-style: none; padding: 0; margin: 8px 0 20px; display: grid; gap: 10px; }
@@ -61,8 +73,6 @@ h2.label { font-size: .85rem; text-transform: uppercase; letter-spacing: .06em; 
 @media (prefers-reduced-motion: reduce) { .steps li.now::before { animation-duration: 2.4s; } }
 
 /* Forms */
-#codeForm, #backupForm { max-width: 420px; }
-input.code { max-width: 420px; }
 input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .note { margin: 16px 0; max-width: 40em; }
 .msg[hidden], .note[hidden] { display: none; }
@@ -135,6 +145,10 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .check { display: flex; align-items: center; gap: 10px; min-height: 44px; margin: 0; font-weight: 600; cursor: pointer; }
 .check input { width: 22px; height: 22px; accent-color: #2dd4bf; }
 .check[hidden], .menu .fine[hidden] { display: none; }
+/* On a phone the quality and display pickers live here, not in the toolbar (viewer.js moves them). */
+.menu .tb-select { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; font-weight: 600; }
+.menu .tb-select .sr-only { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; }
+.menu .tb-select select { flex: 0 1 60%; min-width: 0; padding-right: 10px; }
 
 /* Status notes */
 .banners {
@@ -244,8 +258,14 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .demolog li.move { color: #9aa3b2; }
 .viewer:has(.keysbar:not([hidden])) .demolog { bottom: calc(var(--kb-inset, 0px) + 72px); }
 
-@media (max-width: 560px) {
-  .tb-mac { max-width: 130px; padding-right: 4px; }
-  .tb-select select { padding-right: 6px; font-size: .9rem; }
+.viewer.touch .demolog { right: 82px; }
+
+@media (max-width: 640px) {
+  .tb-mac { max-width: 120px; padding-right: 4px; }
   .screen .lead { font-size: 1rem; }
+}
+@media (max-width: 440px) { .mac-go .icon:last-child { display: none; } }
+@media (max-width: 400px) {
+  .tb-mac { max-width: 84px; }
+  .tb-btn { width: 40px; }
 }

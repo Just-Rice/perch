@@ -829,7 +829,9 @@ async function main() {
     const here = fileURLToPath(import.meta.url);
     check('bundle: host script runs from Contents/Resources/host', here.endsWith('/Perch.app/Contents/Resources/host/perch-host.mjs'), here);
     check('bundle: node runs from Contents/Helpers', process.execPath.endsWith('/Perch.app/Contents/Helpers/node'), process.execPath);
-    check('bundle: the version comes from Info.plist', h.version === '0.1.0', h.version);
+    const plist = readFileSync(new URL('../../Info.plist', import.meta.url), 'utf8');
+    const plistVersion = /<key>CFBundleShortVersionString<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1];
+    check('bundle: the version comes from Info.plist', /^\d+\.\d+\.\d+$/.test(h.version) && h.version === plistVersion, `${h.version} vs ${plistVersion}`);
     // A bundle that has never registered reports SMAppService's notFound; once registered and removed, notRegistered.
     check('bundle: login item status is SMAppService\'s', ['not-found', 'not-registered', 'enabled', 'requires-approval'].includes(h.loginItem.status),
       JSON.stringify(h.loginItem));
@@ -851,7 +853,8 @@ async function main() {
       const since = got.events.length;
       command('login-item', { on: true });
       const li = await event('login-item', { since });
-      check('bundle: login-item refused in a test run', li.status !== 'enabled' && typeof li.error === 'string', JSON.stringify(li));
+      // Refused, and left as it was. (It can already be "enabled": an installed Perch shares this bundle's identifier.)
+      check('bundle: login-item refused in a test run', li.status === h.loginItem.status && typeof li.error === 'string', JSON.stringify(li));
     });
     return finish('uninstall');
   }

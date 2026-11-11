@@ -43,6 +43,7 @@ const ctx = {
     gone = true;
     stopWatching();
     for (const card of document.querySelectorAll('main > section')) card.hidden = card.id !== 'farewell';
+    $('toc').hidden = true;
     showBanner('');
     setText($('statePillText'), 'Uninstalled');
     $('statePill').dataset.tone = 'neutral';
@@ -59,7 +60,39 @@ function apply(next) {
   for (const part of parts) {
     try { part.render(next); } catch (e) { console.error('Setup: render failed', e); }
   }
+  syncToc();
 }
+
+// The jump links: only to cards that are showing, with the one being read marked.
+const tocLinks = [...document.querySelectorAll('#toc a')].map(a => [a, document.getElementById(a.hash.slice(1))]);
+function syncToc() {
+  $('toc').hidden = gone;
+  for (const [a, card] of tocLinks) a.parentElement.hidden = !card || card.hidden;
+  markToc();
+}
+function markToc() {
+  // The last showing card whose top has passed a line a third of the way down the window.
+  const line = window.innerHeight / 3;
+  let current = null;
+  for (const [a, card] of tocLinks) {
+    if (a.parentElement.hidden) continue;
+    current ??= a;
+    if (card.getBoundingClientRect().top <= line) current = a;
+  }
+  for (const [a] of tocLinks) {
+    if (a === current) {
+      if (a.getAttribute('aria-current') !== 'true') {
+        a.setAttribute('aria-current', 'true');
+        // Keep the marked chip in view in the scrolling row (no effect on the side list).
+        const row = a.closest('ul');
+        if (row.scrollWidth > row.clientWidth) row.scrollTo({ left: a.offsetLeft - row.offsetLeft - row.clientWidth / 2 + a.offsetWidth / 2 });
+      }
+    } else a.removeAttribute('aria-current');
+  }
+}
+let tocFrame = 0;
+window.addEventListener('scroll', () => { tocFrame ||= requestAnimationFrame(() => { tocFrame = 0; markToc(); }); }, { passive: true });
+window.addEventListener('resize', markToc);
 
 // Countdowns every second; "5 minutes ago" and the like every 30 seconds.
 setInterval(() => { if (state && !gone) for (const p of parts) p.tick?.(state); }, 1000);

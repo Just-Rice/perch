@@ -326,6 +326,16 @@ export class Viewer {
       this.setView(IDENTITY);
     });
 
+    // On a phone the toolbar can't hold everything, so the two pickers live in the More menu there.
+    const narrow = window.matchMedia('(max-width: 640px)');
+    const placePickers = () => {
+      const pickers = [$('tbQuality').closest('label'), $('tbDisplayWrap')];
+      if (narrow.matches && !this.guest) $('moreMenu').prepend(...pickers);
+      else $('tbKeyboard').before(...pickers);
+    };
+    placePickers();
+    this._on(narrow, 'change', placePickers);
+
     $('tbKeyboard').hidden = !this.touchFirst;
     // pointerdown keeps the phone keyboard's focus while the button is pressed, so the button can toggle it.
     on('tbKeyboard', 'pointerdown', e => e.preventDefault());
@@ -402,7 +412,8 @@ export class Viewer {
         this.setView(IDENTITY);
       }
     }
-    this.$('tbDisplayWrap').hidden = displays.length < 2;
+    // A guest can't switch displays (the Mac ignores it), so they aren't offered the picker.
+    this.$('tbDisplayWrap').hidden = displays.length < 2 || !!this.guest;
   }
 
   // Tells the Mac how big its picture is on this screen, in real pixels, so it doesn't send more than can be shown

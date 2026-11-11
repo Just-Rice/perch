@@ -239,7 +239,7 @@ input[role=switch]:focus-visible { outline: 3px solid var(--accent); outline-off
 .choices { border: 0; border-top: 1px solid var(--line); margin: 0; padding: 14px 0 0; min-width: 0; }
 .choices legend { font-weight: 600; padding: 14px 0 0; float: left; width: 100%; }
 .choices legend + p { clear: both; margin: 0 0 10px; padding-top: 4px; }
-.choice-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.choice-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 @media (max-width: 600px) { .choice-grid { grid-template-columns: 1fr; } }
 .choice {
   display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 12px 14px; border-radius: 12px;
@@ -341,3 +341,25 @@ input[role=switch]:focus-visible { outline: 3px solid var(--accent); outline-off
 .site-row .confirm { flex-basis: 100%; }
 #pairSiteLabel { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-weight: 600; }
 #pairSite { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; padding: 0 10px; }
+
+/* --- jump links (inside the sticky header) --- */
+main > section { scroll-margin-top: 136px; }
+.toc { border-top: 1px solid var(--line); }
+.toc ul {
+  list-style: none; margin: 0 auto; padding: 8px 0; width: min(780px, 100% - 32px); display: flex; gap: 6px;
+  overflow-x: auto; scrollbar-width: none;
+}
+.toc ul::-webkit-scrollbar { display: none; }
+.toc a {
+  display: block; padding: 7px 12px; border-radius: 999px; white-space: nowrap; text-decoration: none;
+  color: var(--muted); font-weight: 600; font-size: .9rem;
+}
+.toc a:hover { color: var(--text); background: var(--surface-2); }
+.toc a[aria-current="true"] { color: var(--accent); background: var(--accent-soft); }
+/* Room beside the column: the links become a list down the left that stays put while the page scrolls. */
+@media (min-width: 1200px) {
+  main > section { scroll-margin-top: 84px; }
+  .toc { position: absolute; top: 96px; left: calc(50% - 390px - 216px); width: 192px; border: 0; }
+  .toc ul { width: auto; flex-direction: column; gap: 2px; padding: 0; overflow: visible; }
+  .toc a { border-radius: 10px; white-space: normal; }
+}

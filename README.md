@@ -6,6 +6,13 @@ sound, the mouse and keyboard. Free and open source, with no account and no serv
 **[just-rice.github.io/perch](https://just-rice.github.io/perch/)** · [Connect](https://just-rice.github.io/perch/connect.html) ·
 [Privacy](https://just-rice.github.io/perch/privacy.html) · [Security](SECURITY.md)
 
+- **Phones, tablets and computers:** touch, mouse, keyboard and sound, with a keyboard button for typing on a phone.
+- **Two-step sign-in checked by your Mac:** a passkey, then a 6-digit code. One tap after the first time.
+- **Private:** black out the Mac's own screen while you're connected, and lock it when you leave.
+- **Guest links:** let someone watch your screen for a while, without being able to touch anything.
+- **Strict Wi-Fi:** an optional relay (a free Cloudflare account of your own) for school and office networks.
+- **Apple silicon and Intel Macs.**
+
 > Perch is a **beta**, so far tested on one Mac. Please [report problems](https://github.com/Just-Rice/perch/issues).
 
 ## Install on a Mac

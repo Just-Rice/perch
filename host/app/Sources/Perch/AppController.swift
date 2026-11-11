@@ -75,6 +75,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         }
         capture.log = { Log.shared.info($0) }
         input.displayID = { [weak self] in self?.capture.displayID }
+        input.region = { [weak self] in self?.capture.inputBounds }
         input.onEcho = { [weak self] e in self?.sendEvent(e) }
 
         watch.onPermissions = { [weak self] p in self?.sendEvent(["e": "permissions", "screen": p.screen, "accessibility": p.accessibility]) }
@@ -221,9 +222,22 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         case "capture":
             // Only an explicit `on: true` starts showing the screen; a malformed command must never switch it on.
             switch JSONValue.bool(cmd["on"]) {
-            case true?: capture.capture(CaptureRequest(command: cmd))
+            case true?:
+                let request = CaptureRequest(command: cmd)
+                // A window just chosen comes to the front, so what the viewer sees is what their clicks reach.
+                if let wid = request.window, wid != capture.windowID { raiseWindow(wid) }
+                capture.capture(request)
             case false?: capture.stop(reason: "requested")
             case nil: warn("capture without on")
+            }
+        case "windows":
+            sendEvent(["e": "windows", "list": Windows.list(synthetic: options.synthetic).map(\.json)])
+        case "window-fit":
+            if let wid = JSONValue.int(cmd["window"]), let w = JSONValue.number(cmd["w"]), let h = JSONValue.number(cmd["h"]),
+               wid > 0, w > 0, h > 0 {
+                fitWindow(UInt32(wid), aspect: w / h)
+            } else {
+                warn("window-fit without window, w and h")
             }
         case "keyframe":
             capture.keyframe()
@@ -269,6 +283,44 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
     }
 
     /// A warning in the log, also sent to the host so it shows up in its log next to whatever caused it.
+    // Accessibility calls wait on the other app, so they stay off the main thread.
+    private let windowQueue = DispatchQueue(label: "perch.windows", qos: .userInitiated)
+
+    private func raiseWindow(_ id: UInt32) {
+        let synthetic = options.synthetic
+        // Test runs never rearrange the windows of whoever is sitting at this Mac.
+        guard synthetic || systemChangesAllowed else { return }
+        windowQueue.async {
+            guard let w = Windows.find(id, synthetic: synthetic) else { return }
+            if !Windows.raise(w, synthetic: synthetic) { Log.shared.info("could not bring window \(id) to the front") }
+        }
+    }
+
+    /// Reshapes the window to the viewer's screen shape. The capture follows the window, so the picture changes by
+    /// itself a moment later. Never done for real in a test run, like every other change to the Mac.
+    private func fitWindow(_ id: UInt32, aspect: Double) {
+        let synthetic = options.synthetic
+        guard synthetic || systemChangesAllowed else {
+            sendEvent(["e": "window-fit", "window": Int(id), "ok": false, "error": "Windows are not reshaped in test runs."])
+            return
+        }
+        guard let w = Windows.find(id, synthetic: synthetic) else {
+            sendEvent(["e": "window-fit", "window": Int(id), "ok": false, "error": "That window is no longer on screen."])
+            return
+        }
+        let displays = Displays.list(synthetic: synthetic)
+        let middle = CGPoint(x: w.bounds.midX, y: w.bounds.midY)
+        let display = displays.first(where: { $0.bounds.contains(middle) }) ?? displays.first(where: { $0.isMain }) ?? displays.first
+        guard let display else { return }
+        let area = Windows.usableArea(displayID: display.id, synthetic: synthetic)
+        windowQueue.async { [weak self] in
+            let ok = Windows.fit(w, aspect: aspect, in: area, synthetic: synthetic)
+            var e: [String: Any] = ["e": "window-fit", "window": Int(id), "ok": ok]
+            if !ok { e["error"] = "This window can't be reshaped." }
+            self?.sendEvent(e)
+        }
+    }
+
     private func warn(_ message: String) {
         Log.shared.warn(message)
         sendEvent(["e": "log", "level": "warn", "message": message])

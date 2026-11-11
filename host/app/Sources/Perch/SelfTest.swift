@@ -306,6 +306,22 @@ enum SelfTest {
         check("capture size: longest edge, aspect, even, never upscaled", wrong.isEmpty, "\(wrong)")
         let r = CaptureRequest(command: ["c": "capture", "on": true, "maxEdge": 99999, "fps": 0, "kbps": 0, "audio": false, "display": 7])
         check("capture request is clamped", r.maxEdge == 4096 && r.fps == 1 && r.kbps == 100 && !r.audio && r.displayID == 7)
+        check("capture request: a window id, or none", r.window == nil
+            && CaptureRequest(command: ["on": true, "window": 4242]).window == 4242
+            && CaptureRequest(command: ["on": true, "window": 0]).window == nil
+            && CaptureRequest(command: ["on": true, "window": "7"]).window == nil)
+        let screen = CGRect(x: 1920, y: 0, width: 1512, height: 982)
+        check("window region: the part on the display, in the display's own points",
+              Windows.region(of: CGRect(x: 2000, y: 100, width: 800, height: 600), on: screen) == CGRect(x: 80, y: 100, width: 800, height: 600)
+              && Windows.region(of: CGRect(x: 3000, y: 800, width: 800, height: 600), on: screen) == CGRect(x: 1080, y: 800, width: 432, height: 182)
+              && Windows.region(of: CGRect(x: 0, y: 0, width: 800, height: 600), on: screen) == nil
+              && Windows.region(of: CGRect(x: 3420, y: 100, width: 800, height: 600), on: screen) == nil)
+        let phone = Windows.fitSize(aspect: 390.0 / 844.0, in: CGSize(width: 1512, height: 949))
+        let wide = Windows.fitSize(aspect: 16.0 / 9.0, in: CGSize(width: 1512, height: 949))
+        let odd = Windows.fitSize(aspect: 0.01, in: CGSize(width: 1512, height: 949))
+        check("window fit: the viewer's shape, as big as the screen allows, never tiny",
+              phone == CGSize(width: 438, height: 949) && wide == CGSize(width: 1512, height: 850) && odd == CGSize(width: 320, height: 949),
+              "\(phone) \(wide) \(odd)")
     }
 
     private static func syntheticPattern() {

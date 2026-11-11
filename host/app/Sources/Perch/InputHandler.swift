@@ -12,6 +12,8 @@ final class InputHandler: @unchecked Sendable {
     var onEcho: (([String: Any]) -> Void)?
     /// The display being captured; input maps onto it (the main display when nothing is captured).
     var displayID: () -> UInt32? = { nil }
+    /// When one window is being shown: the part of the screen in the picture (global points). Input maps onto that.
+    var region: () -> CGRect? = { nil }
 
     private let queue = DispatchQueue(label: "perch.input", qos: .userInteractive)
     private let echo: Bool
@@ -64,6 +66,7 @@ final class InputHandler: @unchecked Sendable {
     }
 
     private func bounds() -> CGRect {
+        if let r = region(), !r.isEmpty { return r }
         if synthetic { return Displays.synthetic.bounds }
         let id = displayID() ?? CGMainDisplayID()
         let b = CGDisplayBounds(id)

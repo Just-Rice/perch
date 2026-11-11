@@ -34,6 +34,18 @@ function cleanDisplays(list) {
   }));
 }
 
+// What the app says about the windows on screen, trimmed to what a viewer's picker needs.
+function cleanWindows(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(w => w && Number.isInteger(w.id) && w.id > 0).slice(0, 40).map(w => ({
+    id: w.id,
+    app: typeof w.app === 'string' ? w.app.slice(0, 80) : '',
+    title: typeof w.title === 'string' ? w.title.slice(0, 160) : '',
+    width: Number.isFinite(w.width) ? w.width : 0,
+    height: Number.isFinite(w.height) ? w.height : 0,
+  }));
+}
+
 export class Controller {
   constructor({ config, store, auth, rendezvous, app, log = silentLog(), updater = null, now = () => Date.now(),
     authTimeoutMs = AUTH_TIMEOUT_MS, relay = null }) {
@@ -198,8 +210,23 @@ export class Controller {
         }
         break;
       case 'capture-started':
-        this.capture = { display: ev.display, width: ev.width | 0, height: ev.height | 0, fps: ev.fps | 0 };
+        this.capture = {
+          display: ev.display, width: ev.width | 0, height: ev.height | 0, fps: ev.fps | 0,
+          window: Number.isInteger(ev.window) && ev.window > 0 ? ev.window : null,
+        };
         this.active?.sendStatus();
+        break;
+      case 'windows':
+        // The answer to a viewer's "which windows are there?": only for the owner's own viewer, if still here.
+        if (this.windowAsker && this.windowAsker === this.active) this.windowAsker.sendWindows(cleanWindows(ev.list));
+        this.windowAsker = null;
+        break;
+      case 'window-gone':
+        // The window being shown was closed or put away: the app is already showing the whole display again.
+        if (this.active && this.active.window === ev.window) this.active.window = null;
+        break;
+      case 'window-fit':
+        this.active?.sendFit(ev.ok === true);
         break;
       case 'capture-stopped':
         this.capture = null;
@@ -337,7 +364,18 @@ export class Controller {
       // preset's starting value, which would undo what bitrate control has learned).
       maxEdge: session.captureEdge?.() ?? preset.maxEdge, fps: preset.fps,
       kbps: session.media?.bitrate.target ?? preset.kbps, audio: true,
+      ...(session.window ? { window: session.window } : {}),
     });
+  }
+
+  listWindows(session) {
+    if (session !== this.active) return;
+    this.windowAsker = session;
+    this.app.command('windows', {});
+  }
+
+  fitWindow(session, w, h) {
+    if (session === this.active && session.window) this.app.command('window-fit', { window: session.window, w, h });
   }
 
   // A viewer just finished signing in: it takes over from any other viewer and gets the picture.
@@ -598,7 +636,7 @@ export class Controller {
   relayIceServers() { return this.relay.iceServers(); }
 
   // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
-  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view']; }
+  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window']; }
 
   async relaySet(keyId, apiToken) {
     const replacing = this.relay.configured;

@@ -29,7 +29,7 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
 
     private var stream: SCStream?
     private var config: SCStreamConfiguration?
-    private var displayPointWidth = 0
+    private var displayPointSize = CGSize.zero
     private var displayID: UInt32 = 0
     private let videoQueue: DispatchQueue
     private let audioQueue: DispatchQueue
@@ -58,7 +58,9 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         try await s.updateContentFilter(f)
     }
 
-    public func start(displayID: UInt32, width: Int, height: Int, fps: Int, audio: Bool, excluding: [CGWindowID] = []) async throws {
+    /// `sourceRect` (the display's own points, top-left origin) shows just that part of the display.
+    public func start(displayID: UInt32, width: Int, height: Int, fps: Int, audio: Bool, excluding: [CGWindowID] = [],
+                      sourceRect: CGRect? = nil) async throws {
         let display = try await capturableDisplay(displayID)
         self.displayID = displayID
         let plain = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
@@ -74,7 +76,8 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         c.showsCursor = true
         c.queueDepth = 5
         // Capture at full Retina detail only when the output is bigger than the display's size in points.
-        c.captureResolution = width > display.width ? .best : .nominal
+        if let r = sourceRect { c.sourceRect = r }
+        c.captureResolution = CGFloat(width) > (sourceRect?.width ?? CGFloat(display.width)) ? .best : .nominal
         c.capturesAudio = audio
         c.sampleRate = OpusEncoder.sampleRate
         c.channelCount = 2
@@ -86,16 +89,18 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         try await s.startCapture()
         stream = s
         config = c
-        displayPointWidth = display.width
+        displayPointSize = CGSize(width: display.width, height: display.height)
     }
 
     /// Changes the picture size of the running stream (no restart: sound carries on, and the change takes a few
     /// frames). Buffers of the old size may still arrive for a moment; the caller skips those.
-    public func update(width: Int, height: Int) async throws {
+    public func update(width: Int, height: Int, sourceRect: CGRect? = nil) async throws {
         guard let s = stream, let c = config else { return }
         c.width = width
         c.height = height
-        c.captureResolution = width > displayPointWidth ? .best : .nominal
+        let whole = CGRect(origin: .zero, size: displayPointSize)
+        c.sourceRect = sourceRect ?? whole
+        c.captureResolution = CGFloat(width) > (sourceRect ?? whole).width ? .best : .nominal
         try await s.updateConfiguration(c)
     }
 

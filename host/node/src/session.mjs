@@ -405,7 +405,29 @@ export class Session {
       case 'display':
         if (!this.hub.hasDisplay(msg.id) || msg.id === this.display) return;
         this.display = msg.id;
+        this.window = null; // a window chosen on the other display doesn't carry over
         this.hub.captureChanged(this);
+        return;
+      case 'windows': {
+        // Which windows could be shown on their own. The answer comes back as {t:'windows', list}.
+        const now = this.now();
+        if (now - (this.windowsAskedAt ?? -Infinity) < 300) return;
+        this.windowsAskedAt = now;
+        this.hub.listWindows(this);
+        return;
+      }
+      case 'window': {
+        // Show one window (the picture follows it), or null for the whole display again.
+        const id = msg.id === null ? null : (Number.isInteger(msg.id) && msg.id > 0 && msg.id <= 0xffffffff ? msg.id : undefined);
+        if (id === undefined || id === (this.window ?? null)) return;
+        this.window = id;
+        this.hub.captureChanged(this);
+        return;
+      }
+      case 'fit':
+        // Reshape the window being shown to this viewer's screen (w by h, any unit: only the shape matters).
+        if (this.window == null || !(msg.w >= 1 && msg.w <= 20000) || !(msg.h >= 1 && msg.h <= 20000)) return;
+        this.hub.fitWindow(this, msg.w, msg.h);
         return;
       case 'keyframe':
         this.media.askKeyframe('viewer asked');
@@ -438,9 +460,13 @@ export class Session {
     const cap = this.hub.capture ?? {};
     this._send({
       t: 'status', locked: !!this.hub.locked, link: this.media.bitrate.link, kbps: s.kbps, fps: s.fps,
-      width: cap.width ?? 0, height: cap.height ?? 0, input: !this.guest && !!this.hub.permissions.accessibility, ...extra,
+      width: cap.width ?? 0, height: cap.height ?? 0, input: !this.guest && !!this.hub.permissions.accessibility,
+      window: cap.window ?? null, ...extra,
     });
   }
+
+  sendWindows(list) { if (this.state === 'ready' && !this.guest) this._send({ t: 'windows', list }); }
+  sendFit(ok) { if (this.state === 'ready' && !this.guest) this._send({ t: 'fit', ok: !!ok }); }
 
   sendError(code, message) {
     if (this.state === 'ready') this._send({ t: 'error', code, message });

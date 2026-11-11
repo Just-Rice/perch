@@ -183,7 +183,12 @@ export class FakeApp extends EventEmitter {
         if (cmd.on) {
           this.player.start();
           this.player.keyframe();
-          this.event({ e: 'capture-started', display: cmd.display ?? 1, width: 640, height: 360, fps: cmd.fps ?? 30 });
+          // One pretend window (id 7); asking for any other gets the whole display and a window-gone, as the app does.
+          if (cmd.window && cmd.window !== 7) this.event({ e: 'window-gone', window: cmd.window });
+          this.event({
+            e: 'capture-started', display: cmd.display ?? 1, width: 640, height: 360, fps: cmd.fps ?? 30,
+            ...(cmd.window === 7 ? { window: 7 } : {}),
+          });
         } else {
           if (!this.streamAlways) this.player.stop();
           this.event({ e: 'capture-stopped', reason: 'requested' });
@@ -191,6 +196,12 @@ export class FakeApp extends EventEmitter {
         break;
       case 'keyframe':
         this.player.keyframe();
+        break;
+      case 'windows':
+        this.event({ e: 'windows', list: [{ id: 7, app: 'Test App', title: 'Test Window', width: 800, height: 600 }] });
+        break;
+      case 'window-fit':
+        this.event({ e: 'window-fit', window: cmd.window, ok: cmd.window === 7 });
         break;
       case 'permissions':
         this.event({ e: 'permissions', ...this.permissions });

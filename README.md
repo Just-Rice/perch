@@ -9,6 +9,7 @@ sound, the mouse and keyboard. Free and open source, with no account and no serv
 - **Phones, tablets and computers:** touch, mouse, keyboard and sound, with a keyboard button for typing on a phone.
 - **Two-step sign-in checked by your Mac:** a passkey, then a 6-digit code. One tap after the first time.
 - **Private:** black out the Mac's own screen while you're connected, and lock it when you leave.
+- **One window at a time:** show a single window instead of the whole desktop, reshaped to fit your phone.
 - **Guest links:** let someone watch your screen for a while, without being able to touch anything.
 - **Strict Wi-Fi:** an optional relay (a free Cloudflare account of your own) for school and office networks.
 - **Apple silicon and Intel Macs.**

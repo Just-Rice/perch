@@ -672,6 +672,57 @@ async function inputChecks(h) {
   check('input: the session ending releases held keys', rel.ev.source === 'app' && deepEqual(rel.out, [{ type: 'keyUp', keyCode: 8, flags: 0 }]), JSON.stringify(rel));
 }
 
+// One window: the list, a picture that is just that window, input that lands inside it, reshaping it, and what
+// happens when it goes away. The pretend window in synthetic mode is 800x600 points at (200, 100).
+async function windowChecks(h) {
+  let since = got.events.length;
+  command('windows');
+  const list = (await event('windows', { since })).list;
+  check('windows: a list of {id, app, title, width, height}', Array.isArray(list) && list.every(w =>
+    Number.isInteger(w.id) && typeof w.app === 'string' && typeof w.title === 'string' && w.width > 0 && w.height > 0),
+    `${list?.length} windows`);
+  if (h.synthetic !== true) return;
+  check('windows: the pretend window', deepEqual(list, [{ id: 7, app: 'Test App', title: 'Test Window', width: 800, height: 600 }]), JSON.stringify(list));
+
+  command('session', { active: true, viewer: 'Chrome on Pixel', route: 'passkey' });
+  since = got.events.length;
+  command('capture', { on: true, maxEdge: 1920, fps: 30, kbps: 2500, audio: false, window: 7 });
+  let st = await event('capture-started', { since });
+  check('one window: the picture is the window alone (800x600 points on a Retina display)',
+    st.window === 7 && st.width === 1600 && st.height === 1200, JSON.stringify(st));
+  const mark = got.video.length;
+  const first = await until(() => got.video[mark], 3000, 'video of the window');
+  const sps = parseSps(nalUnits(first.data).find(n => (n[0] & 0x1f) === 7));
+  check('one window: the video itself is 1600x1200', sps?.width === 1600 && sps?.height === 1200, JSON.stringify(sps));
+  let out = await echo({ t: 'm', x: 0.5, y: 0.5 });
+  check('one window: input lands inside the window', deepEqual(out, [{ type: 'mouseMoved', x: 600, y: 400, flags: 0 }]), JSON.stringify(out));
+
+  // Reshape it to a phone held upright. The capture follows by itself.
+  since = got.events.length;
+  command('window-fit', { window: 7, w: 390, h: 844 });
+  const fit = await event('window-fit', { since });
+  check('window-fit: done', fit.ok === true && fit.window === 7, JSON.stringify(fit));
+  st = await event('capture-started', { since, where: e => e.window === 7 && e.height > e.width, ms: 4000 });
+  check('window-fit: the picture takes the phone\'s shape, as tall as the display allows',
+    st.height === 1920 && Math.abs(st.width / st.height - 390 / 844) < 0.01, JSON.stringify(st));
+  out = await echo({ t: 'm', x: 0, y: 0 });
+  check('window-fit: input follows the window to its new place', out[0]?.y === 0 && out[0]?.x > 600 && out[0]?.x < 800, JSON.stringify(out));
+
+  // A window that isn't there: say so, and show the whole display.
+  since = got.events.length;
+  command('capture', { on: true, maxEdge: 1920, fps: 30, kbps: 2500, audio: false, window: 99 });
+  const gone = await event('window-gone', { since });
+  st = await event('capture-started', { since });
+  check('a window that is gone: window-gone, then the whole display', gone.window === 99 && st.window === undefined && st.width === 1920 && st.height === 1080, JSON.stringify(st));
+  out = await echo({ t: 'm', x: 0.5, y: 0.5 });
+  check('whole display again: input maps onto all of it', deepEqual(out, [{ type: 'mouseMoved', x: 960, y: 540, flags: 0 }]), JSON.stringify(out));
+  since = got.events.length;
+  command('capture', { on: false });
+  await event('capture-stopped', { since });
+  command('session', { active: false });
+  await settled();
+}
+
 async function commandChecks(h) {
   // permissions on request.
   let since = got.events.length;
@@ -862,6 +913,7 @@ async function main() {
   await section('commands', () => commandChecks(h));
   await section('capture', () => captureChecks(h));
   await section('input', () => inputChecks(h));
+  await section('windows', () => windowChecks(h));
   logChecks();
   await finish();
 }

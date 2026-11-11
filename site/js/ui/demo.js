@@ -92,8 +92,15 @@ export function startDemo(app) {
     displays: DISPLAYS, quality: 'balanced', audio: params.get('sound') === 'blocked', input: params.get('viewonly') !== '1',
     locked: params.get('locked') === '1',
   };
+  // Two pretend windows for "show one window"; choosing one makes the picture that window's size and shape.
+  const WINDOWS = [
+    { id: 11, app: 'Notes', title: 'Shopping list', width: 900, height: 620 },
+    { id: 12, app: 'Safari', title: 'Perch', width: 1200, height: 800 },
+  ];
+  let shown = null;
   const session = {
     stream,
+    caps: ['window'],
     onmessage: () => {},
     onstream: () => {},
     onlink: () => {},
@@ -102,8 +109,24 @@ export function startDemo(app) {
       if (m.t === 'ping') setTimeout(() => this.onmessage({ t: 'pong', n: m.n, ts: m.ts }), 12);
       if (m.t === 'display') {
         display = DISPLAYS.find(d => d.id === m.id) || display;
+        shown = null;
         setSize(display);
-        setTimeout(() => this.onmessage({ t: 'status', width: display.width, height: display.height }), 50);
+        setTimeout(() => this.onmessage({ t: 'status', width: display.width, height: display.height, window: null }), 50);
+      }
+      if (m.t === 'windows') setTimeout(() => this.onmessage({ t: 'windows', list: WINDOWS }), 20);
+      if (m.t === 'window') {
+        shown = WINDOWS.find(w => w.id === m.id) ?? null;
+        setSize(shown ? { width: shown.width * 2, height: shown.height * 2 } : display);
+        setTimeout(() => this.onmessage({ t: 'status', width: canvas.width, height: canvas.height, window: shown?.id ?? null }), 50);
+      }
+      if (m.t === 'fit' && shown) {
+        // As the Mac does: the viewer's shape, as large as the display allows.
+        const scale = Math.min(display.width / m.w, display.height / m.h);
+        setSize({ width: Math.round(m.w * scale) * 2, height: Math.round(m.h * scale) * 2 });
+        setTimeout(() => {
+          this.onmessage({ t: 'fit', ok: true });
+          this.onmessage({ t: 'status', width: canvas.width, height: canvas.height, window: shown.id });
+        }, 50);
       }
     },
     sendInput(m) { log('input', m); },

@@ -216,6 +216,50 @@ test('desktop: toolbar controls — quality, display, stats, keys bar, more menu
   await page.close();
 });
 
+test('desktop: show one window, fit it to this screen, and go back to the whole screen', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  const pick = v => page.eval(`(() => { const s = document.getElementById('optWindow'); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event('change')); })()`);
+  const size = () => page.eval(`[document.getElementById('video').videoWidth, document.getElementById('video').videoHeight]`);
+  const n = await count(page);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.waitFor(`document.getElementById('optWindow').options.length === 3`, { what: 'the list of windows' });
+  assert.deepEqual(await page.eval(`[...document.getElementById('optWindow').options].map(o => o.textContent)`),
+    ['The whole screen', 'Notes: Shopping list', 'Safari: Perch']);
+  assert.equal(await page.eval(`document.getElementById('optFit').hidden`), true, 'nothing to fit yet');
+
+  await pick('11');
+  await page.waitFor(`document.getElementById('video').videoWidth === 900`, { what: 'the picture in the window\'s shape' });
+  assert.deepEqual(await size(), [900, 620]);
+  assert.equal(await page.eval(`document.getElementById('optFit').hidden`), false);
+  await page.shot('viewer-demo-one-window-desktop');
+
+  // Fit: the window takes this screen's shape, so the picture fills it.
+  await page.click('#optFit');
+  await page.waitFor(`(() => { const v = document.getElementById('video'); return Math.abs(v.videoWidth / v.videoHeight - innerWidth / innerHeight) < 0.01; })()`,
+    { what: 'a picture the shape of this screen' });
+  assert.equal(await page.eval(`document.getElementById('moreMenu').hidden`), true);
+  const ctl = (await messages(page, n)).filter(m => m.channel === 'control' && ['windows', 'window', 'fit'].includes(m.t));
+  assert.deepEqual(ctl.map(m => [m.t, m.id ?? null]), [['windows', null], ['window', 11], ['fit', null]]);
+  assert.deepEqual([ctl[2].w, ctl[2].h], await page.eval(`[innerWidth, innerHeight]`));
+
+  // The Mac says the window has gone (it was closed): the picker goes back to the whole screen by itself.
+  await sleep(1600);
+  await page.eval(`window.__perch.demoSession.onmessage({ t: 'status', window: null })`);
+  assert.equal(await page.eval(`document.getElementById('optWindow').value`), '');
+  assert.equal(await page.eval(`document.getElementById('optFit').hidden`), true);
+
+  // Choosing "The whole screen" asks for it.
+  await pick('12');
+  await page.waitFor(`document.getElementById('video').videoWidth === 1200`, { what: 'the second window' });
+  await pick('');
+  await page.waitFor(`document.getElementById('video').videoWidth === 756`, { what: 'the whole screen again' });
+  assert.equal((await messages(page, n)).filter(m => m.t === 'window').at(-1).id, null);
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
 test('status notes: locked, view only, slow link, no screen permission', async () => {
   const page = await openPage(stack, demoUrl({ locked: '1', viewonly: '1' }));
   await ready(page);

@@ -74,6 +74,13 @@ final class CaptureSession: @unchecked Sendable {
     let display: DisplayInfo
     private(set) var width: Int
     private(set) var height: Int
+    /// The part of the display being shown (its own points, top-left origin) when following one window; nil for all.
+    /// Read from other threads too (input maps onto it), so it sits behind its own lock.
+    var region: CGRect? { whereLock.withLock { shownRegion } }
+    var windowID: UInt32? { whereLock.withLock { shownWindow } }
+    private let whereLock = NSLock()
+    private var shownRegion: CGRect?
+    private var shownWindow: UInt32?
     let synthetic: Bool
     let gate = KeyframeGate()
     var onVideo: ((EncodedFrame) -> Void)?
@@ -115,13 +122,27 @@ final class CaptureSession: @unchecked Sendable {
     static let sharpenForMicros: UInt64 = 1_500_000
     static let sharpenEveryMicros: UInt64 = 120_000
 
-    init(request: CaptureRequest, display: DisplayInfo, synthetic: Bool, videoQueue: DispatchQueue, audioQueue: DispatchQueue) throws {
+    /// The encoded size for the whole display, or for the part of it in `region`.
+    static func outputSize(display: DisplayInfo, region: CGRect?, maxEdge: Int) -> (width: Int, height: Int) {
+        var pw = display.pixelWidth, ph = display.pixelHeight
+        if let r = region, display.bounds.width > 0 {
+            let scale = Double(display.pixelWidth) / Double(display.bounds.width)
+            pw = Int((Double(r.width) * scale).rounded())
+            ph = Int((Double(r.height) * scale).rounded())
+        }
+        return CaptureSizing.outputSize(pixelWidth: pw, pixelHeight: ph, maxEdge: maxEdge)
+    }
+
+    init(request: CaptureRequest, display: DisplayInfo, region: CGRect? = nil, windowID: UInt32? = nil, synthetic: Bool,
+         videoQueue: DispatchQueue, audioQueue: DispatchQueue) throws {
         self.request = request
         self.display = display
+        shownRegion = region
+        shownWindow = region == nil ? nil : windowID
         self.synthetic = synthetic
         self.videoQueue = videoQueue
         self.audioQueue = audioQueue
-        let size = CaptureSizing.outputSize(pixelWidth: display.pixelWidth, pixelHeight: display.pixelHeight, maxEdge: request.maxEdge)
+        let size = Self.outputSize(display: display, region: region, maxEdge: request.maxEdge)
         width = size.width
         height = size.height
         encoder = try H264Encoder(width: width, height: height, fps: request.fps, bitsPerSecond: request.kbps * 1000)
@@ -144,7 +165,7 @@ final class CaptureSession: @unchecked Sendable {
 
     /// Changes the picture size while capture keeps running: a new encoder, the stream told its new size, and a
     /// keyframe to start from. Much lighter than stopping and starting (no gap in the sound, no display lookup).
-    func resize(width w: Int, height h: Int, kbps: Int) async throws {
+    func resize(width w: Int, height h: Int, kbps: Int, region r: CGRect? = nil, windowID wid: UInt32? = nil) async throws {
         let fresh = try H264Encoder(width: w, height: h, fps: request.fps, bitsPerSecond: kbps * 1000)
         fresh.warmUp(ptsMicros: hostMicros())
         wire(fresh)
@@ -156,6 +177,7 @@ final class CaptureSession: @unchecked Sendable {
             width = w
             height = h
             request.kbps = kbps
+            whereLock.withLock { shownRegion = r; shownWindow = r == nil ? nil : wid }
             lastPixelBuffer = nil // the old size; a picture of the new size arrives in a moment
             gate.request()
             old.invalidate()
@@ -166,7 +188,15 @@ final class CaptureSession: @unchecked Sendable {
                 startRepeats()
             }
         }
-        if !synthetic { try await capturer?.update(width: w, height: h) }
+        if !synthetic { try await capturer?.update(width: w, height: h, sourceRect: r) }
+    }
+
+    /// The window being followed moved without changing size: show the same-sized part of the display, elsewhere.
+    func move(to r: CGRect) async {
+        whereLock.withLock { shownRegion = r }
+        if synthetic { return }
+        do { try await capturer?.update(width: width, height: height, sourceRect: r) }
+        catch { log("could not follow the window: \(error)") }
     }
 
     func start() async throws {
@@ -185,7 +215,7 @@ final class CaptureSession: @unchecked Sendable {
             cap.onStop = { [weak self] error in self?.onFailure?(error) }
             cap.log = log
             try await cap.start(displayID: display.id, width: width, height: height, fps: request.fps, audio: request.audio,
-                                excluding: excluded)
+                                excluding: excluded, sourceRect: region)
             capturer = cap
         }
         videoQueue.sync { startRepeats() }
@@ -332,13 +362,64 @@ public final class CaptureController: @unchecked Sendable {
 
     /// The display being captured, if any (input coordinates map onto it).
     public var displayID: UInt32? { lock.withLock { current?.display.id } }
+    /// When one window is being shown: the part of the screen in the picture, in global points. Input maps onto it.
+    public var inputBounds: CGRect? {
+        guard let s = lock.withLock({ current }), let r = s.region else { return nil }
+        return r.offsetBy(dx: s.display.bounds.minX, dy: s.display.bounds.minY)
+    }
+    /// The window being shown, if any.
+    public var windowID: UInt32? { lock.withLock { current }?.windowID }
     public var isCapturing: Bool { lock.withLock { current != nil } }
 
     /// Starts capture, or changes what is being captured. Main thread.
     public func capture(_ request: CaptureRequest) {
         let gen = nextGeneration()
-        lock.withLock { pendingKbps = nil; lastRequest = request; restartsInARow = 0 }
+        lock.withLock { pendingKbps = nil; lastRequest = request; restartsInARow = 0; pendingSize = nil }
+        if request.window != nil { startFollowing() }
         enqueue { [self] in await start(request, generation: gen) }
+    }
+
+    // MARK: following one window
+
+    private var followTimer: DispatchSourceTimer?
+    /// A new size is only taken once it has been seen twice in a row, so dragging a window's edge doesn't rebuild
+    /// the encoder several times a second.
+    private var pendingSize: CGSize?
+
+    /// A few times a second, see where the window being shown is now. Main thread.
+    private func startFollowing() {
+        guard followTimer == nil else { return }
+        let t = DispatchSource.makeTimerSource(queue: .main)
+        t.schedule(deadline: .now() + .milliseconds(300), repeating: .milliseconds(300), leeway: .milliseconds(50))
+        t.setEventHandler { [weak self] in self?.follow() }
+        t.resume()
+        followTimer = t
+    }
+
+    private func follow() {
+        let state = lock.withLock { () -> (CaptureRequest, CaptureSession, Int)? in
+            guard let r = lastRequest, let c = current, let wid = r.window, c.windowID == wid else { return nil }
+            return (r, c, generation)
+        }
+        guard let (request, cur, gen) = state, let wid = request.window, let shown = cur.region else { return }
+        // Closed, minimised, dragged to another display or almost off this one: start() sorts out what to show now.
+        let again = { [self] in enqueue { [self] in await start(request, generation: gen) } }
+        guard let w = Windows.find(wid, synthetic: synthetic),
+              cur.display.bounds.contains(CGPoint(x: w.bounds.midX, y: w.bounds.midY)),
+              let target = Windows.region(of: w.bounds, on: cur.display.bounds) else { return again() }
+        if target == shown { pendingSize = nil; return }
+        if target.size == shown.size {
+            pendingSize = nil
+            enqueue { [self] in
+                guard isLatest(gen) else { return }
+                await cur.move(to: target)
+            }
+        } else if pendingSize == target.size {
+            pendingSize = nil
+            again()
+        } else {
+            pendingSize = target.size
+        }
     }
 
     /// Stops capture. `notify` false is for when there is no host left to tell. Main thread.
@@ -388,16 +469,32 @@ public final class CaptureController: @unchecked Sendable {
 
     private func start(_ request: CaptureRequest, generation gen: Int) async {
         guard isLatest(gen) else { return }
-        guard let display = Displays.find(request.displayID, synthetic: synthetic) else {
+        guard var display = Displays.find(request.displayID, synthetic: synthetic) else {
             onEvent?(["e": "capture-error", "code": "capture-failed", "message": "This Mac has no display to capture."])
             return
         }
         if let wanted = request.displayID, wanted != display.id {
             log("display \(wanted) is not connected; capturing display \(display.id) instead")
         }
-        let size = CaptureSizing.outputSize(pixelWidth: display.pixelWidth, pixelHeight: display.pixelHeight, maxEdge: request.maxEdge)
+        // One window: the part of its display it covers right now. A window that is gone (closed, minimised, on
+        // another desktop) means the whole display again, and the host is told.
+        var region: CGRect?
+        if let wid = request.window {
+            if let w = Windows.find(wid, synthetic: synthetic) {
+                let middle = CGPoint(x: w.bounds.midX, y: w.bounds.midY)
+                if !display.bounds.contains(middle),
+                   let other = Displays.list(synthetic: synthetic).first(where: { $0.bounds.contains(middle) }) { display = other }
+                region = Windows.region(of: w.bounds, on: display.bounds)
+            }
+            if region == nil {
+                lock.withLock { if lastRequest?.window == wid { lastRequest?.window = nil } }
+                log("window \(wid) is no longer on screen; showing the whole display")
+                onEvent?(["e": "window-gone", "window": Int(wid)])
+            }
+        }
+        let size = CaptureSession.outputSize(display: display, region: region, maxEdge: request.maxEdge)
         if let cur = lock.withLock({ current }), cur.display.id == display.id, cur.width == size.width, cur.height == size.height,
-           cur.request.fps == request.fps, cur.request.audio == request.audio {
+           cur.region == region, cur.request.fps == request.fps, cur.request.audio == request.audio {
             // Same picture: keep the stream running, take the new bitrate, and send a keyframe so whoever asked
             // can start at once.
             cur.setBitrate(kbps: request.kbps)
@@ -409,8 +506,8 @@ public final class CaptureController: @unchecked Sendable {
            cur.request.fps == request.fps, cur.request.audio == request.audio {
             // Same display, new size (the viewer's window changed, or the link got faster or slower).
             do {
-                try await cur.resize(width: size.width, height: size.height, kbps: request.kbps)
-                log("capture resized to \(size.width)x\(size.height), \(request.kbps) kbit/s")
+                try await cur.resize(width: size.width, height: size.height, kbps: request.kbps, region: region, windowID: request.window)
+                log("capture resized to \(size.width)x\(size.height), \(request.kbps) kbit/s\(region == nil ? "" : ", one window")")
                 emitStarted(cur)
                 return
             } catch {
@@ -426,8 +523,8 @@ public final class CaptureController: @unchecked Sendable {
         await teardown()
         var session: CaptureSession?
         do {
-            let s = try CaptureSession(request: request, display: display, synthetic: synthetic,
-                                       videoQueue: videoQueue, audioQueue: audioQueue)
+            let s = try CaptureSession(request: request, display: display, region: region, windowID: request.window,
+                                       synthetic: synthetic, videoQueue: videoQueue, audioQueue: audioQueue)
             session = s
             s.excluded = lock.withLock { excludedWindows }
             s.canSend = { [weak self] in self?.canSendVideo() ?? false }
@@ -482,7 +579,10 @@ public final class CaptureController: @unchecked Sendable {
     }
 
     private func emitStarted(_ s: CaptureSession) {
-        onEvent?(["e": "capture-started", "display": Int(s.display.id), "width": s.width, "height": s.height, "fps": s.request.fps])
+        var e: [String: Any] = ["e": "capture-started", "display": Int(s.display.id), "width": s.width, "height": s.height,
+                                "fps": s.request.fps]
+        if let w = s.windowID { e["window"] = Int(w) }
+        onEvent?(e)
     }
 
     static func errorCode(_ error: Error) -> String {

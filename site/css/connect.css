@@ -148,7 +148,7 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 /* On a phone the quality and display pickers live here, not in the toolbar (viewer.js moves them). */
 .menu .tb-select { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; font-weight: 600; }
 .menu .tb-select .sr-only { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; }
-.menu .tb-select select { flex: 0 1 60%; min-width: 0; padding-right: 10px; }
+.menu .tb-select select { flex: 1 1 0; min-width: 0; max-width: 78%; padding-right: 10px; text-overflow: ellipsis; }
 
 /* Status notes */
 .banners {

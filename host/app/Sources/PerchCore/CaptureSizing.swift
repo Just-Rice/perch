@@ -7,9 +7,13 @@ public struct CaptureRequest: Equatable {
     public var fps: Int
     public var kbps: Int
     public var audio: Bool
+    /// Show only this window (the picture follows it) instead of the whole display.
+    public var window: UInt32?
 
-    public init(displayID: UInt32? = nil, maxEdge: Int = 1920, fps: Int = 30, kbps: Int = 5000, audio: Bool = true) {
+    public init(displayID: UInt32? = nil, maxEdge: Int = 1920, fps: Int = 30, kbps: Int = 5000, audio: Bool = true,
+                window: UInt32? = nil) {
         self.displayID = displayID; self.maxEdge = maxEdge; self.fps = fps; self.kbps = kbps; self.audio = audio
+        self.window = window
     }
 
     /// Reads a `capture` command, clamping each value into a range the encoder handles well.
@@ -19,6 +23,7 @@ public struct CaptureRequest: Equatable {
         fps = CaptureSizing.clampFps(JSONValue.int(c["fps"]) ?? 30)
         kbps = CaptureSizing.clampKbps(JSONValue.int(c["kbps"]) ?? 5000)
         audio = JSONValue.bool(c["audio"]) ?? true
+        window = JSONValue.number(c["window"]).flatMap { $0 >= 1 && $0 <= Double(UInt32.max) ? UInt32($0) : nil }
     }
 }
 

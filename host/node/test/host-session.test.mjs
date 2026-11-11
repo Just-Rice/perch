@@ -511,6 +511,67 @@ test('a changed SDP on the way makes every proof fail, and nothing is sent', asy
 
 // --- during a session ---
 
+test('one window: the list, choosing it, reshaping it, and going back to the whole screen', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  const { v, end } = await passkey(t, ctx);
+  assert.equal(end.t, 'ready');
+  assert.ok(v.firstReply.caps.includes('window'));
+
+  v.send({ t: 'windows' });
+  const list = await v.next(['windows']);
+  assert.deepEqual(list.list, [{ id: 7, app: 'Test App', title: 'Test Window', width: 800, height: 600 }]);
+
+  // Nothing is reshaped while no window is chosen, and junk ids are ignored.
+  let since = app.commands.length;
+  v.send({ t: 'fit', w: 390, h: 844 });
+  v.send({ t: 'window', id: 'seven' });
+  v.send({ t: 'window', id: -1 });
+  v.send({ t: 'window', id: 7 });
+  const one = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.equal(one.window, 7);
+  assert.equal(app.commands.slice(since).some(c => c.c === 'window-fit'), false);
+  const statusWindow = async (want) => {
+    for (let i = 0; i < 100; i++) {
+      if (v.all.findLast(m => m.t === 'status')?.window === want) return;
+      await sleep(50);
+    }
+    assert.fail(`no status with window ${want}`);
+  };
+  await statusWindow(7);
+
+  since = app.commands.length;
+  v.send({ t: 'fit', w: 390, h: 844 });
+  const fit = await app.waitForCommand(c => c.c === 'window-fit', { since });
+  assert.deepEqual([fit.window, fit.w, fit.h], [7, 390, 844]);
+  assert.equal((await v.next(['fit'])).ok, true);
+
+  // Back to the whole display.
+  since = app.commands.length;
+  v.send({ t: 'window', id: null });
+  const whole = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.equal('window' in whole, false);
+  await statusWindow(null);
+
+  // A window that has gone: the app shows the whole display, and the host stops asking for that window.
+  since = app.commands.length;
+  v.send({ t: 'window', id: 99 });
+  await app.waitForCommand(c => c.c === 'capture' && c.window === 99, { since });
+  await sleep(150);
+  since = app.commands.length;
+  v.send({ t: 'quality', preset: 'sharp' });
+  const after = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.equal('window' in after, false, 'the gone window is forgotten');
+
+  // Switching display drops the chosen window.
+  v.send({ t: 'window', id: 7 });
+  await app.waitForCommand(c => c.c === 'capture' && c.window === 7, { since });
+  since = app.commands.length;
+  v.send({ t: 'display', id: 2 });
+  const other = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.deepEqual([other.display, 'window' in other], [2, false]);
+});
+
 test('quality, display and keyframe requests reach the app; junk during sign-in ends it', async (t) => {
   const ctx = await pairedHost(t);
   const { app } = ctx;

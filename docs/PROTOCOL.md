@@ -227,8 +227,19 @@ Macs with `fps60` in the offer's `caps`), `{t:"display", id}`, `{t:"keyframe"}`,
 of the picture on the viewer's screen in device pixels, for Macs with `view` in `caps`: the Mac never sends a bigger
 picture than that), `{t:"ping", n, ts}`, `{t:"bye"}`.
 
-Mac → viewer: `{t:"pong", n, ts}`, `{t:"status", locked, link: "good"|"slow", kbps, fps, width, height, input}`
-(plus `displays` and `display` when the Mac's displays change),
+For Macs with `window` in `caps` (never for guests): `{t:"windows"}` asks which windows are on screen (answered with
+`{t:"windows", list: [{id, app, title, width, height}]}`, front to back, sizes in points);
+`{t:"window", id}` shows only that window, `id: null` the whole display again; `{t:"fit", w, h}` reshapes the window
+being shown to the shape `w:h` (the viewer's own screen), as large as the Mac's display allows, answered with
+`{t:"fit", ok}`. "Shows only that window" means the picture is the part of the display the window covers, and it
+follows the window as it moves or changes size; whatever is in front of it there is in the picture too, so what the
+viewer sees is always what their clicks reach. Pointer positions stay 0..1 across the picture. The window is brought
+to the front when chosen. When it closes, is minimised or leaves the desktop, the Mac goes back to the whole display
+(`status.window` becomes `null`). Choosing another display forgets the window.
+
+Mac → viewer: `{t:"pong", n, ts}`, `{t:"status", locked, link: "good"|"slow", kbps, fps, width, height, input, window}`
+(`window`: the id of the one window being shown, or `null`; plus `displays` and `display` when the Mac's displays
+change),
 `{t:"error", code, message}` (codes: `no-screen-permission`, `capture-failed`), `{t:"bye", reason}`
 (`signed-in-elsewhere | paused | quit | idle | removed | disconnected`).
 
@@ -266,13 +277,17 @@ stdout (host → app). stderr is the host's log. Every frame is `[u32 big-endian
 | `0x10` COMMAND | host → app | JSON command (below) |
 | `0x11` INPUT | host → app | JSON input message from the table above, already validated |
 
-Events (`e`): `permissions {screen, accessibility}`, `displays {displays}`, `capture-started {display, width, height, fps}`,
+Events (`e`): `permissions {screen, accessibility}`, `displays {displays}`, `capture-started {display, width, height, fps, window?}`,
+`windows {list}`, `window-gone {window}` (the window being shown left the screen; the app is already showing the
+whole display), `window-fit {window, ok, error?}`,
 `capture-stopped {reason}`, `capture-error {code, message}`, `lock {locked}`, `login-item {on, status, error?}`,
 `menu {action}` (`pause | resume | disconnect | backup-on | backup-off | keep-awake-on | keep-awake-off |
 login-item-on | login-item-off | check-updates | update | quit`), `input-echo {ev}` (only with `--echo-input`),
 `log {level, message}`.
 
-Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio}`, `keyframe {}`, `bitrate {kbps}`,
+Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?}` (`window`: show only the part of the
+display that window covers, following it), `windows {}` (asks for a `windows` event), `window-fit {window, w, h}`
+(reshape it to `w:h` through Accessibility; never done in test runs), `keyframe {}`, `bitrate {kbps}`,
 `session {active, viewer?, route?, curtain?}` (menu light, notification, keeps the display awake while active;
 `curtain: true` blacks out the Mac's own displays with windows left out of the capture, lifted by three Esc presses
 at the Mac), `lock {}` (lock the screen; sent when a session ends and the owner chose "lock when a session ends"),

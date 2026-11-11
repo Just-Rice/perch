@@ -134,6 +134,15 @@ test('the real app and host: set up, pair from the website, picture and sound fr
     await page.waitFor(`!!document.querySelector('#banners [data-id="viewonly"]')`, { what: 'the view-only note' });
     assert.deepEqual(echoed, [], 'nothing forwarded without Accessibility');
   }
+  // One window: the picker lists the app's pretend window (800 by 600), and choosing it turns the picture into
+  // just that window, in its 4:3 shape.
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.waitFor(`[...document.getElementById('optWindow').options].some(o => o.textContent === 'Test App: Test Window')`,
+    { timeoutMs: 10000, what: 'the list of windows from the app' });
+  await page.eval(`(() => { const s = document.getElementById('optWindow'); s.value = '7'; s.dispatchEvent(new Event('change')); })()`);
+  await page.waitFor(`(() => { const v = document.getElementById('video'); return v.videoWidth > 0 && Math.abs(v.videoWidth / v.videoHeight - 4 / 3) < 0.01; })()`,
+    { timeoutMs: 15000, what: 'a picture in the window\'s shape' });
   const s1 = await state();
   assert.equal(s1.session?.route, 'pair');
   assert.equal(s1.state, 'connected');

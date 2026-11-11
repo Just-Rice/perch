@@ -168,6 +168,15 @@ export class Viewer {
       if (typeof m.ts === 'number') this.pingMs = Math.max(0, performance.now() - m.ts);
     } else if (m.t === 'status') {
       this._applyStatus(m);
+    } else if (m.t === 'windows') {
+      this._setWindows(Array.isArray(m.list) ? m.list : []);
+    } else if (m.t === 'fit') {
+      if (m.ok === false) {
+        this.banners.show('fit', { kind: 'warn', icon: 'warn', title: "That window can't be reshaped.",
+          body: 'Some apps fix the size of their windows.', dismissible: true });
+      } else {
+        this.banners.hide('fit');
+      }
     } else if (m.t === 'error') {
       const e = errorMessage(m.code, m.message);
       this.banners.show('error', { kind: 'bad', icon: 'warn', title: e.title + '.', body: e.body });
@@ -215,6 +224,58 @@ export class Viewer {
     }
     if (st.width > 0 && st.height > 0) { this.display.width = st.width; this.display.height = st.height; }
     if (Array.isArray(st.displays)) this._setDisplays(st.displays, st.display);
+    // Which window is being shown, if any. Just after choosing one here the Mac's older notes still say otherwise.
+    if ('window' in st && performance.now() >= (this.windowChosenAt ?? -Infinity) + 1500) this._showWindow(st.window ?? null);
+  }
+
+  // --- one window ---
+
+  // The windows on the Mac right now, asked for each time the menu opens.
+  _setWindows(list) {
+    const sel = this.$('optWindow');
+    const whole = document.createElement('option');
+    whole.value = '';
+    whole.textContent = 'The whole screen';
+    sel.replaceChildren(whole, ...list.filter(w => Number.isInteger(w?.id)).map(w => {
+      const o = document.createElement('option');
+      o.value = String(w.id);
+      const app = String(w.app ?? '').trim(), title = String(w.title ?? '').trim();
+      o.textContent = (title && title !== app ? `${app || 'Window'}: ${title}` : app || 'Window').slice(0, 60);
+      return o;
+    }));
+    // The one being shown may have gone from the list (it was closed); the Mac says so in its next note.
+    sel.value = this.windowId != null && [...sel.options].some(o => o.value === String(this.windowId)) ? String(this.windowId) : '';
+  }
+
+  _showWindow(id) {
+    if (id === (this.windowId ?? null)) return;
+    this.windowId = id;
+    const sel = this.$('optWindow');
+    if (id != null && ![...sel.options].some(o => o.value === String(id))) {
+      const o = document.createElement('option');
+      o.value = String(id);
+      o.textContent = 'One window';
+      sel.append(o);
+    }
+    sel.value = id == null ? '' : String(id);
+    this.$('optFit').hidden = id == null;
+    this.setView(IDENTITY);
+  }
+
+  _chooseWindow(value) {
+    const id = value === '' ? null : Number(value);
+    if (id !== null && !Number.isInteger(id)) return;
+    this.windowChosenAt = performance.now();
+    this._showWindow(id);
+    this.session.send({ t: 'window', id });
+  }
+
+  // Reshape the window on the Mac to this screen's shape, so it fills the screen here.
+  _fitWindow() {
+    const box = this.surface.getBoundingClientRect();
+    if (this.windowId == null || !(box.width > 0 && box.height > 0)) return;
+    this.session.send({ t: 'fit', w: Math.round(box.width), h: Math.round(box.height) });
+    this._toggleMenu(false);
   }
 
   // --- regular checks ---
@@ -322,6 +383,7 @@ export class Viewer {
       const d = this.displays.find(x => String(x.id) === sel.value);
       if (!d) return;
       this.display = { id: d.id, width: d.width, height: d.height };
+      this._showWindow(null); // a window chosen on the other display doesn't carry over
       this.session.send({ t: 'display', id: d.id });
       this.setView(IDENTITY);
     });
@@ -377,6 +439,14 @@ export class Viewer {
       this.prefs.set('swapCtrlCmd', e.target.checked);
     });
     on('optZoom', 'click', () => { this.setView(IDENTITY); this._toggleMenu(false); });
+    // One window at a time, on Macs that offer it.
+    const canWindow = !this.guest && !!this.session.caps?.includes('window');
+    $('windowWrap').hidden = !canWindow;
+    $('optFit').hidden = true;
+    this.windowId = null;
+    this._setWindows([]);
+    on('optWindow', 'change', e => this._chooseWindow(e.target.value));
+    on('optFit', 'click', () => this._fitWindow());
     on('optKeyframe', 'click', () => { this.session.send({ t: 'keyframe' }); this._toggleMenu(false); });
     on('tbBye', 'click', () => this.onLeave());
 
@@ -449,7 +519,10 @@ export class Viewer {
     const show = open ?? menu.hidden;
     menu.hidden = !show;
     this.$('tbMore').setAttribute('aria-expanded', String(show));
-    if (show) this._showToolbar();
+    if (show) {
+      this._showToolbar();
+      if (!this.$('windowWrap').hidden) this.session.send({ t: 'windows' });
+    }
   }
 
   _showToolbar() {

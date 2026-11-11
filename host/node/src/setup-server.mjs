@@ -64,6 +64,8 @@ const ACTIONS = {
   totpStart: [],
   totpConfirm: [['code', 'string']],
   pairStart: [['site', 'string?']],
+  guestStart: [['minutes', 'number'], ['site', 'string?']],
+  guestStop: [],
   siteAdd: [['url', 'string']],
   siteRemove: [['origin', 'string']],
   pairCancel: [],
@@ -96,6 +98,7 @@ function checkField(value, rule, name) {
   if (rule === 'string?' && (value === undefined || value === null || value === '')) return undefined;
   if ((rule === 'string' || rule === 'string?') && typeof value === 'string' && value.length > 0 && value.length <= 16384) return value;
   if (rule === 'object' && value && typeof value === 'object' && !Array.isArray(value)) return value;
+  if (rule === 'number' && typeof value === 'number' && Number.isFinite(value)) return value;
   throw new HttpError(400, `Something was missing from that request (${name}). Reload the page and try again.`);
 }
 

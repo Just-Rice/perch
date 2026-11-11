@@ -192,6 +192,15 @@ pin; the browser connects with that certificate, refuses offers that don't match
 fingerprint, recomputes the challenge with it, and accepts each `r` once and `ts` within 3 minutes. Then the code, as
 usual.
 
+**Guest link** (`route:"guest"`). The owner can make a link that lets someone watch, never control:
+`connect.html#guest=<b64url(guestId ‖ guestSecret ‖ pin)>`, valid for a chosen time (1 minute to 24 hours), one at a
+time. It has a meeting point of its own, `perch/v1/g/<hash(guestId)>` sealed with `HKDF(guestSecret, …, "guest")`, so
+it reveals nothing about the Mac's usual address or key. After `hi` the guest sends
+`{t:"guest1", proof: HMAC-SHA256(guestSecret, "perch guest v1" ‖ bind)}` and gets `ready` with `guest: true,
+input: false` (no passkey, no code: the link is the pass). Up to 3 guests at once receive the same picture and sound
+as the owner's viewer (or the main display when the owner isn't connected); their input and every control message
+except `ping` and `keyframe` are ignored. Stopping the link or its running out ends them with `bye removed`.
+
 **Sites.** A Mac accepts passkey sign-ins and pairings only from its list of sites: `https://just-rice.github.io`
 always, plus any the owner added in Setup (`config.sites`: `{origin, url}`, https and a domain name only). A passkey
 belongs to one site's domain (its RP ID, the origin's hostname), so each device is paired once per site: `pair1`

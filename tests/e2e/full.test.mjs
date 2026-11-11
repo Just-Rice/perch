@@ -231,3 +231,29 @@ test('"Sign in with a passkey" on a browser that doesn\'t remember the Mac asks 
     off();
   }
 });
+
+test('a guest link: the page watches with no sign-in, shows it is view only, and can control nothing', async () => {
+  const { link } = await app.call('guestStart', 30);
+  assert.match(link, /connect\.html#guest=[A-Za-z0-9_-]+$/);
+  const page = await openPage(stack, link.replace('connect.html#', `connect.html?${testParams()}#`), { name: 'guest' });
+  await assertPlaying(page);
+  assert.equal(await page.eval('location.hash'), '', 'the link was cleared from the address bar');
+  await page.waitFor(`!!document.querySelector('#banners [data-id="guest"]')`, { what: 'the guest note' });
+  assert.match(await page.text('#banners'), /watching as a guest/);
+  assert.equal(await page.eval(`document.getElementById('tbKeys').hidden && document.getElementById('tbMore').hidden`), true);
+  const st = await app.call('state');
+  assert.equal(st.guest.watching, 1);
+  assert.equal(st.session, null);
+  // Clicking and typing on the picture send nothing to the Mac.
+  const before = app.inputs.length;
+  const box = await page.eval(`(() => { const r = document.getElementById('surface').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.click(null, box);
+  await page.key('a', 'KeyA', { text: 'a' });
+  await sleep(500);
+  assert.equal(app.inputs.length, before, 'nothing from a guest reaches the Mac');
+  // Stopping the link ends the watching, with a plain explanation.
+  await app.call('guestStop');
+  await page.waitFor(`!document.getElementById('ended').hidden`, { what: 'the ended card' });
+  assert.match(await page.text('#endedTitle'), /guest link has stopped working/);
+  assert.deepEqual(page.problems(), []);
+});

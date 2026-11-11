@@ -825,3 +825,69 @@ test('lock on disconnect and the privacy curtain: the app is told when the owner
   const tail = app.commands.slice(since).map(c => c.c);
   assert.ok(tail.lastIndexOf('lock') > tail.lastIndexOf('session'), 'locked after the session ended');
 });
+
+test('guest link: watch only, alongside the owner or alone; ends when stopped or when it runs out', async (t) => {
+  const ctx = await pairedHost(t, { streamAlways: true });
+  const { app } = ctx;
+  const parse = link => {
+    const b = Buffer.from(new URL(link).hash.replace('#guest=', ''), 'base64url');
+    return { guestId: new Uint8Array(b.subarray(0, 16)), guestSecret: new Uint8Array(b.subarray(16, 48)), pin: b.subarray(48) };
+  };
+  // No link yet: nobody is listening for guests.
+  const made = await app.call('guestStart', 30);
+  const g = parse(made.link);
+  assert.equal(g.pin.length, 16, 'the link carries the Mac\'s certificate pin, and nothing else about the Mac');
+  assert.equal((await app.call('state')).guest.watching, 0);
+
+  // A wrong secret is refused; the right one gets a view-only session with picture and sound.
+  const bad = viewer(t, { label: 'Wrong link' });
+  await bad.open({ route: 'guest', guestId: g.guestId, guestSecret: g.guestSecret });
+  const refused = await bad.signInGuest({ guestSecret: new Uint8Array(32) });
+  assert.deepEqual([refused.t, refused.reason], ['denied', 'bad-link']);
+  await bad.close();
+
+  const guest = viewer(t, { label: 'Guest' });
+  await guest.open({ route: 'guest', guestId: g.guestId, guestSecret: g.guestSecret });
+  const ready = await guest.signInGuest({ guestSecret: g.guestSecret });
+  assert.deepEqual([ready.t, ready.guest, ready.input], ['ready', true, false]);
+  await app.waitFor(() => guest.media.video > 20 && guest.media.audio > 5, { what: 'picture and sound for the guest' });
+  assert.equal((await app.call('state')).guest.watching, 1);
+  assert.equal((await app.call('state')).session, null, 'a guest is not the owner\'s session');
+
+  // Nothing a guest sends can touch the Mac.
+  const before = app.inputs.length, cmds = app.commands.length;
+  guest.sendInput({ t: 'k', c: 'KeyA', k: 'a', d: true, m: 0 });
+  guest.sendInput({ t: 'b', b: 0, d: true, x: 0.5, y: 0.5, n: 1 });
+  guest.send({ t: 'quality', preset: 'sharp' });
+  guest.send({ t: 'display', id: 2 });
+  await new Promise(r => setTimeout(r, 400));
+  assert.equal(app.inputs.length, before, 'no input from a guest');
+  assert.equal(app.commands.slice(cmds).some(c => c.c === 'capture'), false, 'a guest can\'t change what is shown');
+
+  // The owner signs in too: both get the picture, only the owner controls, and the guest stays when the owner leaves.
+  const owner = await passkey(t, ctx);
+  assert.equal(owner.end.t, 'ready');
+  const v0 = guest.media.video;
+  await app.waitFor(() => owner.v.media.video > 20 && guest.media.video > v0 + 20, { what: 'picture for both' });
+  owner.v.sendInput({ t: 'k', c: 'KeyB', k: 'b', d: true, m: 0 });
+  await app.waitFor(() => app.inputs.some(i => i.ev.c === 'KeyB'), { what: 'the owner\'s key' });
+  owner.v.send({ t: 'bye' });
+  await app.waitFor(async () => (await app.call('state')).session === null, { what: 'the owner to leave' });
+  const v1 = guest.media.video;
+  await app.waitFor(() => guest.media.video > v1 + 20, { what: 'the guest still watching' });
+  assert.equal(app.commands.filter(c => c.c === 'capture').at(-1).on, true);
+
+  // Stopping the link disconnects the guest and stops the picture; the link no longer works.
+  await app.call('guestStop');
+  assert.equal((await guest.next(['bye'])).reason, 'removed');
+  await app.waitForCommand(c => c.c === 'capture' && c.on === false);
+  await assert.rejects(viewer(t).open({ route: 'guest', guestId: g.guestId, guestSecret: g.guestSecret, timeoutMs: 1500 }), /no offer/);
+
+  // A link that runs out does the same by itself.
+  const short = parse((await app.call('guestStart', 1)).link);
+  const late = viewer(t, { label: 'Late guest' });
+  await late.open({ route: 'guest', guestId: short.guestId, guestSecret: short.guestSecret });
+  assert.equal((await late.signInGuest({ guestSecret: short.guestSecret })).t, 'ready');
+  await app.advance(61_000);
+  assert.equal((await app.call('state')).guest, null);
+});

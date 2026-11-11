@@ -19,6 +19,7 @@ const BYE_TEXT = {
   removed: 'the device was removed', disconnected: 'disconnected', bye: 'the viewer left', denied: 'sign-in refused',
 };
 const CAPTURE_ERRORS = ['no-screen-permission', 'capture-failed'];
+const MAX_GUESTS = 3;
 
 const publicDevice = d => ({ id: d.id, label: d.label, createdAt: d.createdAt ?? null, lastUsedAt: d.lastUsedAt ?? null });
 
@@ -41,6 +42,8 @@ export class Controller {
     this.relay = relay ?? new Relay({ store, log: log.child('relay'), now });
     this.sessions = new Set();
     this.active = null;
+    this.guests = new Set();   // signed-in guests (view only), besides the one active viewer
+    this.guestTimer = null;
     this.listeners = new Set();
     this.changeQueued = false;
     this.started = false;
@@ -136,6 +139,7 @@ export class Controller {
       devices: s.devices.map(d => ({ ...publicDevice(d), site: this.auth.deviceRpId(d) })),
       sites: this.auth.sites().map(x => ({ origin: x.origin, url: x.url, builtIn: !!x.builtIn, addedAt: x.addedAt ?? null })),
       pairing: this.auth.pairingInfo(),
+      guest: (g => g ? { ...g, watching: this.guests.size } : null)(this.auth.guestInfo()),
       session: a ? { viewer: a.label, route: a.route, since: new Date(a.signedInAt).toISOString(), deviceId: a.deviceId } : null,
       activity: s.config.log.slice(-ACTIVITY_SHOWN).reverse(),
       update: this.update,
@@ -236,8 +240,14 @@ export class Controller {
   }
 
   // Media from the app goes to the signed-in viewer only, and only once it is signed in.
-  handleVideo(frame) { if (this.active?.signedIn) this.active.pushVideo(frame); }
-  handleAudio(frame) { if (this.active?.signedIn) this.active.pushAudio(frame); }
+  handleVideo(frame) {
+    if (this.active?.signedIn) this.active.pushVideo(frame);
+    for (const g of this.guests) g.pushVideo(frame);
+  }
+  handleAudio(frame) {
+    if (this.active?.signedIn) this.active.pushAudio(frame);
+    for (const g of this.guests) g.pushAudio(frame);
+  }
 
   _notify(title, body) { this.app.command('notify', { title, body }); }
 
@@ -273,6 +283,10 @@ export class Controller {
   refusal(hello) {
     const s = this.store;
     if (s.settings.paused) return { reason: 'paused' };
+    if (hello.route === 'guest') {
+      if (!this.auth.guestInfo()) return { reason: 'link-expired' };
+      return this.guests.size >= MAX_GUESTS ? { reason: 'busy', retryAfter: 30 } : null;
+    }
     if (!s.config.totp.set) return { reason: 'not-set-up' };
     if (hello.route === 'passkey' && s.devices.length === 0) return { reason: 'not-set-up' };
     if (hello.route === 'backup' && (!s.settings.backupOn || !s.config.backup.record)) return { reason: 'backup-off' };
@@ -287,7 +301,8 @@ export class Controller {
     let n = 0;
     for (const s of this.sessions) {
       if (s.state === 'ready' || s.state === 'ended') continue;
-      if (kind === undefined || (kind === 'name') === (s.route === 'backup')) n++;
+      const k = s.route === 'backup' ? 'name' : s.route === 'guest' ? 'guest' : 'host';
+      if (kind === undefined || kind === k) n++;
     }
     return n;
   }
@@ -344,16 +359,43 @@ export class Controller {
     };
   }
 
+  // Whoever sets the picture's size and bitrate: the owner's own viewer, or else the first guest.
+  get leader() { return this.active ?? this.guests.values().next().value ?? null; }
+
   captureChanged(session) {
-    if (session === this.active) this._sendCapture(session);
+    if (session === this.leader) this._sendCapture(session);
   }
 
+  // Any viewer may need a fresh picture to start from (a guest joining, a lost packet).
   keyframe(session) {
-    if (session === this.active) this.app.command('keyframe', {});
+    if (session === this.active || this.guests.has(session)) this.app.command('keyframe', {});
   }
 
   bitrate(session, kbps) {
-    if (session === this.active) this.app.command('bitrate', { kbps });
+    if (session === this.leader) this.app.command('bitrate', { kbps });
+  }
+
+  // A guest finished joining: they get the same picture the owner's viewer gets (or the main display, if nobody
+  // else is connected), and never any control.
+  guestSignedIn(session) {
+    this.guests.add(session);
+    const leader = this.active;
+    const quality = leader?.quality ?? (Object.hasOwn(QUALITY, this.store.settings.quality) ? this.store.settings.quality : DEFAULT_QUALITY);
+    const display = this._display(leader?.display);
+    session.quality = quality;
+    session.display = display.id;
+    if (!leader && this.guests.size === 1) {
+      this.app.command('session', { active: true, viewer: 'A guest (view only)', route: 'guest', curtain: false });
+      this._sendCapture(session);
+    } else {
+      this.app.command('keyframe', {});
+    }
+    this._notify('Perch', `A guest is watching this Mac's screen (${session.label}).`);
+    this._changed();
+    return {
+      display: { id: display.id, width: display.width, height: display.height },
+      displays: [{ ...display }], quality, audio: true, input: false, locked: !!this.locked, guest: true,
+    };
   }
 
   // Input reaches the app only from the active, signed-in viewer, and only if the Mac allows Perch to control it.
@@ -364,6 +406,30 @@ export class Controller {
 
   sessionEnded(session, reason, wasReady) {
     this.sessions.delete(session);
+    if (this.guests.delete(session)) {
+      this.store.activity('guest', `A guest stopped watching: ${session.label}`);
+      if (!this.active && this.guests.size === 0) {
+        this.captureOn = false;
+        this.capture = null;
+        this.app.command('capture', { on: false });
+        this.app.command('session', { active: false });
+      } else if (!this.active) {
+        this._sendCapture(this.leader); // the next guest's link now sets the bitrate
+      }
+      this._changed();
+      return;
+    }
+    if (this.active === session && this.guests.size > 0) {
+      // The owner's viewer left but guests are still watching: keep the picture going for them.
+      this.active = null;
+      this.app.command('session', { active: true, viewer: 'A guest (view only)', route: 'guest', curtain: false });
+      this._sendCapture(this.leader);
+      if (wasReady && reason !== 'signed-in-elsewhere') {
+        this.store.activity('session', `${session.label} disconnected (${BYE_TEXT[reason] ?? reason})`);
+      }
+      this._changed();
+      return;
+    }
     if (this.active === session) {
       this.active = null;
       this.captureOn = false;
@@ -410,6 +476,29 @@ export class Controller {
     this.pairTimer.unref?.();
     this._changed();
     return info;
+  }
+
+  // --- guest link: show the screen to someone, view only ---
+
+  async guestStart(minutes = 30, site = null) {
+    const info = this.auth.createGuest({ minutes: Number(minutes), siteOrigin: typeof site === 'string' && site ? site : null });
+    await this.signaling.setGuest(this.auth.guest);
+    clearTimeout(this.guestTimer);
+    // When the link runs out, everyone watching through it is disconnected.
+    this.guestTimer = setTimeout(() => this.guestStop('expired').catch(() => {}), this.auth.guest.expiresAt - this.now() + 50);
+    this.guestTimer.unref?.();
+    this._changed();
+    return info;
+  }
+
+  async guestStop(why = 'stopped') {
+    clearTimeout(this.guestTimer);
+    const had = !!this.auth.guest;
+    this.auth.stopGuest();
+    await this.signaling.setGuest(null);
+    this._endSessions(s => s.route === 'guest', 'removed');
+    if (had) this.store.activity('guest', why === 'expired' ? 'The guest link ran out' : 'Guest link stopped');
+    this._changed();
   }
 
   pairCancel() {
@@ -601,6 +690,7 @@ export class Controller {
   async reset() {
     this._endSessions(() => true, 'removed');
     this.auth.cancelPairing();
+    await this.guestStop();
     this.auth.pendingTotp = null;
     await this.store.reset();
     await this.auth.init();
@@ -674,6 +764,7 @@ export class Controller {
   async shutdown(reason = 'quit') {
     this._endSessions(() => true, reason);
     clearTimeout(this.pairTimer);
+    clearTimeout(this.guestTimer);
     await this.signaling.close().catch(() => {});
   }
 }

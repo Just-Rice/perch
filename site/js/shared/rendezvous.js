@@ -25,6 +25,13 @@ export async function nameTopic(macName) {
   return `${TOPIC_PREFIX}n/${await shortHash('perch name v1', utf8(normalizeMacName(macName)))}`;
 }
 
+// A guest link has a meeting point of its own, made from the link's random id and secret alone: a guest learns
+// nothing about the Mac's usual address or key.
+export async function guestTopic(guestId) {
+  return `${TOPIC_PREFIX}g/${await shortHash('perch guest v1', guestId)}`;
+}
+export const guestEnvelopeKey = guestSecret => hkdfAesKey(guestSecret, 'perch env v1', 'guest');
+
 export const replyTopic = (topic, sid) => `${topic}/${sid}`;
 
 export const hostEnvelopeKey = sigKey => hkdfAesKey(sigKey, 'perch env v1', 'host');

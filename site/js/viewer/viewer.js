@@ -29,7 +29,8 @@ export class Viewer {
     this.summary = null;
     this.status = {};
     this.over = false;
-    this.inputAllowed = ready.input !== false;
+    this.guest = ready.guest === true;   // watching through a guest link: never any control
+    this.inputAllowed = !this.guest && ready.input !== false;
     this.display = { ...(ready.display || {}) };
     this.hideTimer = null;
   }
@@ -85,8 +86,8 @@ export class Viewer {
 
     this._applyStatus({ locked: this.ready.locked, input: this.ready.input });
     const q = this.prefs.get('quality');
-    this.$('tbQuality').value = q in QUALITY ? q : this.ready.quality;
-    if (q in QUALITY && q !== this.ready.quality) session.send({ t: 'quality', preset: q });
+    this.$('tbQuality').value = q in QUALITY && !this.guest ? q : this.ready.quality;
+    if (!this.guest && q in QUALITY && q !== this.ready.quality) session.send({ t: 'quality', preset: q });
 
     this._every(PING_MS, () => this._ping());
     this._every(1000, () => this._stats());
@@ -184,10 +185,16 @@ export class Viewer {
       }
     }
     if ('input' in st) {
-      this.inputAllowed = st.input !== false;
+      this.inputAllowed = !this.guest && st.input !== false;
       this.root.classList.toggle('view-only', !this.inputAllowed);
       this._syncKeyboardButton();
-      if (!this.inputAllowed) {
+      if (this.guest) {
+        if (!this.guestNoted) {
+          this.guestNoted = true;
+          this.banners.show('guest', { kind: 'info', icon: 'eye', title: "You're watching as a guest.",
+            body: "You can see and hear this Mac, but you can't control it.", dismissible: true });
+        }
+      } else if (!this.inputAllowed) {
         this.banners.show('viewonly', { kind: 'warn', icon: 'eye', title: 'View only.',
           body: "Your Mac hasn't let Perch control it yet. On the Mac, open System Settings › Privacy & Security › " +
             'Accessibility and turn on Perch.' });
@@ -302,6 +309,9 @@ export class Viewer {
 
     on('tbQuality', 'change', e => this._setQuality(e.target.value));
 
+    // A guest only watches: nothing here that would change the Mac or what it sends.
+    for (const id of ['tbKeys', 'tbMore']) $(id).hidden = this.guest;
+    $('tbQuality').closest('label').hidden = this.guest;
     // 60 frames a second, on Macs that offer it.
     const fast = $('tbQuality').querySelector('option[value="fast"]');
     fast.hidden = fast.disabled = !this.session.caps?.includes('fps60');
@@ -399,7 +409,7 @@ export class Viewer {
   // (a phone needs far fewer than a desktop monitor, and fewer pixels means a smoother picture on the same link).
   // Zooming in asks for up to twice as many. Sent a moment after things settle, and only when it changed.
   _reportView() {
-    if (!this.session.caps?.includes('view')) return;
+    if (this.guest || !this.session.caps?.includes('view')) return;
     clearTimeout(this.viewTimer);
     this.viewTimer = setTimeout(() => {
       if (this.over) return;

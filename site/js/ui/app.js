@@ -4,7 +4,7 @@ import { pageEnv } from './env.js';
 import { MacStore, lastUsedText } from './macs.js';
 import { Prefs } from './prefs.js';
 import { deviceLabel, isAppleDevice, isTouchFirst } from './device.js';
-import { parsePairHash, parseUserHandle } from './pairlink.js';
+import { parsePairHash, parseGuestHash, parseUserHandle } from './pairlink.js';
 import { Connection, PerchError } from './connection.js';
 import { signIn, loadOpaque } from './signin.js';
 import { Screens } from './screens.js';
@@ -45,6 +45,7 @@ export function start() {
 
   // A pairing link carries secrets in the address: take it out of the address bar (and history) straight away.
   const pair = parsePairHash(location.hash);
+  const guest = parseGuestHash(location.hash);
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
 
   $('boot').hidden = true;
@@ -55,6 +56,8 @@ export function start() {
   $('app').hidden = false;
   if (pair?.error) return showMessage(app, failureMessage('bad-link'), null);
   if (pair) return runSession(app, { route: 'pair', pair });
+  if (guest?.error) return showMessage(app, failureMessage('bad-link'), null);
+  if (guest) return runSession(app, { route: 'guest', guest });
   showHome(app);
 }
 
@@ -209,14 +212,17 @@ async function runSession(app, target) {
   const { route, mac, pair } = target;
   const shownName = mac?.label || mac?.name || target.macName || '';
   ui.setMacName(shownName || 'your Mac');
-  ui.progress(route === 'pair' ? 'Pairing with your Mac' : shownName ? `Connecting to ${shownName}` : 'Connecting to your Mac');
+  ui.progress(route === 'pair' ? 'Pairing with your Mac' : route === 'guest' ? 'Joining as a guest'
+    : shownName ? `Connecting to ${shownName}` : 'Connecting to your Mac');
 
   const ids = route === 'pair' ? { hostId: pair.hostId, sigKey: pair.sigKey }
     : route === 'passkey' ? { hostId: fromB64url(mac.hostId), sigKey: fromB64url(mac.sigKey) } : {};
   // The Mac's certificate pin, from its passkey, a remembered Mac or the pairing link: only that Mac is trusted.
-  const pin = route === 'pair' ? pair.pin ?? null : route === 'passkey' && mac?.pin ? fromB64url(mac.pin) : null;
+  const pin = route === 'pair' ? pair.pin ?? null : route === 'guest' ? target.guest.pin ?? null
+    : route === 'passkey' && mac?.pin ? fromB64url(mac.pin) : null;
   const conn = new Connection({
     route, ...ids, macName: target.macName, pairId: pair?.pairId, label: app.label, pin,
+    guestId: target.guest?.guestId, guestSecret: target.guest?.guestSecret,
     certificate: target.quick?.cert ?? null,
     brokers: env.brokers, iceServers: env.iceServers, log: app.log, onStage: s => ui.stage(s),
   });
@@ -224,6 +230,7 @@ async function runSession(app, target) {
   let saved = mac || null;
   const ctx = {
     route, rpId: env.rpId, label: app.label, credentialId: mac?.credentialId, password: target.password, pair,
+    guest: target.guest ?? null,
     quick: target.quick ?? null,
     alwaysTap: env.params.get('tap') === '1',
     onHi: hi => ui.setMacName(hi.name),
@@ -240,7 +247,8 @@ async function runSession(app, target) {
     const name = ready.name || hi.name || shownName;
     if (saved) saved = app.macs.update(saved.hostId, { name, lastUsed: Date.now() }) || saved;
     // What "Reconnect" does later: a paired or known Mac signs in with its passkey; backup asks for the password again.
-    const again = saved ? { route: 'passkey', mac: saved } : { route: 'backup-form', macName: target.macName };
+    const again = route === 'guest' ? { route: 'guest', guest: target.guest }
+      : saved ? { route: 'passkey', mac: saved } : { route: 'backup-form', macName: target.macName };
     startViewer(app, conn, hi, ready, again);
   } catch (e) {
     if (app.conn !== conn) return;

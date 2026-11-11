@@ -19,8 +19,8 @@ export const MAX_INPUT_BYTES = 4096;
 export const STATUS_EVERY_MS = 2000;
 export const MAX_CODE_TRIES = 3;
 export const BYE_REASONS = ['signed-in-elsewhere', 'paused', 'quit', 'idle', 'removed', 'disconnected'];
-const ROUTE_TEXT = { passkey: 'passkey', backup: 'backup password', pair: 'pairing' };
-const FIRST_STEP = { passkey: 'assert', backup: 'opaque1', pair: 'pair1' };
+const ROUTE_TEXT = { passkey: 'passkey', backup: 'backup password', pair: 'pairing', guest: 'guest link' };
+const FIRST_STEP = { passkey: 'assert', backup: 'opaque1', pair: 'pair1', guest: 'guest1' };
 const CLOSE_DELAY_MS = 250;
 
 const seconds = ms => Math.max(1, Math.ceil(ms / 1000));
@@ -148,8 +148,10 @@ export class Session {
     if (msg.t === 'bye') return this.end('bye', { sendBye: false });
     if (this.state === 'ready') return this._handleReady(msg);
     if (this.state !== 'auth') return this._protocol(`${msg.t} before hi`);
-    const expect = { assert: 'assert', opaque1: 'opaque1', opaque3: 'opaque3', pair1: 'pair1', 'pair-cred': 'pair-cred', code: 'code' }[this.step];
+    const expect = { assert: 'assert', opaque1: 'opaque1', opaque3: 'opaque3', pair1: 'pair1', 'pair-cred': 'pair-cred', code: 'code',
+      guest1: 'guest1' }[this.step];
     if (msg.t !== expect && !(this.step === 'opaque3' && msg.t === 'opaque-fail')) return this._protocol(`${msg.t} during ${this.step}`);
+    if (this.step === 'guest1') return this._guest1(msg);
     const locked = this.auth.lockedFor(this.route);
     if (locked > 0 && this.step !== 'opaque3' && this.step !== 'pair-cred') {
       return this._deny('locked-out', { retryAfter: seconds(locked) });
@@ -237,6 +239,19 @@ export class Session {
     this._askCode();
   }
 
+  // A guest: the link itself is the pass (the owner handed it out on purpose). It only ever lets them watch.
+  async _guest1(msg) {
+    try {
+      await this.auth.checkGuestProof(msg.proof, this.bind);
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      this.log?.info(`guest refused: ${e.message}`);
+      return this._deny(e.reason);
+    }
+    this.guest = true;
+    this._signedIn();
+  }
+
   async _pair1(msg) {
     try {
       await this.auth.checkPairProof(msg.pairId, msg.proof, this.bind, this);
@@ -313,9 +328,9 @@ export class Session {
     this.lastInputAt = this.now();
     const how = this.route === 'backup' ? 'the backup password' : this.route === 'pair' ? 'a new passkey' : 'a passkey';
     const who = this.deviceLabel && this.deviceLabel !== this.label ? `${this.label} (${this.deviceLabel})` : this.label;
-    this.store.activity('sign-in', `Signed in with ${how}: ${who}`);
+    this.store.activity(this.guest ? 'guest' : 'sign-in', this.guest ? `A guest started watching: ${this.label}` : `Signed in with ${how}: ${who}`);
     this.log?.info(`signed in (${this.route})`);
-    const info = this.hub.sessionSignedIn(this);
+    const info = this.guest ? this.hub.guestSignedIn(this) : this.hub.sessionSignedIn(this);
     this.quality = info.quality;
     this.governor.setFps((QUALITY[this.quality] ?? QUALITY.balanced).fps);
     this.display = info.display.id;
@@ -335,10 +350,10 @@ export class Session {
       this.lastSample = this.media.sample();
       // A link that can't carry this picture size at full frame rate gets a smaller picture (and the size comes back
       // when the link does).
-      if (this.governor.update(this.media.bitrate.target, this.wantedEdge()) !== undefined) this.hub.captureChanged(this);
+      if (!this.guest && this.governor.update(this.media.bitrate.target, this.wantedEdge()) !== undefined) this.hub.captureChanged(this);
       this.sendStatus();
     }, STATUS_EVERY_MS, true);
-    this._watchIdle();
+    if (!this.guest) this._watchIdle(); // a guest never sends input; the link's own time limit ends their watching
     if (!this.hub.permissions.screen) this.sendError('no-screen-permission', 'The Mac has not allowed Perch to record the screen yet.');
   }
 
@@ -365,6 +380,8 @@ export class Session {
   // --- during a session ---
 
   _handleReady(msg) {
+    // A guest may only keep the connection alive and ask for a fresh picture; everything else is the owner's.
+    if (this.guest && msg.t !== 'ping' && msg.t !== 'keyframe') return;
     switch (msg.t) {
       case 'ping':
         if (Number.isFinite(msg.n) && Number.isFinite(msg.ts)) this._send({ t: 'pong', n: msg.n, ts: msg.ts });
@@ -399,6 +416,7 @@ export class Session {
   }
 
   _onInput(data, channel) {
+    if (this.guest) return; // view only, always
     if (this.state !== 'ready') {
       this.stats.inputDroppedBeforeSignIn++;
       return;
@@ -420,7 +438,7 @@ export class Session {
     const cap = this.hub.capture ?? {};
     this._send({
       t: 'status', locked: !!this.hub.locked, link: this.media.bitrate.link, kbps: s.kbps, fps: s.fps,
-      width: cap.width ?? 0, height: cap.height ?? 0, input: !!this.hub.permissions.accessibility, ...extra,
+      width: cap.width ?? 0, height: cap.height ?? 0, input: !this.guest && !!this.hub.permissions.accessibility, ...extra,
     });
   }
 

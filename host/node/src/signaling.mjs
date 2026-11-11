@@ -6,7 +6,7 @@
 // hellos are rate limited, at most a few sign-ins may be in progress, and the real checks happen later, over the
 // WebRTC connection itself (src/session.mjs).
 import {
-  hostTopic, nameTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey,
+  hostTopic, nameTopic, guestTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey, guestEnvelopeKey,
 } from '../../../site/js/shared/rendezvous.js';
 import { PROTO, MIN_PEER_PROTO } from '../../../site/js/shared/proto.js';
 
@@ -26,6 +26,7 @@ export class Signaling {
     this.now = now;
     this.host = null;      // {topic, key}
     this.name = null;      // {topic, key, macName}
+    this.guest = null;     // {topic, key} while a guest link is active
     this.recentByKind = {}; // kind ('host' | 'name') -> times of accepted hellos, for the per-minute limit
     this.lastRateReply = {}; // kind -> when we last answered 'rate'
     this.sids = new Map(); // sid -> {kind, topic, key, session?, offer?, resends, at}
@@ -57,14 +58,30 @@ export class Signaling {
     await this.rv.listen(topic, key, (msg, info) => this._receive('name', msg, info));
   }
 
+  // Listen for guests of the active guest link ({id, secret}), or stop (null).
+  async setGuest(link) {
+    const topic = link ? await guestTopic(link.id) : null;
+    if (this.guest?.topic === topic) return;
+    if (this.guest) {
+      const old = this.guest.topic;
+      this.guest = null;
+      await this.rv.unlisten(old);
+    }
+    if (!topic) return;
+    const key = await guestEnvelopeKey(link.secret);
+    this.guest = { topic, key };
+    await this.rv.listen(topic, key, (msg, info) => this._receive('guest', msg, info));
+  }
+
   get listening() {
-    return { host: this.host?.topic ?? null, name: this.name?.topic ?? null };
+    return { host: this.host?.topic ?? null, name: this.name?.topic ?? null, ...(this.guest ? { guest: this.guest.topic } : {}) };
   }
 
   async close() {
     if (this.host) await this.rv.unlisten(this.host.topic).catch(() => {});
     if (this.name) await this.rv.unlisten(this.name.topic).catch(() => {});
-    this.host = this.name = null;
+    if (this.guest) await this.rv.unlisten(this.guest.topic).catch(() => {});
+    this.host = this.name = this.guest = null;
   }
 
   // --- internals ---
@@ -75,7 +92,7 @@ export class Signaling {
   }
 
   async _receive(kind, msg, { topic }) {
-    const where = kind === 'host' ? this.host : this.name;
+    const where = kind === 'host' ? this.host : kind === 'guest' ? this.guest : this.name;
     if (!where || where.topic !== topic) return;
     this._forget();
     if (msg.t === 'hello') return this._hello(kind, where, msg);
@@ -91,7 +108,7 @@ export class Signaling {
 
   _refuse(where, sid, reason, retryAfter) {
     this.stats.refusals[reason] = (this.stats.refusals[reason] ?? 0) + 1;
-    this.log?.info(`rendezvous: refused a ${where === this.name ? 'backup' : 'host'} hello (${reason})`);
+    this.log?.info(`rendezvous: refused a ${where === this.name ? 'backup' : where === this.guest ? 'guest' : 'host'} hello (${reason})`);
     return this._reply(where, sid, {
       t: 'refuse', reason, ...(retryAfter ? { retryAfter } : {}), pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv,
     });
@@ -101,7 +118,7 @@ export class Signaling {
     const { sid, pv, route } = msg;
     if (typeof sid !== 'string' || !ID16_RE.test(sid)) return this._drop('bad sid');
     if (!Number.isInteger(pv) || pv < 0) return this._drop('bad pv');
-    const routes = kind === 'host' ? ['passkey', 'pair'] : ['backup'];
+    const routes = kind === 'host' ? ['passkey', 'pair'] : kind === 'guest' ? ['guest'] : ['backup'];
     if (!routes.includes(route)) return this._drop(`route ${route} on the ${kind} topic`);
     if (route === 'pair' && (typeof msg.pairId !== 'string' || !ID16_RE.test(msg.pairId))) return this._drop('bad pairId');
 

@@ -10,7 +10,9 @@
 // time, and once signed in everything goes to onmessage for the viewer.
 import { cleanIceServers, hasRelay } from '../shared/relay.js';
 import { offerMatchesPin } from './quick.js';
-import { Rendezvous, hostTopic, nameTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey } from '../shared/rendezvous.js';
+import {
+  Rendezvous, hostTopic, nameTopic, guestTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey, guestEnvelopeKey,
+} from '../shared/rendezvous.js';
 import { bindingHash } from '../shared/bind.js';
 import { toB64url, fromB64url, randomBytes } from '../shared/bytes.js';
 import { PROTO, MIN_PEER_PROTO, CONTROL_CHANNEL, INPUT_CHANNEL, POINTER_CHANNEL } from '../shared/proto.js';
@@ -39,10 +41,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 export class Connection {
   // pin: the Mac's certificate pin (16 bytes), when known; certificate: an RTCCertificate to use (one-tap sign-in).
-  constructor({ route, hostId, sigKey, macName, pairId, label, brokers, iceServers, pin = null, certificate = null,
-    log = () => {}, onStage = () => {}, PeerConnection = globalThis.RTCPeerConnection }) {
-    Object.assign(this, { route, hostId, sigKey, macName, pairId, label, brokers, iceServers, pin, certificate, log, onStage,
-      PeerConnection });
+  constructor({ route, hostId, sigKey, macName, pairId, guestId = null, guestSecret = null, label, brokers, iceServers, pin = null,
+    certificate = null, log = () => {}, onStage = () => {}, PeerConnection = globalThis.RTCPeerConnection }) {
+    Object.assign(this, { route, hostId, sigKey, macName, pairId, guestId, guestSecret, label, brokers, iceServers, pin, certificate,
+      log, onStage, PeerConnection });
     this.sid = toB64url(randomBytes(16));
     this.rdv = null;
     this.pc = null;
@@ -71,8 +73,10 @@ export class Connection {
   async open() {
     const { route } = this;
     this.onStage('finding');
-    const topic = route === 'backup' ? await nameTopic(this.macName) : await hostTopic(this.hostId);
-    const key = route === 'backup' ? await nameEnvelopeKey(this.macName) : await hostEnvelopeKey(this.sigKey);
+    const topic = route === 'backup' ? await nameTopic(this.macName) : route === 'guest' ? await guestTopic(this.guestId)
+      : await hostTopic(this.hostId);
+    const key = route === 'backup' ? await nameEnvelopeKey(this.macName) : route === 'guest' ? await guestEnvelopeKey(this.guestSecret)
+      : await hostEnvelopeKey(this.sigKey);
     this._check();
     this.rdv = new Rendezvous({ brokers: this.brokers, log: this.log });
     try {

@@ -213,7 +213,22 @@ export function failureMessage(kind, { route, detail } = {}) {
 }
 
 // Any PerchError (ui/connection.js) → the message to show. `route` is how the person was signing in.
+// A guest link that no longer works, however the Mac said so.
+const guestOver = () => msg('This guest link has stopped working',
+  'It ran out or was switched off. Ask the person who sent it for a new one.', 'home');
+
 export function messageFor(err, route) {
+  if (route === 'guest') {
+    const r = err?.reason;
+    if ((err?.kind === 'refuse' || err?.kind === 'denied') && ['link-expired', 'bad-link', 'not-set-up'].includes(r)) return guestOver();
+    if (err?.kind === 'bye' && r === 'removed') return guestOver();
+    if (err?.kind === 'refuse' && r === 'busy') {
+      return msg('Too many people are watching', 'This link is already being watched by as many people as it allows. Try again in a moment.', 'retry');
+    }
+    if (err?.kind === 'timeout') {
+      return msg("The Mac didn't answer", 'It may be switched off or asleep, or the link has stopped working. Ask the person who sent it.', 'retry');
+    }
+  }
   switch (err?.kind) {
     case 'refuse': return refuseMessage(err.reason, { retryAfter: err.retryAfter, route });
     case 'denied': return deniedMessage(err.reason, { retryAfter: err.retryAfter, final: true, route });

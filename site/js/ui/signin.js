@@ -43,6 +43,14 @@ export async function signIn(conn, ctx, ui) {
     await backupSteps(conn, ctx, ui);
   } else if (ctx.route === 'pair') {
     await pairSteps(conn, ctx, ui, hi);
+  } else if (ctx.route === 'guest') {
+    // A guest link is its own pass: prove we hold it, on this connection, and start watching. No passkey, no code.
+    const proof = await bindProof(ctx.guest.guestSecret, 'guest', conn.bind);
+    conn.send({ t: 'guest1', proof: toB64url(proof) });
+    ui.stage('verifying');
+    const m = await conn.next(['ready', 'denied'], REPLY_MS);
+    if (m.t === 'denied') throw deniedError(m);
+    return { hi, ready: m };
   } else {
     throw new PerchError('protocol', { message: 'unknown route' });
   }

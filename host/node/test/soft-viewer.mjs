@@ -9,7 +9,7 @@
 import {
   RTCPeerConnection, useH264, useOPUS, useNACK, usePLI, useREMB, useSdesMid, useAbsSendTime,
 } from 'werift';
-import {
+import { guestTopic, guestEnvelopeKey,
   Rendezvous, hostTopic, nameTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey,
 } from '../../../site/js/shared/rendezvous.js';
 import { bindingHash, bindProof, quickChallenge, sdpFingerprint } from '../../../site/js/shared/bind.js';
@@ -62,10 +62,11 @@ export class SoftViewer {
   }
 
   // Rendezvous and WebRTC up to the Mac's `hi`. Throws Refused when the Mac refuses the hello.
-  async open({ route, hostId, sigKey, macName, pairId, pv = PROTO, tamper = {}, timeoutMs = 15000, rawHello = null }) {
+  async open({ route, hostId, sigKey, macName, pairId, guestId, guestSecret, pv = PROTO, tamper = {}, timeoutMs = 15000, rawHello = null }) {
     this.route = route;
-    const topic = route === 'backup' ? await nameTopic(macName) : await hostTopic(hostId);
-    const key = route === 'backup' ? await nameEnvelopeKey(macName) : await hostEnvelopeKey(sigKey);
+    const topic = route === 'backup' ? await nameTopic(macName) : route === 'guest' ? await guestTopic(guestId) : await hostTopic(hostId);
+    const key = route === 'backup' ? await nameEnvelopeKey(macName) : route === 'guest' ? await guestEnvelopeKey(guestSecret)
+      : await hostEnvelopeKey(sigKey);
     this.rv = new Rendezvous({ brokers: this.brokers });
     await this.rv.start(5000);
     let gotReply;
@@ -229,6 +230,13 @@ export class SoftViewer {
     const resp = this.authenticator.get({ challenge: toB64url(challenge), credentialId }, overrides);
     this.send({ t: 'assert', response: resp, quick: { r: toB64url(r), ts } });
     return this._code(code, beforeCode);
+  }
+
+  // A guest joins with the link's secret alone; resolves to ready or denied.
+  async signInGuest({ guestSecret }) {
+    const proof = await bindProof(guestSecret, 'guest', this.bind);
+    this.send({ t: 'guest1', proof: toB64url(proof) });
+    return this.next(['ready', 'denied']);
   }
 
   async signInPair({ pairId, pairSecret, code, createOverrides = {}, beforeCode, origin }) {

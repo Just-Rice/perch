@@ -28,6 +28,25 @@ export function parsePairHash(hash) {
   return link;
 }
 
+// A guest link: connect.html#guest=<b64url(guestId ‖ guestSecret [‖ pin])>. Same answers as parsePairHash.
+export function parseGuestHash(hash) {
+  const h = String(hash || '').replace(/^#/, '');
+  let value = null;
+  for (const part of h.split('&')) {
+    const i = part.indexOf('=');
+    if (i > 0 && part.slice(0, i) === 'guest') value = part.slice(i + 1);
+  }
+  if (value === null) return null;
+  let bytes;
+  try { bytes = fromB64url(value.trim()); } catch { return { error: 'bad' }; }
+  const base = PAIR_ID_BYTES + PAIR_SECRET_BYTES;
+  if (bytes.length !== base && bytes.length !== base + PIN_BYTES) return { error: 'bad' };
+  return {
+    guestId: bytes.slice(0, PAIR_ID_BYTES), guestSecret: bytes.slice(PAIR_ID_BYTES, base),
+    ...(bytes.length > base ? { pin: bytes.slice(base) } : {}),
+  };
+}
+
 export function makePairHash({ hostId, sigKey, pairId, pairSecret, pin = null }) {
   const all = new Uint8Array(PAIR_BYTES + (pin ? PIN_BYTES : 0));
   if (pin) all.set(pin, PAIR_BYTES);

@@ -79,6 +79,7 @@ export class Auth {
     this.now = now;
     this.pendingTotp = null;  // {secret} while the Setup page shows a new QR code; never written to disk
     this.pairing = null;      // the one active pairing link
+    this.guest = null;        // the one active guest (view-only) link
   }
 
   async init() {
@@ -279,6 +280,46 @@ export class Auth {
 
   consumePairing(holder) {
     if (this.pairing && this.pairing.holder === holder) this.pairing = null;
+  }
+
+  // --- guest link: lets someone watch (never control) until it runs out or the owner stops it ---
+
+  createGuest({ minutes = 30, siteOrigin = null } = {}) {
+    if (!Number.isFinite(minutes) || minutes < 1 || minutes > 24 * 60) throw new Error('A guest link can last from 1 minute to 24 hours.');
+    const site = siteOrigin ? this.siteFor(siteOrigin) : this.primarySite;
+    if (!site) throw new Error('That site isn’t one this Mac accepts sign-ins from.');
+    const id = randomBytes(PAIR_ID_BYTES);
+    const secret = randomBytes(PAIR_SECRET_BYTES);
+    const pin = this.store.dtlsPin;
+    const token = pin ? concat(id, secret, pin) : concat(id, secret);
+    this.guest = {
+      id: new Uint8Array(id), secret: new Uint8Array(secret), expiresAt: this.now() + minutes * 60000,
+      link: `${site.url}#guest=${toB64url(token)}`,
+    };
+    this.store.activity('guest', `Made a guest link to show this Mac's screen (view only, ${minutes} min)`);
+    return this.guestInfo();
+  }
+
+  guestInfo() {
+    const g = this.guest;
+    if (!g) return null;
+    if (this.now() >= g.expiresAt) {
+      this.guest = null;
+      return null;
+    }
+    return { link: g.link, expiresAt: new Date(g.expiresAt).toISOString() };
+  }
+
+  stopGuest() { this.guest = null; }
+
+  // A guest proves it holds the link, on this connection: HMAC(guestSecret, "perch guest v1" ‖ bind).
+  async checkGuestProof(proof, bind) {
+    if (!this.guestInfo()) throw new AuthError('link-expired', 'no guest link is active');
+    let given = null;
+    try { given = isB64url(proof, 64) ? fromB64url(proof) : null; } catch {}
+    if (!given || !equalBytes(given, await bindProof(this.guest.secret, 'guest', bind))) {
+      throw new AuthError('bad-link', 'guest proof did not match');
+    }
   }
 
   // --- authenticator app ---

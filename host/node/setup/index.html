@@ -230,6 +230,41 @@
     </div>
   </section>
 
+  <!-- Guest link -->
+  <section class="card" id="guestCard" aria-labelledby="hGuest">
+    <h2 id="hGuest">Show your screen to someone <span class="optional">optional</span></h2>
+    <p class="lead">Make a link that lets someone watch this Mac's screen in their browser, with its sound. They can
+      only watch: they can't click, type or change anything, and the link stops working when its time is up or you
+      stop it.</p>
+    <div id="guestIdle">
+      <label for="guestMinutes">The link works for</label>
+      <div class="inline">
+        <select id="guestMinutes">
+          <option value="15">15 minutes</option>
+          <option value="30" selected>30 minutes</option>
+          <option value="60">1 hour</option>
+          <option value="240">4 hours</option>
+        </select>
+        <button type="button" class="btn primary" id="guestStartBtn">Make a guest link</button>
+      </div>
+    </div>
+    <div id="guestActive" hidden>
+      <div class="note warn"><b>Anyone with this link can watch your screen</b> until it stops working. Send it only
+        to the person you mean to show, and close anything private first.</div>
+      <label for="guestLink">Guest link</label>
+      <div class="inline">
+        <input id="guestLink" type="text" readonly spellcheck="false">
+        <button type="button" class="btn" id="guestCopyBtn">Copy</button>
+      </div>
+      <p class="small muted" id="guestCopyStatus" role="status"></p>
+      <p class="countdown"><span class="clock" aria-hidden="true"></span>
+        <span id="guestCountdown"></span></p>
+      <p class="small" id="guestWatching" role="status"></p>
+      <button type="button" class="btn danger-quiet" id="guestStopBtn">Stop sharing now</button>
+    </div>
+    <p class="msg bad" id="guestError" role="alert" hidden></p>
+  </section>
+
   <!-- Relay for strict networks -->
   <section class="card" id="relayCard" aria-labelledby="hRelay">
     <h2 id="hRelay">School or office Wi-Fi <span class="optional">optional</span></h2>

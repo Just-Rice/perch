@@ -25,6 +25,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   backupOn: false,
   idleMinutes: 60,
   paused: false,
+  lockOnDisconnect: false,   // lock the Mac when a viewer's session ends
+  curtain: false,            // black out the Mac's own screen while a viewer is connected
   quality: DEFAULT_QUALITY,
 });
 

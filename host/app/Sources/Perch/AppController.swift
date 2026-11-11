@@ -23,6 +23,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
     private var restartTimer: DispatchWorkItem?
     private var lastHostStatus: Int32?
 
+    private let curtain = Curtain()
     private var sessionViewer: String?
     private var sessionActive = false
     private var shuttingDown = false
@@ -231,9 +232,12 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         case "session":
             if JSONValue.bool(cmd["active"]) == true {
                 startSession(viewer: JSONValue.string(cmd["viewer"]), route: JSONValue.string(cmd["route"]))
+                setCurtain(JSONValue.bool(cmd["curtain"]) == true)
             } else {
                 endSession()
             }
+        case "lock":
+            lockScreen()
         case "status":
             menu?.update(status: cmd)
         case "notify":
@@ -287,7 +291,40 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         }
     }
 
+    /// The privacy curtain only ever shows from a real, bundled Perch (never in test runs: a test must not black out
+    /// the screen of the Mac it runs on).
+    private func setCurtain(_ on: Bool) {
+        guard systemChangesAllowed, !options.noUI else {
+            if on { Log.shared.info("privacy curtain requested (not shown in a test run)") }
+            sendEvent(["e": "curtain", "up": false, "requested": on])
+            return
+        }
+        if on {
+            curtain.exclude = { [weak self] ids, done in
+                guard let self else { done(); return }
+                self.capture.setExcludedWindows(ids, done: done)
+            }
+            curtain.onLifted = { [weak self] in self?.sendEvent(["e": "curtain", "up": false, "lifted": true]) }
+            curtain.raise()
+        } else {
+            curtain.lower()
+        }
+        sendEvent(["e": "curtain", "up": curtain.isUp, "requested": on])
+    }
+
+    private func lockScreen() {
+        guard systemChangesAllowed else {
+            Log.shared.info("lock requested (not done in a test run; lock call available: \(ScreenLock.available))")
+            sendEvent(["e": "lock-request", "performed": false, "available": ScreenLock.available])
+            return
+        }
+        let ok = ScreenLock.lock()
+        Log.shared.info(ok ? "locked the screen (session ended)" : "could not lock the screen")
+        sendEvent(["e": "lock-request", "performed": ok, "available": ScreenLock.available])
+    }
+
     private func endSession() {
+        curtain.lower()
         input.releaseAll()
         guard sessionActive else { return }
         sessionActive = false

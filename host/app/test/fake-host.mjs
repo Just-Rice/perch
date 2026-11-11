@@ -708,6 +708,20 @@ async function commandChecks(h) {
     /PreventUserIdleDisplaySleep.*Someone is viewing this Mac/.test(during) && !/PreventUserIdleDisplaySleep/.test(afterSession),
     `during: ${during || '(none)'}; after: ${afterSession || '(none)'}`);
 
+  // The privacy curtain and the screen lock are never performed in a test run (this Mac's screen must not go black
+  // or lock), but the app says what it would have done.
+  let mark = got.events.length;
+  command('session', { active: true, viewer: 'Curtain viewer', route: 'passkey', curtain: true });
+  const curtainEv = await event('curtain', { since: mark, ms: 3000 });
+  check('session with curtain: asked for, not raised in a test run', curtainEv.requested === true && curtainEv.up === false, JSON.stringify(curtainEv));
+  command('session', { active: false });
+  mark = got.events.length;
+  command('lock', {});
+  const lockEv = await event('lock-request', { since: mark, ms: 3000 });
+  check('lock: not performed in a test run, and the lock call exists on this macOS',
+    lockEv.performed === false && lockEv.available === true, JSON.stringify(lockEv));
+  await settled();
+
   command('notify', { title: 'Test title', body: 'Test body' });
   await settled();
 

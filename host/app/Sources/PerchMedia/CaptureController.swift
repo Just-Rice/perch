@@ -81,6 +81,13 @@ final class CaptureSession: @unchecked Sendable {
     var onFailure: ((Error) -> Void)?
     var canSend: () -> Bool = { true }
     var log: (String) -> Void = { _ in }
+    /// Windows left out of the picture (the privacy curtain). Set before start(); change later with setExcluded.
+    var excluded: [CGWindowID] = []
+
+    func setExcluded(_ ids: [CGWindowID]) async {
+        excluded = ids
+        do { try await capturer?.setExcluded(ids) } catch { log("could not update the capture filter: \(error)") }
+    }
 
     private let videoQueue: DispatchQueue
     private let audioQueue: DispatchQueue
@@ -177,7 +184,8 @@ final class CaptureSession: @unchecked Sendable {
             cap.onAudio = { [weak self] sb in self?.audioArrived(sb) }
             cap.onStop = { [weak self] error in self?.onFailure?(error) }
             cap.log = log
-            try await cap.start(displayID: display.id, width: width, height: height, fps: request.fps, audio: request.audio)
+            try await cap.start(displayID: display.id, width: width, height: height, fps: request.fps, audio: request.audio,
+                                excluding: excluded)
             capturer = cap
         }
         videoQueue.sync { startRepeats() }
@@ -312,6 +320,7 @@ public final class CaptureController: @unchecked Sendable {
     private var current: CaptureSession?
     private var pendingKbps: Int?
     /// What the host last asked for, so capture can be restarted by itself when the system stops it.
+    private var excludedWindows: [CGWindowID] = []
     private var lastRequest: CaptureRequest?
     private var startedAt = Date.distantPast
     private var restartsInARow = 0
@@ -344,6 +353,16 @@ public final class CaptureController: @unchecked Sendable {
     }
 
     public func keyframe() { lock.withLock { current }?.keyframe() }
+
+    /// Leaves these windows out of the picture from now on (also for captures started later). `done` is called once
+    /// the running capture, if any, has taken the change. Main thread.
+    public func setExcludedWindows(_ ids: [CGWindowID], done: @escaping () -> Void = {}) {
+        lock.withLock { excludedWindows = ids }
+        enqueue { [self] in
+            await lock.withLock({ current })?.setExcluded(ids)
+            done()
+        }
+    }
 
     public func setBitrate(kbps: Int) {
         let s = lock.withLock { () -> CaptureSession? in pendingKbps = kbps; return current }
@@ -410,6 +429,7 @@ public final class CaptureController: @unchecked Sendable {
             let s = try CaptureSession(request: request, display: display, synthetic: synthetic,
                                        videoQueue: videoQueue, audioQueue: audioQueue)
             session = s
+            s.excluded = lock.withLock { excludedWindows }
             s.canSend = { [weak self] in self?.canSendVideo() ?? false }
             s.log = { [weak self] in self?.log($0) }
             s.onVideo = { [weak self] frame in self?.onVideo?(frame) }

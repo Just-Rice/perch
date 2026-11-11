@@ -264,7 +264,9 @@ login-item-on | login-item-off | check-updates | update | quit`), `input-echo {e
 `log {level, message}`.
 
 Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio}`, `keyframe {}`, `bitrate {kbps}`,
-`session {active, viewer?, route?}` (menu light, notification, keeps the display awake while active),
+`session {active, viewer?, route?, curtain?}` (menu light, notification, keeps the display awake while active;
+`curtain: true` blacks out the Mac's own displays with windows left out of the capture, lifted by three Esc presses
+at the Mac), `lock {}` (lock the screen; sent when a session ends and the owner chose "lock when a session ends"),
 `status {state, text, macName, setupUrl, settings, update?}` (menu bar contents), `notify {title, body}`,
 `permissions {}` (asks for a `permissions` event), `request-permission {which}` (`screen | accessibility`),
 `open-url {url}`, `login-item {on}`, `keep-awake {on}`, `uninstall {}`, `quit {}`.

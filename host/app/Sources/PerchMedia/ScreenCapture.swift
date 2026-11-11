@@ -30,6 +30,7 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
     private var stream: SCStream?
     private var config: SCStreamConfiguration?
     private var displayPointWidth = 0
+    private var displayID: UInt32 = 0
     private let videoQueue: DispatchQueue
     private let audioQueue: DispatchQueue
 
@@ -42,9 +43,26 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         super.init()
     }
 
-    public func start(displayID: UInt32, width: Int, height: Int, fps: Int, audio: Bool) async throws {
+    /// The whole display, minus any of the given windows (the privacy curtain) that exist.
+    private static func filter(displayID: UInt32, excluding ids: [CGWindowID]) async throws -> SCContentFilter? {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+        guard let display = content.displays.first(where: { $0.displayID == displayID }) else { return nil }
+        let windows = content.windows.filter { ids.contains($0.windowID) }
+        return windows.isEmpty ? SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+            : SCContentFilter(display: display, excludingWindows: windows)
+    }
+
+    /// Changes which windows are left out, on the running stream.
+    public func setExcluded(_ ids: [CGWindowID]) async throws {
+        guard let s = stream, let f = try await Self.filter(displayID: displayID, excluding: ids) else { return }
+        try await s.updateContentFilter(f)
+    }
+
+    public func start(displayID: UInt32, width: Int, height: Int, fps: Int, audio: Bool, excluding: [CGWindowID] = []) async throws {
         let display = try await capturableDisplay(displayID)
-        let filter = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+        self.displayID = displayID
+        let plain = SCContentFilter(display: display, excludingApplications: [], exceptingWindows: [])
+        let filter = excluding.isEmpty ? plain : (try await Self.filter(displayID: displayID, excluding: excluding)) ?? plain
         let c = SCStreamConfiguration()
         c.width = width
         c.height = height

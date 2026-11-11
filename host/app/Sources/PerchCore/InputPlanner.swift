@@ -302,6 +302,9 @@ public final class InputPlanner {
 /// never makes one, so tests can't post anything to the Mac they run on.
 public final class InputPoster {
     private let source: CGEventSource?
+    /// Stamped on every event Perch posts ("PERCH"), so the app can tell the viewer's keys from ones pressed at the
+    /// Mac itself (the privacy curtain only lifts for the latter).
+    public static let sourceMark: Int64 = 0x50_4552_4348
 
     public init() {
         source = CGEventSource(stateID: .hidSystemState)
@@ -311,7 +314,12 @@ public final class InputPoster {
     }
 
     public func post(_ plan: [PlannedEvent]) {
-        for e in plan { for ev in events(for: e) { ev.post(tap: .cghidEventTap) } }
+        for e in plan {
+            for ev in events(for: e) {
+                ev.setIntegerValueField(.eventSourceUserData, value: Self.sourceMark)
+                ev.post(tap: .cghidEventTap)
+            }
+        }
     }
 
     /// The CGEvents for one planned event (two for text: key down and up). Creating them posts nothing.

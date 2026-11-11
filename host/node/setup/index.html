@@ -308,6 +308,21 @@
       </label>
     </div>
     <div class="switch-row">
+      <label class="switch" for="setLock">
+        <span class="switch-text"><b>Lock this Mac when a session ends</b>
+          <span class="muted">When you disconnect, the Mac goes to its lock screen, so nobody can use what you left open.</span></span>
+        <input type="checkbox" role="switch" id="setLock" data-setting="lockOnDisconnect">
+      </label>
+    </div>
+    <div class="switch-row">
+      <label class="switch" for="setCurtain">
+        <span class="switch-text"><b>Hide this Mac's screen while someone is connected</b>
+          <span class="muted">The Mac's own display goes black so nobody nearby can watch. Pressing Esc three times at
+            the Mac shows it again.</span></span>
+        <input type="checkbox" role="switch" id="setCurtain" data-setting="curtain">
+      </label>
+    </div>
+    <div class="switch-row">
       <label class="switch" for="setPaused">
         <span class="switch-text"><b>Pause Perch</b>
           <span class="muted">Nobody can connect while Perch is paused.</span></span>

@@ -797,3 +797,31 @@ test('an added site: pairing and signing in there work; removing the site remove
   assert.equal((await app.call('state')).devices.length, 0);
   await assert.rejects(app.call('siteRemove', TEST_ORIGIN), /can’t be removed/);
 });
+
+test('lock on disconnect and the privacy curtain: the app is told when the owner switched them on', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  // Off by default: a session starts without the curtain, and ending it locks nothing.
+  let first = await passkey(t, ctx);
+  assert.equal(app.commands.filter(c => c.c === 'session' && c.active).at(-1).curtain, false);
+  first.v.send({ t: 'bye' });
+  await app.waitFor(async () => (await app.call('state')).session === null, { what: 'session over' });
+  assert.equal(app.commands.some(c => c.c === 'lock'), false);
+
+  await app.call('updateSettings', { lockOnDisconnect: true, curtain: true });
+  const { v } = await passkey(t, ctx);
+  assert.equal(app.commands.filter(c => c.c === 'session' && c.active).at(-1).curtain, true);
+  // Switching the curtain off mid-session lowers it at once.
+  let since = app.commands.length;
+  await app.call('updateSettings', { curtain: false });
+  assert.equal((await app.waitForCommand(c => c.c === 'session' && c.active, { since })).curtain, false);
+  // Another of the owner's devices taking over doesn't lock the Mac; the last one leaving does.
+  since = app.commands.length;
+  const second = await passkey(t, ctx, { label: 'Second device' });
+  assert.equal((await v.next(['bye'])).reason, 'signed-in-elsewhere');
+  assert.equal(app.commands.slice(since).some(c => c.c === 'lock'), false);
+  second.v.send({ t: 'bye' });
+  await app.waitForCommand(c => c.c === 'lock', { since });
+  const tail = app.commands.slice(since).map(c => c.c);
+  assert.ok(tail.lastIndexOf('lock') > tail.lastIndexOf('session'), 'locked after the session ended');
+});

@@ -334,7 +334,7 @@ export class Controller {
     const display = this._display(old?.display);
     session.quality = quality;
     session.display = display.id;
-    this.app.command('session', { active: true, viewer: session.label, route: session.route });
+    this.app.command('session', { active: true, viewer: session.label, route: session.route, curtain: !!this.store.settings.curtain });
     this._sendCapture(session);
     this._changed();
     return {
@@ -370,6 +370,11 @@ export class Controller {
       this.capture = null;
       this.app.command('capture', { on: false });
       this.app.command('session', { active: false });
+      // Leave the Mac locked behind the viewer, if the owner asked for that (not when Perch itself is quitting or
+      // another of their devices is taking over).
+      if (wasReady && this.store.settings.lockOnDisconnect && reason !== 'quit' && reason !== 'signed-in-elsewhere') {
+        this.app.command('lock', {});
+      }
     }
     if (wasReady && reason !== 'signed-in-elsewhere') {
       this.store.activity('session', `${session.label} disconnected (${BYE_TEXT[reason] ?? reason})`);
@@ -533,7 +538,7 @@ export class Controller {
     const s = this.store;
     for (const [k, v] of Object.entries(patch)) {
       switch (k) {
-        case 'loginItem': case 'keepAwake': case 'backupOn': case 'paused':
+        case 'loginItem': case 'keepAwake': case 'backupOn': case 'paused': case 'lockOnDisconnect': case 'curtain':
           if (typeof v !== 'boolean') throw new Error(`${k} must be true or false.`);
           break;
         case 'idleMinutes':
@@ -562,6 +567,10 @@ export class Controller {
       await this._applyListening();
     }
     if ('keepAwake' in patch) this.app.command('keep-awake', { on: after.keepAwake });
+    // The curtain can go up or down in the middle of a session.
+    if ('curtain' in patch && this.active) {
+      this.app.command('session', { active: true, viewer: this.active.label, route: this.active.route, curtain: after.curtain });
+    }
     if ('loginItem' in patch) this.app.command('login-item', { on: after.loginItem });
     this._changed();
     return { ...after };

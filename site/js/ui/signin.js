@@ -127,7 +127,8 @@ async function backupSteps(conn, ctx, ui) {
 async function pairSteps(conn, ctx, ui, hi) {
   const { pair } = ctx;
   const proof = await bindProof(pair.pairSecret, 'pair', conn.bind);
-  conn.send({ t: 'pair1', pairId: toB64url(pair.pairId), proof: toB64url(proof) });
+  // `origin`: which site this is, so the Mac makes the passkey for this site's domain (it must be one it accepts).
+  conn.send({ t: 'pair1', pairId: toB64url(pair.pairId), proof: toB64url(proof), origin: globalThis.location?.origin });
   const m = await conn.next(['pair-options', 'denied'], REPLY_MS);
   if (m.t === 'denied') throw deniedError(m);
   const o = m.options;

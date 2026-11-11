@@ -239,6 +239,19 @@ export class Store {
     this.save();
   }
 
+  // --- extra sites this Mac accepts sign-ins from (the official site is always accepted) ---
+  get sites() { return this.config.sites ?? []; }
+  addSite(site) {
+    this.config.sites = [...this.sites.filter(x => x.origin !== site.origin), { ...site, addedAt: new Date().toISOString() }];
+    this.save();
+  }
+  removeSite(origin) {
+    const before = this.sites.length;
+    this.config.sites = this.sites.filter(x => x.origin !== origin);
+    this.save();
+    return this.config.sites.length < before;
+  }
+
   // --- lockouts ---
   limit(route) { return this.config.limits[route] ?? freshLimit(); }
   setLimit(route, value) { this.config.limits[route] = value; this.save(); }

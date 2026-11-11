@@ -92,7 +92,7 @@ test('registration is refused for every bad field', async () => {
     ['crossOrigin true', { crossOrigin: true }, 'bad-passkey', /cross-origin/],
     ['topOrigin present', { topOrigin: 'https://evil.example' }, 'bad-passkey', /topOrigin/],
     ['crossOrigin true with topOrigin', { crossOrigin: true, topOrigin: 'https://evil.example' }, 'bad-passkey', /cross-origin/],
-    ['wrong origin', { origin: 'https://evil.example' }, 'bad-passkey', /not allowed/],
+    ['wrong origin', { origin: 'https://evil.example' }, 'origin', /not one this Mac accepts/],
     ['wrong type', { type: 'webauthn.get' }, 'bad-passkey', /expected webauthn.create/],
     ['user not verified', { flags: FLAG.UP | FLAG.AT }, 'bad-passkey', /verification was required/],
     ['user not present', { flags: FLAG.UV | FLAG.AT }, 'bad-passkey', /presence was required/],
@@ -129,8 +129,8 @@ test('sign-in is refused for every bad field', async () => {
     ['crossOrigin true', { crossOrigin: true }, 'bad-passkey', /cross-origin/],
     ['topOrigin present', { topOrigin: APP_ORIGIN }, 'bad-passkey', /topOrigin/],
     ['crossOrigin true with topOrigin', { crossOrigin: true, topOrigin: 'https://evil.example' }, 'bad-passkey', /cross-origin/],
-    ['wrong origin', { origin: 'https://just-rice.github.io.evil.example' }, 'bad-passkey', /not allowed/],
-    ['http origin', { origin: 'http://just-rice.github.io' }, 'bad-passkey', /not allowed/],
+    ['wrong origin', { origin: 'https://just-rice.github.io.evil.example' }, 'origin', /not one this Mac accepts/],
+    ['http origin', { origin: 'http://just-rice.github.io' }, 'origin', /not one this Mac accepts/],
     ['wrong type', { type: 'webauthn.create' }, 'bad-passkey', /expected webauthn.get/],
     ['user not verified', { flags: FLAG.UP }, 'bad-passkey', /verification required/],
     ['user not present', { flags: FLAG.UV }, 'bad-passkey', /not present/],
@@ -316,4 +316,43 @@ test('the OPAQUE server setup is made once and kept', async () => {
   const auth2 = new Auth({ store: store2, config });
   await auth2.init();
   assert.equal(store2.opaqueServerSetup, first);
+});
+
+test('extra sites: accepted only once added, each with passkeys of its own', async () => {
+  const { auth, store } = await setup();
+  const MINE = 'https://perch.example.org';
+  const mine = new SoftAuthenticator({ rpId: 'perch.example.org', origin: MINE });
+  const official = new SoftAuthenticator({ rpId: RP_ID, origin: APP_ORIGIN });
+  const bind = bindOf();
+  // Not on the list: no pairing options for it, and nothing made there is accepted.
+  await assert.rejects(async () => auth.creationOptions(bind, MINE), e => e.reason === 'origin');
+  assert.throws(() => auth.createPairing(MINE), /isn’t one this Mac accepts/);
+
+  store.addSite({ origin: MINE, url: `${MINE}/remote/connect.html` });
+  assert.deepEqual(auth.sites().map(x => [x.origin, x.rpId, x.builtIn]),
+    [[APP_ORIGIN, RP_ID, true], [MINE, 'perch.example.org', false]]);
+  // Pairing links open the site they were made for; the default is still the official one.
+  assert.ok(auth.createPairing().link.startsWith(`${CONNECT_URL}#pair=`));
+  assert.ok(auth.createPairing(MINE).link.startsWith(`${MINE}/remote/connect.html#pair=`));
+
+  // A passkey made on the new site is for that site's domain...
+  const opts = auth.creationOptions(bind, MINE);
+  assert.equal(opts.rp.id, 'perch.example.org');
+  const dev = await auth.verifyRegistration(mine.create(opts), bind);
+  assert.equal(dev.rpId, 'perch.example.org');
+  store.addDevice({ ...dev, label: 'On my own site' });
+  // ...and one made on the official site is for the official domain.
+  const dev2 = await auth.verifyRegistration(official.create(auth.creationOptions(bind)), bind);
+  assert.equal(dev2.rpId, RP_ID);
+  store.addDevice({ ...dev2, label: 'On the official site' });
+
+  const b2 = bindOf();
+  assert.equal((await auth.verifyAssertion(mine.get({ challenge: toB64url(b2) }), b2)).label, 'On my own site');
+  assert.equal((await auth.verifyAssertion(official.get({ challenge: toB64url(b2) }), b2)).label, 'On the official site');
+  // The official site's passkey shown as if from the other site (or the reverse) is refused.
+  await assert.rejects(auth.verifyAssertion(official.get({ challenge: toB64url(b2) }, { origin: MINE }), b2), e => e.reason === 'bad-passkey');
+  await assert.rejects(auth.verifyAssertion(mine.get({ challenge: toB64url(b2) }, { origin: APP_ORIGIN }), b2), e => e.reason === 'bad-passkey');
+  // Taken off the list again: its passkeys stop working at once.
+  store.removeSite(MINE);
+  await assert.rejects(auth.verifyAssertion(mine.get({ challenge: toB64url(b2) }), b2), e => e.reason === 'origin');
 });

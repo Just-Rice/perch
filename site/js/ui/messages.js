@@ -109,8 +109,9 @@ export function deniedMessage(reason, { retryAfter, final = true, route } = {}) 
       return msg('Signing in took too long',
         'For safety, each sign-in has to finish within 2 minutes. Try again.', route === 'pair' ? 'home' : 'retry', wait);
     case 'origin': case 'cross-origin':
-      return msg('This page is in the wrong place',
-        'Your Mac only accepts sign-ins made on just-rice.github.io/perch, and not from inside another website.', 'home');
+      return msg("Your Mac doesn't accept sign-ins from this site",
+        'It accepts them from just-rice.github.io/perch and from sites added in Perch\'s Setup on the Mac (Perch menu › ' +
+        'Open Setup… › Sites that can sign in), and never from inside another website.', 'home');
     case 'protocol':
       return msg("This page and your Mac didn't understand each other",
         'Reload the page to get the latest version. If it keeps happening, update Perch on the Mac (Perch menu › Check ' +

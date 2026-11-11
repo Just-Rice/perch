@@ -231,9 +231,9 @@ export class SoftViewer {
     return this._code(code, beforeCode);
   }
 
-  async signInPair({ pairId, pairSecret, code, createOverrides = {}, beforeCode }) {
+  async signInPair({ pairId, pairSecret, code, createOverrides = {}, beforeCode, origin }) {
     const proof = await bindProof(pairSecret, 'pair', this.bind);
-    this.send({ t: 'pair1', pairId: toB64url(pairId), proof: toB64url(proof) });
+    this.send({ t: 'pair1', pairId: toB64url(pairId), proof: toB64url(proof), ...(origin ? { origin } : {}) });
     const m = await this.next(['pair-options', 'denied']);
     if (m.t === 'denied') return m;
     this.pairOptions = m.options;

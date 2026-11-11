@@ -765,3 +765,35 @@ test('the picture is no bigger than the viewer\'s screen, and capture keeps the 
   assert.equal(app.commands.slice(since).filter(c => c.c === 'capture').length, 1);
   assert.ok(v.firstReply.caps.includes('fps60') && v.firstReply.caps.includes('view'));
 });
+
+test('an added site: pairing and signing in there work; removing the site removes its devices', async (t) => {
+  const app = await host(t);
+  await app.setupTotp();
+  const MINE = 'https://perch.example.org';
+  // Not accepted yet: pairing from that site is refused.
+  const { link } = await app.call('pairStart');
+  const p0 = parsePairLink(link);
+  const mine = new SoftAuthenticator({ rpId: 'perch.example.org', origin: MINE });
+  const v0 = viewer(t, { authenticator: mine });
+  await v0.open({ route: 'pair', hostId: p0.hostId, sigKey: p0.sigKey, pairId: p0.pairId });
+  const refused = await v0.signInPair({ pairId: p0.pairId, pairSecret: p0.pairSecret, code: () => app.freshCode(), origin: MINE });
+  assert.deepEqual([refused.t, refused.reason], ['denied', 'origin']);
+  await v0.close();
+
+  await assert.rejects(app.call('siteAdd', 'https://10.0.0.1/x'), /domain name/);
+  assert.deepEqual(await app.call('siteAdd', `${MINE}/perch/`), { origin: MINE, url: `${MINE}/perch/connect.html` });
+  const made = await app.call('pairStart', MINE);
+  assert.ok(made.link.startsWith(`${MINE}/perch/connect.html#pair=`));
+  const p = parsePairLink(made.link);
+  const v = viewer(t, { authenticator: mine, label: 'My own site' });
+  await v.open({ route: 'pair', hostId: p.hostId, sigKey: p.sigKey, pairId: p.pairId });
+  const end = await v.signInPair({ pairId: p.pairId, pairSecret: p.pairSecret, code: () => app.freshCode(), origin: MINE });
+  assert.equal(end.t, 'ready', JSON.stringify(end));
+  const st = await app.call('state');
+  assert.deepEqual(st.devices.map(d => [d.label, d.site]), [['My own site', 'perch.example.org']]);
+  // Removing the site ends the session and removes the device paired there.
+  assert.deepEqual(await app.call('siteRemove', MINE), { removedDevices: 1 });
+  assert.equal((await v.next(['bye'])).reason, 'removed');
+  assert.equal((await app.call('state')).devices.length, 0);
+  await assert.rejects(app.call('siteRemove', TEST_ORIGIN), /can’t be removed/);
+});

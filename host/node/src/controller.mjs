@@ -133,7 +133,8 @@ export class Controller {
       totp: { set: !!s.config.totp.set, setAt: s.config.totp.setAt ?? null },
       backup: { set: !!s.config.backup.record, on: !!s.settings.backupOn, setAt: s.config.backup.setAt ?? null },
       relay: this.relay.state(),
-      devices: s.devices.map(publicDevice),
+      devices: s.devices.map(d => ({ ...publicDevice(d), site: this.auth.deviceRpId(d) })),
+      sites: this.auth.sites().map(x => ({ origin: x.origin, url: x.url, builtIn: !!x.builtIn, addedAt: x.addedAt ?? null })),
       pairing: this.auth.pairingInfo(),
       session: a ? { viewer: a.label, route: a.route, since: new Date(a.signedInAt).toISOString(), deviceId: a.deviceId } : null,
       activity: s.config.log.slice(-ACTIVITY_SHOWN).reverse(),
@@ -397,8 +398,8 @@ export class Controller {
     return r;
   }
 
-  pairStart() {
-    const info = this.auth.createPairing();
+  pairStart(site = null) {
+    const info = this.auth.createPairing(typeof site === 'string' && site ? site : null);
     clearTimeout(this.pairTimer);
     this.pairTimer = setTimeout(() => this._changed(), PAIR_TTL_MS + 100);
     this.pairTimer.unref?.();
@@ -438,6 +439,48 @@ export class Controller {
     if (n) this.store.activity('device', `Removed all ${n} devices`);
     this._endSessions(s => s.deviceId !== null, 'removed');
     this._changed();
+  }
+
+  // --- sites this Mac accepts sign-ins from ---
+
+  // Adds a site (the address of its Perch connect page). Only the Mac's owner can, in Setup on the Mac itself.
+  siteAdd(address) {
+    let u;
+    try { u = new URL(String(address ?? '').trim()); } catch { throw new Error('That doesn’t look like a web address. It should start with https://'); }
+    const local = this.config.test && (u.hostname === 'localhost' || u.hostname === '127.0.0.1');
+    if (u.protocol !== 'https:' && !local) throw new Error('The address must start with https://');
+    if (u.username || u.password) throw new Error('The address can’t contain a username or password.');
+    // Passkeys need a real domain name: not an IP address, and not a bare word.
+    if (!local && !/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i.test(u.hostname)) {
+      throw new Error('The address needs a domain name, like example.com.');
+    }
+    if (this.auth.siteFor(u.origin)) throw new Error('That site is already on the list.');
+    if (this.store.sites.length >= 8) throw new Error('That’s the most sites Perch keeps. Remove one first.');
+    u.hash = '';
+    u.search = '';
+    if (u.pathname.endsWith('/')) u.pathname += 'connect.html';
+    this.store.addSite({ origin: u.origin, url: u.href });
+    this.store.activity('settings', `Sign-ins are now accepted from ${u.origin}`);
+    this._changed();
+    return { origin: u.origin, url: u.href };
+  }
+
+  // Removes a site, and with it the devices paired there (their passkeys only ever worked on that site).
+  siteRemove(origin) {
+    const site = this.auth.siteFor(origin);
+    if (!site || site.builtIn) throw new Error('That site can’t be removed.');
+    this.store.removeSite(origin);
+    const stillServed = new Set(this.auth.sites().map(x => x.rpId));
+    const gone = this.store.devices.filter(d => !stillServed.has(this.auth.deviceRpId(d)));
+    for (const d of gone) {
+      this.store.removeDevice(d.id);
+      this._endSessions(x => x.deviceId === d.id, 'removed');
+    }
+    if (this.auth.pairing?.site === origin) this.auth.cancelPairing();
+    this.store.activity('settings', `Sign-ins are no longer accepted from ${origin}` +
+      (gone.length ? ` (${gone.length} device${gone.length === 1 ? '' : 's'} paired there removed)` : ''));
+    this._changed();
+    return { removedDevices: gone.length };
   }
 
   suggestPassword() {

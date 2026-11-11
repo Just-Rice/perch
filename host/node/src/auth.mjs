@@ -65,16 +65,16 @@ export function checkClientData(resp, type, origins) {
   if (cd.type !== type) throw new AuthError('bad-passkey', `clientData type ${cd.type}, expected ${type}`);
   if (cd.crossOrigin !== undefined && cd.crossOrigin !== false) throw new AuthError('bad-passkey', 'made inside a cross-origin frame');
   if (cd.topOrigin !== undefined) throw new AuthError('bad-passkey', 'made inside a frame (topOrigin present)');
-  if (!origins.includes(cd.origin)) throw new AuthError('bad-passkey', `origin ${cd.origin} is not allowed`);
+  if (!origins.includes(cd.origin)) throw new AuthError('origin', `origin ${cd.origin} is not one this Mac accepts sign-ins from`);
   return cd;
 }
 
 export class Auth {
   constructor({ store, config, log, now = () => Date.now() }) {
     this.store = store;
-    this.origins = config.origins;
-    this.rpId = config.rpId;
-    this.site = config.site;
+    // The sites built in: the official one (and, in test mode, the test page). Passkeys belong to a site's domain
+    // (its "RP ID"), so each site has its own, and a device is paired once per site it signs in from.
+    this.builtinSites = config.origins.map(origin => ({ origin, rpId: config.rpId, url: config.site, builtIn: true }));
     this.log = log;
     this.now = now;
     this.pendingTotp = null;  // {secret} while the Setup page shows a new QR code; never written to disk
@@ -86,17 +86,36 @@ export class Auth {
     if (!this.store.opaqueServerSetup) await this.store.setOpaqueServerSetup(opaque.server.createSetup());
   }
 
+  // --- sites ---
+
+  // Every site this Mac accepts sign-ins from: the built-in ones, then those the owner added in Setup.
+  sites() {
+    return [...this.builtinSites, ...this.store.sites.map(x => ({
+      origin: x.origin, rpId: new URL(x.origin).hostname, url: x.url, builtIn: false, addedAt: x.addedAt ?? null,
+    }))];
+  }
+  siteFor(origin) { return this.sites().find(x => x.origin === origin) ?? null; }
+  // Where pairing links point unless another site is asked for, and the site older devices were paired on.
+  get primarySite() { return this.builtinSites.at(-1); }
+  get origins() { return this.sites().map(x => x.origin); }
+  deviceRpId(device) { return device.rpId ?? this.primarySite.rpId; }
+
   // --- passkeys ---
 
-  creationOptions(bind) {
+  // `origin`: the site the viewer says it is on (the browser itself refuses to make a passkey for another site's
+  // domain, and the registration that comes back is checked against the real origin).
+  creationOptions(bind, origin = null) {
     const macName = this.store.macName;
+    const site = origin ? this.siteFor(origin) : this.primarySite;
+    if (!site) throw new AuthError('origin', `origin ${String(origin).slice(0, 100)} is not one this Mac accepts sign-ins from`);
     return {
       challenge: toB64url(bind),
-      rp: { id: this.rpId, name: 'Perch' },
+      rp: { id: site.rpId, name: 'Perch' },
       user: { id: toB64url(this.store.userHandle), name: `Perch · ${macName}`, displayName: `Perch on ${macName}` },
       pubKeyCredParams: COSE_ALGS.map(alg => ({ type: 'public-key', alg })),
       timeout: 120000,
-      excludeCredentials: this.store.devices.map(d => ({ type: 'public-key', id: d.id, ...(d.transports ? { transports: d.transports } : {}) })),
+      excludeCredentials: this.store.devices.filter(d => this.deviceRpId(d) === site.rpId)
+        .map(d => ({ type: 'public-key', id: d.id, ...(d.transports ? { transports: d.transports } : {}) })),
       authenticatorSelection: { residentKey: 'required', requireResidentKey: true, userVerification: 'required' },
       attestation: 'none',
     };
@@ -108,6 +127,9 @@ export class Auth {
     const device = this.store.findDevice(response.id);
     if (!device) throw new AuthError('unknown-device', 'credential is not one of this Mac\'s devices');
     const cd = checkClientData(response, 'webauthn.get', this.origins);
+    const site = this.siteFor(cd.origin);
+    // A passkey only ever works on the site it was made for.
+    if (this.deviceRpId(device) !== site.rpId) throw new AuthError('bad-passkey', 'passkey belongs to another site');
     // A valid passkey that signed some other connection's challenge: the SDP was changed on the way.
     if (cd.challenge !== toB64url(bind)) throw new AuthError('bad-proof', 'challenge is not this connection\'s binding');
     const uh = response.response.userHandle;
@@ -123,8 +145,8 @@ export class Auth {
       v = await verifyAuthenticationResponse({
         response,
         expectedChallenge: toB64url(bind),
-        expectedOrigin: this.origins,
-        expectedRPID: this.rpId,
+        expectedOrigin: site.origin,
+        expectedRPID: site.rpId,
         expectedType: 'webauthn.get',
         credential: { id: device.id, publicKey: fromB64url(device.publicKey), counter: device.counter ?? 0, transports: device.transports },
         requireUserVerification: true,
@@ -141,6 +163,7 @@ export class Auth {
   async verifyRegistration(response, bind) {
     checkShape(response, 'create');
     const cd = checkClientData(response, 'webauthn.create', this.origins);
+    const site = this.siteFor(cd.origin);
     if (cd.challenge !== toB64url(bind)) throw new AuthError('bad-proof', 'challenge is not this connection\'s binding');
     if (this.store.findDevice(response.id)) throw new AuthError('already-paired', 'this passkey is already paired');
     let v;
@@ -148,8 +171,8 @@ export class Auth {
       v = await verifyRegistrationResponse({
         response,
         expectedChallenge: toB64url(bind),
-        expectedOrigin: this.origins,
-        expectedRPID: this.rpId,
+        expectedOrigin: site.origin,
+        expectedRPID: site.rpId,
         expectedType: 'webauthn.create',
         requireUserPresence: true,
         requireUserVerification: true,
@@ -170,6 +193,7 @@ export class Auth {
       counter: cred.counter,
       ...(transports?.length ? { transports } : {}),
       backedUp: !!v.registrationInfo.credentialBackedUp,
+      rpId: site.rpId,
     };
   }
 
@@ -186,8 +210,11 @@ export class Auth {
 
   // --- pairing links ---
 
-  createPairing() {
+  // `siteOrigin`: which accepted site the link should open (default: the official one).
+  createPairing(siteOrigin = null) {
     if (!this.store.config.totp.set) throw new Error('Set up the authenticator app first.');
+    const site = siteOrigin ? this.siteFor(siteOrigin) : this.primarySite;
+    if (!site) throw new Error('That site isn’t one this Mac accepts sign-ins from.');
     const id = randomBytes(PAIR_ID_BYTES);
     const secret = randomBytes(PAIR_SECRET_BYTES);
     // ‖ the Mac's certificate pin, so the new device trusts only this Mac from its very first connection.
@@ -198,7 +225,8 @@ export class Auth {
       id: toB64url(id),
       secret: new Uint8Array(secret),
       expiresAt: this.now() + PAIR_TTL_MS,
-      link: `${this.site}#pair=${toB64url(token)}`,
+      link: `${site.url}#pair=${toB64url(token)}`,
+      site: site.origin,
       badProofs: 0,
       holder: null,
     };
@@ -213,7 +241,7 @@ export class Auth {
       this.pairing = null;
       return null;
     }
-    return { link: p.link, expiresAt: new Date(p.expiresAt).toISOString() };
+    return { link: p.link, expiresAt: new Date(p.expiresAt).toISOString(), site: p.site };
   }
 
   cancelPairing() {

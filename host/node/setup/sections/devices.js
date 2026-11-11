@@ -119,7 +119,9 @@ export function devices(ctx) {
       if (row.kind !== kind) { row.kind = kind; row.iconBox.replaceChildren(icon(kind)); }
       setText(row.label, d.label);
       const used = d.lastUsedAt ? `last used ${ago(d.lastUsedAt)}` : 'not used yet';
-      setText(row.meta, `Added ${dateOnly(d.createdAt)} · ${used}`);
+      // Say which site a device signs in from only when it isn't the official one.
+      const where = d.site && d.site !== 'just-rice.github.io' && d.site !== 'localhost' ? ` · on ${d.site}` : '';
+      setText(row.meta, `Added ${dateOnly(d.createdAt)} · ${used}${where}`);
       show(row.now, st.session?.deviceId === d.id);
       // Keep Perch's order, but only move a row when it's out of place: moving it would drop the focus inside it.
       if (list.children[i] !== row.li) list.insertBefore(row.li, list.children[i] ?? null);

@@ -11,6 +11,7 @@ import { pairing } from './sections/pairing.js';
 import { devices } from './sections/devices.js';
 import { backup } from './sections/backup.js';
 import { relay } from './sections/relay.js';
+import { sites } from './sections/sites.js';
 import { settings } from './sections/settings.js';
 import { session } from './sections/session.js';
 import { activity } from './sections/activity.js';
@@ -49,7 +50,7 @@ const ctx = {
   },
 };
 
-const parts = [header, permissions, totp, pairing, devices, backup, relay, settings, session, activity, about].map(make => make(ctx));
+const parts = [header, permissions, totp, pairing, devices, backup, relay, sites, settings, session, activity, about].map(make => make(ctx));
 
 function apply(next) {
   if (!next || typeof next !== 'object' || gone) return;

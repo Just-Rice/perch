@@ -246,9 +246,18 @@ export class Session {
       this.auth.note('failure', `Pairing refused: ${e.reason} (${this.label})`);
       return this._deny(e.reason);
     }
+    let options;
+    try {
+      options = this.auth.creationOptions(this.bind, typeof msg.origin === 'string' ? msg.origin : null);
+    } catch (e) {
+      if (!(e instanceof AuthError)) throw e;
+      this.auth.releasePairing(this);
+      this.log?.info(`pairing refused: ${e.message}`);
+      return this._deny(e.reason);
+    }
     this.holdsPairing = true;
     this.step = 'pair-cred';
-    this._send({ t: 'pair-options', options: this.auth.creationOptions(this.bind) });
+    this._send({ t: 'pair-options', options });
   }
 
   async _pairCred(msg) {

@@ -836,6 +836,43 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     assert.equal((await state()).pairing, null);
   });
 
+  await t.test('sites that can sign in: the official one is fixed; adding one offers pairing for it; removing it', async () => {
+    assert.deepEqual((await state()).sites.filter(x => x.builtIn).map(x => x.origin).includes('https://just-rice.github.io'), true);
+    assert.match(await text(page, '#sitesList'), /just-rice\.github\.io · the official Perch site/);
+    assert.equal(await page.eval(`document.getElementById('pairSiteLabel').hidden`), true, 'no choice with one site');
+    assert.equal(await page.eval(`document.querySelectorAll('#sitesList button').length`), 0, 'the official site has no Remove');
+    await page.eval(`document.getElementById('sitesAdd').open = true`);
+    // Refused: not https, an IP address, a site already there.
+    for (const [bad, why] of [['http://example.org/connect.html', /https/], ['https://192.168.1.5/x', /domain name/],
+      ['https://just-rice.github.io/other/', /already/]]) {
+      await page.eval(`document.getElementById('siteUrl').value = ''`);
+      await type(page, '#siteUrl', bad);
+      await click(page, '#siteAddBtn');
+      await waitFor(page, `${why}.test(document.getElementById('sitesError').textContent)`, `refusal for ${bad}`);
+    }
+    await page.eval(`document.getElementById('siteUrl').value = ''`);
+    await type(page, '#siteUrl', 'https://perch.example.org/remote/');
+    await click(page, '#siteAddBtn');
+    await waitFor(page, `/Added perch\.example\.org/.test(document.getElementById('sitesOk').textContent)`, 'site added');
+    const added = (await state()).sites.find(x => !x.builtIn);
+    assert.deepEqual([added.origin, added.url], ['https://perch.example.org', 'https://perch.example.org/remote/connect.html']);
+    // Pairing can now be made for either site.
+    await waitFor(page, `!document.getElementById('pairSiteLabel').hidden`, 'the site choice in step 3');
+    await page.eval(`(() => { const s = document.getElementById('pairSite'); s.value = 'https://perch.example.org'; s.dispatchEvent(new Event('change')); })()`);
+    await click(page, '#pairStartBtn');
+    await waitFor(page, `!document.getElementById('pairActive').hidden`);
+    assert.match(await value(page, '#pairLink'), /^https:\/\/perch\.example\.org\/remote\/connect\.html#pair=[A-Za-z0-9_-]{150}$/);
+    // Removing the site (after confirming) cancels its pairing link too.
+    await click(page, '#sitesList .site-row:last-child button');
+    await waitFor(page, `!!document.querySelector('#sitesList .confirm')`, 'confirmation');
+    await click(page, '#sitesList .confirm .btn.danger');
+    await waitFor(page, `document.querySelectorAll('#sitesList .site-row').length === 1`, 'site removed');
+    const after = await state();
+    assert.equal(after.sites.length, (await state()).sites.filter(x => x.builtIn).length);
+    assert.equal(after.pairing, null);
+    await waitFor(page, `document.getElementById('pairSiteLabel').hidden`, 'no choice again');
+  });
+
   await t.test('backup password: OPAQUE in the page, accepted by the real host', async () => {
     await click(page, '#backupSuggestBtn');
     await waitFor(page, `/^[a-z]+(-[a-z]+){4}$/.test(document.getElementById('backupPw').value)`, 'suggested password');
@@ -895,8 +932,9 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
   });
 
   await t.test('no console errors, no security-policy violations, no pop-up dialogs', async () => {
-    const refusals = await checkCleanConsole(page, tab, host.base, idleRefused ? ['/api/updateSettings'] : []);
-    assert.deepEqual(refusals, idleRefused ? ['/api/updateSettings'] : []);
+    // The deliberate refusals: three addresses the sites section must not accept (and "Never" idle, if refused).
+    const refusals = await checkCleanConsole(page, tab, host.base, ['/api/siteAdd', ...(idleRefused ? ['/api/updateSettings'] : [])]);
+    assert.deepEqual(refusals, ['/api/siteAdd', '/api/siteAdd', '/api/siteAdd', ...(idleRefused ? ['/api/updateSettings'] : [])]);
     assert.doesNotMatch(host.log, /uncaught exception|unhandled rejection|ERROR/);
   });
 });

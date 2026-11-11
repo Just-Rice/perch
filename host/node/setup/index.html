@@ -138,6 +138,8 @@
     <p class="note" id="pairLocked">Finish step 2 first: every sign-in needs a code from your authenticator app.</p>
 
     <div id="pairIdle">
+      <label for="pairSite" id="pairSiteLabel" hidden>Pair it for
+        <select id="pairSite"></select></label>
       <button type="button" class="btn primary" id="pairStartBtn">Pair a device</button>
       <p class="small muted">Perch shows a code to scan with the device you want to use.</p>
     </div>
@@ -261,6 +263,30 @@
     <div class="confirm-host" id="relayRemoveHost" hidden>
       <button type="button" class="btn danger-quiet" id="relayRemoveBtn">Remove the relay</button>
     </div>
+  </section>
+
+  <!-- Sites that can sign in -->
+  <section class="card" id="sitesCard" aria-labelledby="hSites">
+    <h2 id="hSites">Sites that can sign in <span class="optional">advanced</span></h2>
+    <p class="lead">This Mac only accepts sign-ins made on the sites listed here. The official Perch site is always on
+      the list. Add another only if you run your own copy of the Perch website.</p>
+    <ul class="plain-list" id="sitesList"></ul>
+    <details id="sitesAdd">
+      <summary>Add a site</summary>
+      <p class="note warn"><b>Only add a site you run yourself or trust completely.</b> Whoever controls that site can
+        see what you type there, including your codes and backup password, and can control this Mac while you are
+        signed in. Never add a site because someone asked you to.</p>
+      <form id="siteForm" novalidate>
+        <label for="siteUrl">Address of the Perch page on that site</label>
+        <input id="siteUrl" type="text" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off"
+          placeholder="https://example.com/perch/connect.html">
+        <div class="actions"><button type="submit" class="btn primary" id="siteAddBtn">Add site</button></div>
+        <p class="small muted">Passkeys belong to one site each, so pair your devices again on the new site
+          (step 3, choosing that site).</p>
+      </form>
+    </details>
+    <p class="msg ok" id="sitesOk" role="status" hidden></p>
+    <p class="msg bad" id="sitesError" role="alert" hidden></p>
   </section>
 
   <!-- Settings -->

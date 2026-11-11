@@ -8,6 +8,7 @@ import net from 'node:net';
 
 const METHODS = new Set([
   'state', 'totpStart', 'totpConfirm', 'pairStart', 'pairCancel', 'deviceRename', 'deviceRemove', 'devicesRemoveAll',
+  'siteAdd', 'siteRemove', 'relaySet', 'relayRemove',
   'suggestPassword', 'backupRegisterStart', 'backupRegisterFinish', 'backupRemove', 'updateSettings', 'disconnect',
   'requestPermission', 'newMacName', 'reset', 'checkForUpdates', 'testInputEcho', 'testState', 'debug',
 ]);

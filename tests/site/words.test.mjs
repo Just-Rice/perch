@@ -62,7 +62,7 @@ test('denied reasons the Mac sends get plain messages', () => {
     'wrong-code': /code didn't work/, 'locked-out': /Too many/, 'bad-passkey': /passkey/, 'unknown-device': /passkey/,
     'bad-proof': /confirm the connection/, 'wrong-password': /Wrong Mac name or password/, 'bad-link': /pairing link/,
     'link-expired': /expired/, 'link-used': /already used/, 'already-paired': /already paired/, timeout: /too long/,
-    origin: /wrong place/, protocol: /understand/, error: /went wrong/,
+    origin: /doesn't accept sign-ins from this site/, protocol: /understand/, error: /went wrong/,
   };
   for (const [reason, re] of Object.entries(cases)) {
     const m = deniedMessage(reason);

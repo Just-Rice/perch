@@ -192,6 +192,14 @@ pin; the browser connects with that certificate, refuses offers that don't match
 fingerprint, recomputes the challenge with it, and accepts each `r` once and `ts` within 3 minutes. Then the code, as
 usual.
 
+**Sites.** A Mac accepts passkey sign-ins and pairings only from its list of sites: `https://just-rice.github.io`
+always, plus any the owner added in Setup (`config.sites`: `{origin, url}`, https and a domain name only). A passkey
+belongs to one site's domain (its RP ID, the origin's hostname), so each device is paired once per site: `pair1`
+carries the viewer's `origin`, the Mac answers with creation options for that site's RP ID (or `denied origin`), and
+every registration and assertion is verified against the origin in its signed client data and that site's RP ID.
+Devices remember their RP ID; removing a site removes the devices paired there. Pairing links are made for a chosen
+site (`pairStart(site)`). The backup route has no origin check (the Mac can't see where a password was typed).
+
 **Limits.** Five wrong 6-digit codes on a route lock that route for 1 minute, doubling per further failure up to 1
 hour; a success resets it. A failed passkey step never counts (a signature can't be guessed, and counting it would
 let anyone with `sigKey` lock the owner out); backup sign-in counts each password attempt. Passkey, pairing and backup

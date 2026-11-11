@@ -63,7 +63,9 @@ const TYPES = {
 const ACTIONS = {
   totpStart: [],
   totpConfirm: [['code', 'string']],
-  pairStart: [],
+  pairStart: [['site', 'string?']],
+  siteAdd: [['url', 'string']],
+  siteRemove: [['origin', 'string']],
   pairCancel: [],
   deviceRename: [['id', 'string'], ['label', 'string']],
   deviceRemove: [['id', 'string']],
@@ -91,7 +93,8 @@ class HttpError extends Error {
 const sha256 = (s) => createHash('sha256').update(String(s)).digest();
 
 function checkField(value, rule, name) {
-  if (rule === 'string' && typeof value === 'string' && value.length > 0 && value.length <= 16384) return value;
+  if (rule === 'string?' && (value === undefined || value === null || value === '')) return undefined;
+  if ((rule === 'string' || rule === 'string?') && typeof value === 'string' && value.length > 0 && value.length <= 16384) return value;
   if (rule === 'object' && value && typeof value === 'object' && !Array.isArray(value)) return value;
   throw new HttpError(400, `Something was missing from that request (${name}). Reload the page and try again.`);
 }

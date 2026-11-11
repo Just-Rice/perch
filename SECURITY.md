@@ -42,6 +42,10 @@ volunteer project, so please allow a few days.
   connection certificate, and the website refuses to talk to anything that can't prove it holds that certificate.
   Passkeys from Perch 0.1 have no pin: pair those devices again to get it. The backup sign-in (Mac name + password)
   has no pin either, so there the website relies on the password check (OPAQUE), which a fake Mac can't pass.
+- **Sites you add yourself.** In Setup you can let your Mac accept sign-ins from other sites, for running your own
+  copy of the Perch website. Whoever controls a site on that list can see what you type there and control the Mac
+  while you're signed in, so add only a site you run or fully trust. Never add a web proxy or "unblocker": it sits
+  between you and the page and can read everything.
 - **A lost device or pairing link.** Removing a device stops its passkey working, but it still knows how to reach
   your Mac. It can't sign in or lock you out, but it could keep trying to connect. If that ever happens, use
   **Start over** in Setup: it gives the Mac a new identity, so everything old stops working.

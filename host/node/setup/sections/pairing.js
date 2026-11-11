@@ -20,7 +20,9 @@ export function pairing(ctx) {
     say(okMsg, '');
     expiredMsg.hidden = true;
     goneMsg.hidden = true;
-    const r = await busy(e.currentTarget, error, () => ctx.post('pairStart'));
+    // With several accepted sites, the link is made for the one chosen (the official site unless changed).
+    const site = $('pairSiteLabel').hidden ? undefined : $('pairSite').value;
+    const r = await busy(e.currentTarget, error, () => ctx.post('pairStart', site ? { site } : {}));
     if (r) $('pairActive').focus();
   });
   $('pairActive').tabIndex = -1;

@@ -332,3 +332,12 @@ input[role=switch]:focus-visible { outline: 3px solid var(--accent); outline-off
   *, *::before, *::after { animation-duration: 2.4s !important; transition: none !important; }
   .live, .pill[data-tone="live"] .pill-dot { animation: none; }
 }
+
+/* Sites that can sign in */
+.plain-list { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 8px; }
+.site-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px;
+  padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.site-name { min-width: 0; overflow-wrap: anywhere; }
+.site-row .confirm { flex-basis: 100%; }
+#pairSiteLabel { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-weight: 600; }
+#pairSite { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; padding: 0 10px; }

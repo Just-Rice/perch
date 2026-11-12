@@ -190,3 +190,17 @@ test('the H.264 codec string comes from the SPS', () => {
   assert.equal(codecFromAnnexB(au), 'avc1.42e028');
   assert.equal(codecFromAnnexB(Uint8Array.from([0, 0, 1, 0x41, 0x9a])), null, 'a delta frame has no SPS');
 });
+
+test('the relay as a rendezvous broker, and the relay address a remembered Mac keeps', async () => {
+  assert.equal(W.relayBroker('https://perch-relay.someone.workers.dev'), 'wss://perch-relay.someone.workers.dev/v1/mqtt');
+  assert.equal(W.relayBroker('http://localhost:8787'), 'ws://localhost:8787/v1/mqtt');
+  const { MacStore } = await import('../../site/js/ui/macs.js');
+  const mem = new Map();
+  const storage = { getItem: k => mem.get(k) ?? null, setItem: (k, v) => mem.set(k, String(v)), removeItem: k => mem.delete(k) };
+  const store = new MacStore(storage);
+  const mac = { hostId: 'A'.repeat(22), sigKey: 'B'.repeat(43), credentialId: 'cred', name: 'test' };
+  assert.equal(store.save({ ...mac, relay: 'https://perch-relay.someone.workers.dev' }).relay, 'https://perch-relay.someone.workers.dev');
+  assert.equal(store.update(mac.hostId, { relay: 'https://evil.example.com' }).relay, undefined, 'only a relay address is kept');
+  assert.equal(store.update(mac.hostId, { relay: 'https://perch-relay.someone.workers.dev' }).relay, 'https://perch-relay.someone.workers.dev');
+  assert.equal(store.update(mac.hostId, { relay: undefined }).relay, undefined, 'a Mac without one any more clears it');
+});

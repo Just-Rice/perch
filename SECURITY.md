@@ -73,7 +73,10 @@ volunteer project, so please allow a few days.
   relay's offer and answer exactly as to WebRTC's. Cloudflare and the Worker see only encrypted bytes, their sizes and
   timing, and the two ends' IP addresses. The relay only lets the Mac that claimed it open connections, so nobody else
   can use up your free allowance; a stranger who learns a connection's room can only join as the viewer, and can't
-  read or forge anything. One-tap sign-in and the microphone aren't offered over the relay. See
+  read or forge anything. The relay is also a rendezvous broker and can serve the Perch website: like the public
+  brokers it only carries sealed notes (and sees their sizes, timing and IP addresses), and anyone may use it for
+  Perch's topics within its limits. A copy of the website served by your relay runs the code you deployed, so deploy
+  it from the official repository. One-tap sign-in and the microphone aren't offered over the relay. See
   [PROTOCOL.md, Worker relay](docs/PROTOCOL.md#worker-relay).
 - **The backup sign-in is weaker than a passkey.** A fake site or someone watching could capture the password, so it
   still needs the 6-digit code, it is off unless you set it up, and the Mac notifies you every time it is used. In an

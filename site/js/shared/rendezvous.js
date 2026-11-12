@@ -105,6 +105,7 @@ export class Rendezvous {
 
   // Resolves once at least one broker is connected; keeps (re)connecting to the rest in the background.
   start(timeoutMs = 10000) {
+    this.started = true;
     this._watchForSleep();
     return new Promise((resolve, reject) => {
       let failures = 0;
@@ -164,6 +165,27 @@ export class Rendezvous {
       last = t;
     }, WAKE_CHECK_MS);
     this.sleepTimer.unref?.();
+  }
+
+  // A broker added or taken away while running (the Mac owner's own relay, shared/wsrelay.js). Topics already
+  // listened to are subscribed on it as soon as it connects.
+  addBroker(url) {
+    if (this.closed || this.brokers.includes(url)) return;
+    this.brokers = [...this.brokers, url];
+    if (!this.started) return; // start() dials every broker in the list
+    this.clients.set(url, { client: null, retry: 0, timer: null });
+    this._dial(url);
+    this.onstatus(this.status());
+  }
+
+  removeBroker(url) {
+    this.brokers = this.brokers.filter(u => u !== url);
+    const slot = this.clients.get(url);
+    if (!slot) return;
+    clearTimeout(slot.timer);
+    if (slot.client) { slot.client.onclose = () => {}; slot.client.close(); }
+    this.clients.delete(url);
+    this.onstatus(this.status());
   }
 
   reconnectAll() {

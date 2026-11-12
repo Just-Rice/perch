@@ -47,6 +47,10 @@ export function relayBase(url, { allowLocal = false } = {}) {
   return null;
 }
 
+// The relay is also a rendezvous broker (MQTT over WebSocket, like the public ones in proto.js BROKERS), so the two
+// ends can find each other through it when a network blocks the public brokers.
+export const relayBroker = base => `${base.replace(/^http/, 'ws')}/v1/mqtt`;
+
 export function roomUrl(base, room, role, auth = null) {
   const ws = base.replace(/^http/, 'ws');
   return `${ws}/v1/room/${room}?role=${role}${auth ? `&auth=${auth}` : ''}`;

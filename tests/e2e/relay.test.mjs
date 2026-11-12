@@ -2,6 +2,8 @@
 // with the stand-in app's test video and sound) and the real website in headless Chrome, told to use the relay
 // (?transport=relay stands in for a network that blocks WebRTC). Covers setting the relay up from Setup's API, pairing
 // and signing in over it (the pinned Mac's signed relay offer), the picture and sound arriving, and input reaching the Mac.
+// Also the relay as a rendezvous broker and as a host of the website: with the public brokers out of reach, a page
+// served by the relay finds the Mac through the relay alone.
 //   (cd relay && npm ci) && node --test tests/e2e/relay.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -15,6 +17,8 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { startStack, openPage, sleep } from '../site/lib/browser.mjs';
 import { startHost } from '../../host/node/test/fake-app.mjs';
+import { MqttClient } from '../../site/js/shared/mqtt.js';
+import { relayBroker } from '../../site/js/shared/wsrelay.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WRANGLER = join(ROOT, 'relay/node_modules/.bin/wrangler');
@@ -183,4 +187,64 @@ test('signing in again over the relay: the pinned Mac’s signed offer, passkey,
   await page.click('#tbBye');
   await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
   assert.deepEqual(page.problems(), []);
+});
+
+test('the relay is a rendezvous broker: Perch’s own MQTT client meets there, on Perch’s topics only', { skip }, async () => {
+  const url = relayBroker(relayUrl);
+  const a = new MqttClient(url), b = new MqttClient(url);
+  await a.connect();
+  await b.connect();
+  const got = [];
+  b.onmessage = (topic, payload) => got.push([topic, new TextDecoder().decode(payload)]);
+  await b.subscribe('perch/v1/h/test-topic');
+  a.publish('perch/v1/h/test-topic', 'sealed');
+  a.publish('perch/v1/h/other-topic', 'not for b');
+  for (let i = 0; i < 50 && !got.length; i++) await sleep(100);
+  assert.deepEqual(got, [['perch/v1/h/test-topic', 'sealed']]);
+  // No wildcards (nobody can listen to everything) and nothing outside Perch's topics.
+  const c = new MqttClient(url);
+  await c.connect();
+  const sniffed = [];
+  c.onmessage = (topic) => sniffed.push(topic);
+  c.subscribe('#').catch(() => {});
+  c.subscribe('perch/v1/#').catch(() => {});
+  await sleep(300);
+  a.publish('perch/v1/h/test-topic', 'sealed again');
+  a.publish('other/topic', 'x');
+  await sleep(700);
+  assert.deepEqual(sniffed, [], 'a wildcard subscriber hears nothing');
+  assert.equal(got.length, 2, 'b got the second message and nothing outside perch/v1/');
+  c.close();
+  a.close();
+  b.close();
+});
+
+test('where only the relay gets through: a page it serves pairs and signs in, finding the Mac through it alone', { skip }, async () => {
+  // The Mac listens on the relay's broker as soon as the relay is set up (it was, in the first test).
+  await app.waitFor(async () => (await app.call('state')).rendezvous.some(r => r.url.endsWith('/v1/mqtt') && r.connected),
+    { what: 'the Mac on the relay’s broker' });
+  // The website as the relay serves it, from the relay's own address (localhost: passkeys need a name, not an IP).
+  const origin = DEPLOYED ? relayUrl : relayUrl.replace('127.0.0.1', 'localhost');
+  const page0 = await fetch(`${origin}/connect.html`);
+  assert.equal(page0.status, 200);
+  assert.match(await page0.text(), /Perch/);
+  // Locally both sites are on localhost, so the passkey from the tests above would count as this site's too ("already
+  // paired"). On the real thing they are different addresses; forget the earlier device to model that.
+  if (!DEPLOYED) await app.call('devicesRemoveAll');
+  await app.call('siteAdd', `${origin}/`);
+  const { link } = await app.call('pairStart', origin);
+  assert.ok(link.startsWith(`${origin}/connect.html#pair=`), link);
+  // Locally, the only public broker the page may use is a dead one: it can only find the Mac through the relay.
+  const local = DEPLOYED ? '' : `test=1&relaysite=1&transport=relay&brokers=${encodeURIComponent('ws://127.0.0.1:9/')}`;
+  const page = await openPage(stack, local ? link.replace('connect.html#', `connect.html?${local}#`) : link, { name: 'relay-site' });
+  await page.waitScreen('pair', { timeoutMs: 20000 });
+  await page.click('#btnCreate');
+  await enterCode(page);
+  await page.waitScreen('viewer', { timeoutMs: 20000 });
+  await page.waitFor(`document.getElementById('video').videoWidth > 16`, { timeoutMs: 15000, what: 'video' });
+  await assertInputReachesMac(page);
+  // The Mac named its relay, and the page remembers it for next time.
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.macs.v1'))[0].relay`), DEPLOYED ? relayUrl : relayUrl);
+  await page.click('#tbBye');
+  await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
 });

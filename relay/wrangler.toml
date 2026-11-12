@@ -17,3 +17,17 @@ class_name = "Config"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Room", "Config"]
+
+[[durable_objects.bindings]]
+name = "BROKER"
+class_name = "Broker"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Broker"]
+
+# The Perch website (site/), served from this relay's own address too: where only *.workers.dev gets through, the
+# website does as well, and it finds the Mac through this relay's broker (site/js/ui/app.js, ownRelayBroker).
+[assets]
+directory = "../site"
+binding = "ASSETS"

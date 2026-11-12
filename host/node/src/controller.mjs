@@ -10,7 +10,7 @@ import { HostPeer, ensureDtlsIdentity } from './rtc.mjs';
 import { Session } from './session.mjs';
 import { Relay } from './relay.mjs';
 import { WorkerRelay, WsPeer } from './wsrelay.mjs';
-import { roomUrl, roomAuth } from '../../../site/js/shared/wsrelay.js';
+import { roomUrl, roomAuth, relayBroker } from '../../../site/js/shared/wsrelay.js';
 import { Signaling } from './signaling.mjs';
 import { silentLog } from './log.mjs';
 
@@ -93,6 +93,7 @@ export class Controller {
     await this._applyListening();
     this.relay.warm(); // fetch relay logins now, so the first viewer's offer doesn't wait for them
     this.workerRelay.warm();
+    this._useRelayBroker();
     this.started = true;
     this._changed();
   }
@@ -434,6 +435,7 @@ export class Controller {
       display: { id: display.id, width: display.width, height: display.height },
       displays: this.displays.map(d => ({ ...d })),
       quality, audio: true, input: !!this.permissions.accessibility, locked: !!this.locked,
+      ...(this.workerRelay.base ? { relay: this.workerRelay.base } : {}),
     };
   }
 
@@ -727,9 +729,17 @@ export class Controller {
     });
   }
 
+  // The Worker relay is also a rendezvous broker: viewers whose network blocks the public brokers find the Mac there.
+  _useRelayBroker(previous = null) {
+    if (previous) this.rendezvous.removeBroker?.(relayBroker(previous));
+    if (this.workerRelay.base) this.rendezvous.addBroker?.(relayBroker(this.workerRelay.base));
+  }
+
   async workerRelaySet(url) {
     const replacing = this.workerRelay.configured;
+    const previous = this.workerRelay.base;
     await this.workerRelay.save(url);
+    this._useRelayBroker(previous !== this.workerRelay.base ? previous : null);
     this.store.activity('settings', replacing ? 'Worker relay replaced' : 'Worker relay for strict networks set up');
     this._changed();
     return { ok: true };
@@ -737,7 +747,9 @@ export class Controller {
 
   async workerRelayRemove() {
     if (this.workerRelay.configured) this.store.activity('settings', 'Worker relay removed');
+    const previous = this.workerRelay.base;
     await this.workerRelay.remove();
+    this._useRelayBroker(previous);
     this._changed();
   }
 
@@ -825,6 +837,7 @@ export class Controller {
 
   // Forget everything: new id, name and keys, so every passkey and link made before stops working.
   async reset() {
+    const relayBefore = this.workerRelay.base;
     this._endSessions(() => true, 'removed');
     this.auth.cancelPairing();
     await this.guestStop();
@@ -836,6 +849,7 @@ export class Controller {
     await ensureDtlsIdentity(this.store);
     this.relay.forget();
     this.workerRelay.lastError = this.workerRelay.lastOkAt = null; // Start over removed its secret with the rest
+    this._useRelayBroker(relayBefore);
     await this.signaling.setHost(this.store.hostId, this.store.sigKey);
     await this._applyListening();
     this.store.activity('settings', 'Perch was reset: new name and keys, no paired devices');

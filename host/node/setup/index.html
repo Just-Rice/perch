@@ -366,6 +366,9 @@ npx wrangler deploy</pre></li>
       </ol>
       <p class="small muted">The first Mac to save a relay becomes its owner; no other Mac can use it. For a second Mac,
         deploy another copy under a different name (change <i>name</i> in <i>relay/wrangler.toml</i>).</p>
+      <p class="small muted">If the Perch website or the public message services are blocked where you are, the relay
+        stands in for both: add its address under <b>Sites that can sign in</b>, pair your device on that site once,
+        and sign in at the relay's address from then on.</p>
     </details>
     <form id="workerRelayForm" novalidate>
       <label for="workerRelayUrl">Relay address</label>

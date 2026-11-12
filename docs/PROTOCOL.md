@@ -151,6 +151,18 @@ input, `3` pointer (UTF-8 JSON, exactly as on the WebRTC data channels of those 
 keyframe) · `u64 BE pts µs` · the H.264 Annex-B access unit; `17` audio: `u8 count` · count × (`u64 BE pts µs` ·
 `u16 BE length` · one Opus packet), up to three packets per message.
 
+**Rendezvous through the relay.** The relay is also a broker: `wss://…/v1/mqtt` speaks the MQTT subset Perch's
+client uses (CONNECT, QoS 0 PUBLISH and SUBSCRIBE, UNSUBSCRIBE, PINGREQ, DISCONNECT), for exact topics under
+`perch/v1/` only (no wildcards; at most 8 per connection; a publish is at most 70 KB and limited to a burst of 60 and
+2 a second per connection). Everything published there is the same sealed envelope as on the public brokers. The Mac
+adds it to its brokers while a relay is set up, and names the relay to signed-in viewers in `ready` (`relay`, its
+https address), which remember it with the Mac (`perch.macs.v1`, `relay`) and add its broker the next time.
+
+**The website from the relay.** The relay Worker also serves `site/` (Workers static assets) from its own address. A
+page whose origin is a `workers.dev` relay (`GET /v1/info` answers `{perch: "relay"}`) puts that relay's broker first,
+so it can find the Mac even on a first visit where only `*.workers.dev` gets through. Passkeys belong to that address,
+so it is one of the Mac's sites (Setup, "Sites that can sign in"), and devices pair there once.
+
 **Media.** There are no receiver reports: the Mac drops video frames while more than about half a second of the
 target bitrate is waiting in its WebSocket (asking for a keyframe, since what follows can't be decoded), and feeds the
 share of dropped frames to the same bitrate controller as WebRTC's loss. The viewer decodes with WebCodecs

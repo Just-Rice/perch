@@ -2,6 +2,7 @@
 // key, both also inside the passkey's user handle) plus which passkey to ask for and a name to show.
 // Kept in localStorage under 'perch.macs.v1'. Storage can be missing or throw (private windows, blocked site data,
 // some about:blank set-ups); then the list simply lives in memory for this visit.
+import { relayBase } from '../shared/wsrelay.js';
 import { fromB64url } from '../shared/bytes.js';
 import { HOST_ID_BYTES, SIG_KEY_BYTES } from '../shared/proto.js';
 
@@ -49,6 +50,9 @@ const clean = m => ({
   ...(m.label ? { label: String(m.label).slice(0, 64) } : {}),
   // The Mac's certificate pin (b64url of 16 bytes), when its passkey or pairing link carried one.
   ...(m.pin ? { pin: m.pin } : {}),
+  // The Mac owner's Worker relay (https://…workers.dev), which the Mac named when signing in: it is also a rendezvous
+  // broker, so the Mac can be found there when the public brokers are blocked. Anything else is dropped.
+  ...(typeof m.relay === 'string' && relayBase(m.relay, { allowLocal: true }) === m.relay ? { relay: m.relay } : {}),
   lastUsed: Number.isFinite(m.lastUsed) ? m.lastUsed : 0,
 });
 

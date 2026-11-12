@@ -4,7 +4,7 @@ A tiny Cloudflare Worker for networks that block the direct connection Perch nor
 You run it in **your own** free Cloudflare account: no payment details, and no monthly data allowance to use up
 (Workers don't charge for bandwidth).
 
-It only passes bytes between your Mac and your browser. Everything it carries is end-to-end encrypted by Perch, so it
+It passes bytes between your Mac and your browser, helps them find each other, and serves the Perch website. Everything it carries is end-to-end encrypted by Perch, so it
 can't see your screen, your sound, what you type or how you sign in. See [docs/PROTOCOL.md](../docs/PROTOCOL.md#worker-relay)
 and [SECURITY.md](../SECURITY.md).
 
@@ -22,6 +22,16 @@ npx wrangler deploy
 
 Wrangler prints the relay's address, like `https://perch-relay.your-name.workers.dev`. On your Mac, open Perch's
 **Setup**, go to **Relay without a card**, paste the address and choose **Check and save**.
+
+### Where only `*.workers.dev` gets through
+
+The relay also helps the two ends find each other (it is a rendezvous broker, so the public ones can be blocked), and
+it serves the Perch website from its own address. If the Perch website or the public brokers are blocked where you
+are, use your relay's address instead:
+
+1. In Setup, **Sites that can sign in**: add `https://perch-relay.your-name.workers.dev/`.
+2. In **Pair a device**, choose that site under **Pair it for**, make the link and open it on your device, once.
+3. From then on, sign in at `https://perch-relay.your-name.workers.dev/connect.html`.
 
 The first Mac to save a relay becomes its owner, and only that Mac can use it. For a second Mac, deploy another copy
 under a different name: change `name` in `wrangler.toml` (or run `npx wrangler deploy --name perch-relay-2`).

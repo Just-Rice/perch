@@ -149,6 +149,12 @@ section > .wrap > p.sub, section > .narrow > p.sub { color: var(--muted); margin
   padding: 12px 12px 12px 16px; overflow-x: auto;
 }
 .cmd code { white-space: nowrap; flex: 1; font-size: .95rem; }
+/* A narrow phone: the command wraps and the Copy button sits under it, instead of off the edge. */
+@media (max-width: 560px) {
+  .cmd { flex-wrap: wrap; overflow-x: visible; }
+  .cmd code { white-space: normal; overflow-wrap: anywhere; flex-basis: 100%; }
+}
+p code, li code { overflow-wrap: anywhere; }
 .cmd .btn { min-height: 36px; padding: .35em .9em; background: #22303f; border-color: #33465a; color: #e6edf3; flex: none; }
 
 .list { padding-left: 1.2em; }

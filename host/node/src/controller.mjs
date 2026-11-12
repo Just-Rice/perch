@@ -514,8 +514,13 @@ export class Controller {
       return;
     }
     if (this.active === session && this.guests.size > 0) {
-      // The owner's viewer left but guests are still watching: keep the picture going for them.
+      // The owner's viewer left but guests are still watching: keep the picture going for them, showing exactly
+      // what the owner was showing (the same display, and only the one window if one was chosen), never more.
       this.active = null;
+      for (const g of this.guests) {
+        g.display = session.display;
+        g.window = session.window ?? null;
+      }
       this.app.command('session', { active: true, viewer: 'A guest (view only)', route: 'guest', curtain: false });
       this._sendCapture(this.leader);
       if (wasReady && reason !== 'signed-in-elsewhere') {

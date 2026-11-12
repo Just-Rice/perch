@@ -133,6 +133,8 @@ export class Viewer {
     this.$('btnEndHome').onclick = () => this.onHome();
     this.$('ended').hidden = false;
     this.$('soundPrompt').hidden = true;
+    this.$('clipSheet').hidden = true;
+    this._inviteKeyboard(null);
     this.$('endedTitle').focus();
   }
 
@@ -157,7 +159,9 @@ export class Viewer {
     clearTimeout(this.clipNoteTimer);
     this.clipWaiter = null;
     this.$('tbKeys').setAttribute('aria-pressed', 'false');
-    this.root.classList.remove('tb-on', 'zoomed');
+    this._inviteKeyboard(null);
+    // The browser says the mouse is let go only after these listeners are gone: don't leave the pointer hidden.
+    this.root.classList.remove('tb-on', 'zoomed', 'captured', 'touchpad');
     this.root.hidden = true;
     document.body.classList.remove('viewing');
     navigator.keyboard?.unlock?.();
@@ -303,7 +307,8 @@ export class Viewer {
       setTimeout(() => resolve({ ok: false, timeout: true }), 5000);
     });
     this.session.send({ t: 'clip-get' });
-    const text = answer.then(m => (m.ok && typeof m.text === 'string' ? m.text : Promise.reject(new Error('no text'))));
+    // An empty Mac clipboard leaves this device's clipboard as it is.
+    const text = answer.then(m => (m.ok && typeof m.text === 'string' && m.text ? m.text : Promise.reject(new Error('no text'))));
     const done = n => {
       this.banners.show('clip', { kind: 'info', icon: 'copy', title: n ? 'Copied from your Mac.' : 'Your Mac\u2019s clipboard has no text.', dismissible: true });
       clearTimeout(this.clipNoteTimer);

@@ -41,8 +41,13 @@ export class Relay {
     return this.mintService();
   }
 
-  // This Mac's relay key, made the first time it is needed.
-  async _identity() {
+  // This Mac's relay key, made the first time it is needed (once, even if two requests ask at the same moment).
+  _identity() {
+    this.identityP ??= this._loadIdentity().catch(e => { this.identityP = null; throw e; });
+    return this.identityP;
+  }
+
+  async _loadIdentity() {
     const have = this.store.relayIdentity;
     if (have) {
       return { key: await subtle.importKey('pkcs8', fromB64url(have.pkcs8), { name: 'Ed25519' }, false, ['sign']), pub: have.pub };
@@ -135,7 +140,8 @@ export class Relay {
   // Fetch now so the first viewer doesn't wait (called at startup).
   warm() { if (this.active) this._refresh(); }
 
-  forget() { this.cache = null; this.lastError = null; this.lastOkAt = null; this.usage = null; }
+  // Also after Start over, which gives this Mac a new relay key.
+  forget() { this.cache = null; this.lastError = null; this.lastOkAt = null; this.usage = null; this.identityP = null; }
 
   _remember(list, ttlS = TTL_S) {
     const now = this.now();

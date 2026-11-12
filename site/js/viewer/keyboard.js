@@ -12,8 +12,9 @@ const OWN_KEYS = new Set(['Backspace', 'Enter', 'Tab', 'Escape', 'ArrowLeft', 'A
 const SENTINEL = ' ';
 
 export class KeyboardInput {
-  constructor({ surface, softkbd, keysBar, session, swapCtrlCmd, enabled = () => true, onActivity = () => {} }) {
-    Object.assign(this, { surface, softkbd, keysBar, session, swapCtrlCmd, enabled, onActivity });
+  // shortcut(id): what a keys bar button with data-key="id" presses ({code, key, m}), or null.
+  constructor({ surface, softkbd, keysBar, session, swapCtrlCmd, enabled = () => true, onActivity = () => {}, shortcut = id => SHORTCUTS[id] }) {
+    Object.assign(this, { surface, softkbd, keysBar, session, swapCtrlCmd, enabled, onActivity, shortcut });
     this.held = new HeldKeys();
     this.sticky = 0;       // modifier bits latched on the keys bar
     this.composing = false;
@@ -146,13 +147,13 @@ export class KeyboardInput {
 
   _keysBarClick(e) {
     const b = e.target.closest('button');
-    if (!b || !this.enabled()) return;
+    if (!b || !b.closest('[data-mod], [data-key]') || !this.enabled()) return;
     this.onActivity(e);
     if (b.dataset.mod) {
       this._setSticky(this.sticky ^ Number(b.dataset.mod));
       return;
     }
-    const s = SHORTCUTS[b.dataset.key];
+    const s = b.dataset.key && this.shortcut(b.dataset.key);
     if (s) this._press(s);
   }
 

@@ -7,6 +7,7 @@
 //   two fingers moved        → scroll (or, when zoomed in, move around the zoomed picture)
 //   pinch                    → zoom this view in or out (nothing changes on the Mac)
 //   two-finger double tap    → back to the whole screen
+//   three fingers sideways   → swipe: next (fingers move left) or previous, like a Mac trackpad; up or down too
 //
 // Positions in and out are page (client) pixels; viewer/pointer.js maps them to the Mac's screen and sends them.
 // Time comes in as an argument (milliseconds) so tests can replay exact sequences. When nextTimer() returns a time,
@@ -20,6 +21,7 @@ export const TOUCH = Object.freeze({
   LONG_PRESS_MS: 550,  // hold this long without moving for a right click
   TWO_TAP_MS: 300,     // two fingers down and up within this is a two-finger tap
   PINCH_PX: 24,        // fingers this much closer or further apart (and more than they moved together) is a pinch
+  SWIPE_PX: 60,        // three fingers moving this far together is a swipe
 });
 
 const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
@@ -29,7 +31,7 @@ export class TouchGestures {
     this.isZoomed = isZoomed;
     this.o = { ...TOUCH, ...options };
     this.touches = new Map(); // id -> {x, y}
-    this.state = 'idle';      // idle | one | two | rest (extra fingers: ignore until all are lifted)
+    this.state = 'idle';      // idle | one | two | three | rest (extra fingers: ignore until all are lifted)
     this.one = null;
     this.two = null;
     this.timerAt = null;
@@ -53,10 +55,21 @@ export class TouchGestures {
       this.timerAt = null;
       this._startTwo(t);
     } else if (this.state === 'two') {
-      this.state = 'rest';
       this.two = null;
+      this.state = 'three';
+      this.three = { c0: this._centroid(), fired: false };
+    } else if (this.state === 'three') {
+      this.state = 'rest';
+      this.three = null;
     }
     return out;
+  }
+
+  _centroid() {
+    let x = 0, y = 0;
+    for (const p of this.touches.values()) { x += p.x; y += p.y; }
+    const n = Math.max(1, this.touches.size);
+    return { x: x / n, y: y / n };
   }
 
   move(id, x, y, t) {
@@ -82,6 +95,12 @@ export class TouchGestures {
       else if (g.mode === 'drag') out.push({ a: 'drag', x, y });
     } else if (this.state === 'two' && this.two.ids.includes(id)) {
       out.push(...this._moveTwo());
+    } else if (this.state === 'three' && !this.three.fired) {
+      const c = this._centroid(), dx = c.x - this.three.c0.x, dy = c.y - this.three.c0.y;
+      if (Math.hypot(dx, dy) >= this.o.SWIPE_PX) {
+        this.three.fired = true;
+        out.push({ a: 'swipe', dir: Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 1 : -1) : (dy < 0 ? 'up' : 'down') });
+      }
     }
     return out;
   }
@@ -105,6 +124,9 @@ export class TouchGestures {
         }
       }
       this.two = null;
+      this.state = this.touches.size ? 'rest' : 'idle';
+    } else if (this.state === 'three') {
+      this.three = null;
       this.state = this.touches.size ? 'rest' : 'idle';
     } else if (this.state === 'rest' && this.touches.size === 0) {
       this.state = 'idle';
@@ -190,6 +212,7 @@ export class TouchGestures {
     this.state = this.touches.size ? 'rest' : 'idle';
     this.one = null;
     this.two = null;
+    this.three = null;
     this.timerAt = null;
   }
 }

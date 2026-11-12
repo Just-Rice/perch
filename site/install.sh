@@ -4,7 +4,7 @@
 #   curl -fsSL https://just-rice.github.io/perch/install.sh | bash
 #
 # What it does, in order:
-#   1. checks this Mac runs macOS 14 or later, and whether it has Apple silicon or an Intel chip;
+#   1. checks this Mac runs macOS 13.5 or later, and whether it has Apple silicon or an Intel chip;
 #   2. asks GitHub for the latest Perch release (or the version in $PERCH_VERSION);
 #   3. downloads Perch.zip and its checksum, and stops unless they match;
 #   4. checks the app's code signature is intact;
@@ -41,8 +41,12 @@ fail() { printf 'Perch install failed: %s\n' "$*" >&2; exit 1; }
 [ "$(uname -s)" = "Darwin" ] || fail "Perch runs on macOS only."
 # Apple silicon or Intel? (Asked of the hardware, not the shell: a Terminal running under Rosetta would say Intel.)
 if [ "$(sysctl -n hw.optional.arm64 2>/dev/null || echo 0)" = "1" ]; then SUFFIX=""; else SUFFIX="-intel"; fi
-MACOS_MAJOR="$(sw_vers -productVersion | cut -d. -f1)"
-[ "$MACOS_MAJOR" -ge 14 ] 2>/dev/null || fail "Perch needs macOS 14 Sonoma or later (this Mac has $(sw_vers -productVersion))."
+# macOS 13.5 Ventura or later: the Node.js inside Perch.app needs 13.5.
+MACOS_VERSION="$(sw_vers -productVersion)"
+MACOS_MAJOR="$(echo "$MACOS_VERSION" | cut -d. -f1)"
+MACOS_MINOR="$(echo "$MACOS_VERSION" | cut -s -d. -f2)"
+{ [ "$MACOS_MAJOR" -gt 13 ] || { [ "$MACOS_MAJOR" -eq 13 ] && [ "${MACOS_MINOR:-0}" -ge 5 ]; }; } 2>/dev/null ||
+  fail "Perch needs macOS 13.5 Ventura or later (this Mac has $MACOS_VERSION). Ventura 13.5 and later are free updates in System Settings › General › Software Update."
 
 # 2. Which release.
 # PERCH_RELEASES_API lets tests point the installer at a local copy of the releases API.

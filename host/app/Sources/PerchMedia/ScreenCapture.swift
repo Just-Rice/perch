@@ -77,7 +77,7 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         c.queueDepth = 5
         // Capture at full Retina detail only when the output is bigger than the display's size in points.
         if let r = sourceRect { c.sourceRect = r }
-        c.captureResolution = CGFloat(width) > (sourceRect?.width ?? CGFloat(display.width)) ? .best : .nominal
+        Self.setDetail(c, retina: CGFloat(width) > (sourceRect?.width ?? CGFloat(display.width)))
         c.capturesAudio = audio
         c.sampleRate = OpusEncoder.sampleRate
         c.channelCount = 2
@@ -100,8 +100,14 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
         c.height = height
         let whole = CGRect(origin: .zero, size: displayPointSize)
         c.sourceRect = sourceRect ?? whole
-        c.captureResolution = CGFloat(width) > (sourceRect ?? whole).width ? .best : .nominal
+        Self.setDetail(c, retina: CGFloat(width) > (sourceRect ?? whole).width)
         try await s.updateConfiguration(c)
+    }
+
+    /// Full Retina detail or the display's size in points. `captureResolution` is macOS 14+; on macOS 13 there is no
+    /// such setting, so ScreenCaptureKit's own default applies and the picture is still scaled to width × height.
+    private static func setDetail(_ c: SCStreamConfiguration, retina: Bool) {
+        if #available(macOS 14.0, *) { c.captureResolution = retina ? .best : .nominal }
     }
 
     public func stop() async {

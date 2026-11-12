@@ -153,7 +153,7 @@ export function errorMessage(code, text) {
   switch (code) {
     case 'no-screen-permission':
       return msg("Your Mac hasn't allowed screen recording",
-        'On the Mac, open System Settings › Privacy & Security › Screen & System Audio Recording, turn on Perch, then reconnect.');
+        'On the Mac, open System Settings › Privacy & Security › Screen & System Audio Recording (just “Screen Recording” on older macOS), turn on Perch, then reconnect.');
     case 'capture-failed':
       return msg("Your Mac couldn't share its screen",
         'Try reconnecting. If it keeps happening, quit Perch on the Mac and open it again.');

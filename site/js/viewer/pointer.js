@@ -6,11 +6,16 @@ import { wheelPixels, WheelAccumulator } from './wheel.js';
 import { TouchGestures } from './touch.js';
 import { ClickCounter } from './clicks.js';
 
+// Touchpad mode: the Mac's pointer moves this many times as far as the finger, across the picture.
+const TOUCHPAD_SPEED = 1.6;
+
 export class PointerInput {
   // surface: the element that gets the events (not transformed); video: for the picture size;
   // session: {sendInput, sendPointer}; view: {get(), set(view)} for local zoom; size(): fallback picture size.
-  constructor({ surface, video, session, view, size, enabled = () => true, onActivity = () => {} }) {
-    Object.assign(this, { surface, video, session, view, size, enabled, onActivity });
+  // touchpad(): true when a finger should move the Mac's pointer like a laptop's touchpad (from where the pointer
+  // is, by how far the finger goes) instead of clicking right under the finger.
+  constructor({ surface, video, session, view, size, enabled = () => true, onActivity = () => {}, touchpad = () => false }) {
+    Object.assign(this, { surface, video, session, view, size, enabled, onActivity, touchpad });
     this.clicks = new ClickCounter();
     this.wheel = new WheelAccumulator();
     this.gestures = new TouchGestures({ isZoomed: () => isZoomed(this.view.get()) });
@@ -182,6 +187,8 @@ export class PointerInput {
     }
     const g = this.gestures;
     const t = e.timeStamp;
+    // Touchpad mode: each new gesture starts from where this finger lands.
+    if (kind === 'down' && g.state === 'idle') this.finger = { x: e.clientX, y: e.clientY };
     const actions = kind === 'down' ? g.down(e.pointerId, e.clientX, e.clientY, t)
       : kind === 'move' ? g.move(e.pointerId, e.clientX, e.clientY, t)
         : g.up(e.pointerId, e.clientX, e.clientY, t);
@@ -201,6 +208,34 @@ export class PointerInput {
     }, delay);
   }
 
+  // Touchpad mode: moving the finger moves the Mac's pointer by as much (a little more, so one swipe crosses the
+  // screen), and taps, presses and scrolls happen where the Mac's pointer is, not under the finger.
+  _touchpadAction(a) {
+    if (a.a === 'move' || a.a === 'drag') {
+      const from = this.finger ?? { x: a.x, y: a.y };
+      this.finger = { x: a.x, y: a.y };
+      const [sw, sh] = this.shownSize();
+      if (!(sw > 0 && sh > 0)) return;
+      const clamp = v => Math.min(1, Math.max(0, v));
+      this.last = { x: clamp(this.last.x + (a.x - from.x) * TOUCHPAD_SPEED / sw), y: clamp(this.last.y + (a.y - from.y) * TOUCHPAD_SPEED / sh) };
+      this._queueMove(this.last.x, this.last.y);
+      return;
+    }
+    const p = this.last;
+    if (a.a === 'scroll') {
+      this.wheel.add(a.dx, a.dy, p.x, p.y);
+      this._schedule();
+    } else if (a.a === 'click') {
+      this._flushMove();
+      this.session.sendInput({ t: 'b', b: a.b, d: true, x: p.x, y: p.y, n: a.n });
+      this.session.sendInput({ t: 'b', b: a.b, d: false, x: p.x, y: p.y, n: a.n });
+      if (a.b === 2) navigator.vibrate?.(15);
+    } else if (a.a === 'down' || a.a === 'up') {
+      this._flushMove();
+      this.session.sendInput({ t: 'b', b: a.b, d: a.a === 'down', x: p.x, y: p.y, n: 1 });
+    }
+  }
+
   _run(actions) {
     for (const a of actions) {
       if (a.a === 'zoom' || a.a === 'pan' || a.a === 'reset') {
@@ -210,6 +245,10 @@ export class PointerInput {
           : a.a === 'pan' ? panView(v, a.dx, a.dy, box) : IDENTITY);
         continue;
       }
+      if (this.touchpad()) {
+        this._touchpadAction(a);
+        continue;
+      }
       if (a.a === 'scroll') {
         const p = this.map(a.x, a.y);
         this.wheel.add(a.dx, a.dy, p.x, p.y);
@@ -217,6 +256,7 @@ export class PointerInput {
         continue;
       }
       const p = this.map(a.x, a.y);
+      this.last = { x: p.x, y: p.y };
       if (a.a === 'move' || a.a === 'drag') {
         this._queueMove(p.x, p.y);
       } else if (a.a === 'click') {

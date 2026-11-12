@@ -67,6 +67,20 @@ final class InputHandler: @unchecked Sendable {
         }
     }
 
+    /// Presses ⌘V, as if typed: after the viewer's text has been put on the clipboard. On the input queue, so it
+    /// comes in order with the viewer's other keys.
+    func pressPaste() {
+        queue.async { [self] in
+            planner.bounds = bounds()
+            for msg: [String: Any] in [["t": "k", "c": "MetaLeft", "k": "Meta", "d": true, "m": 8],
+                                       ["t": "k", "c": "KeyV", "k": "v", "d": true, "m": 8],
+                                       ["t": "k", "c": "KeyV", "k": "v", "d": false, "m": 8],
+                                       ["t": "k", "c": "MetaLeft", "k": "Meta", "d": false, "m": 0]] {
+                perform(planner.plan(msg), for: msg)
+            }
+        }
+    }
+
     /// Lets go of everything the viewer was holding (session over, host gone, quitting).
     func releaseAll(wait: Bool = false) {
         let work = { [self] in

@@ -16,6 +16,7 @@ const ANSWER_TIMEOUT_MS = 15000; // offer sent, no answer yet
 
 export const MAX_CONTROL_BYTES = 64 * 1024;
 export const MAX_INPUT_BYTES = 4096;
+export const MAX_CLIP_CHARS = 30000; // clipboard text, either way (the Mac app has the same limit)
 export const STATUS_EVERY_MS = 2000;
 export const MAX_CODE_TRIES = 3;
 export const BYE_REASONS = ['signed-in-elsewhere', 'paused', 'quit', 'idle', 'removed', 'disconnected'];
@@ -426,6 +427,19 @@ export class Session {
         this.hub.captureChanged(this);
         return;
       }
+      case 'clip-get': {
+        // The Mac's clipboard text, for the viewer to copy. Answered with {t:'clip', ok, text}.
+        const now = this.now();
+        if (now - (this.clipAt ?? -Infinity) < 300) return;
+        this.clipAt = now;
+        this.hub.clipGet(this);
+        return;
+      }
+      case 'clip-set':
+        // Text from the viewer onto the Mac's clipboard, and pasted there if asked. Answered with {t:'clip-set', ok}.
+        if (typeof msg.text !== 'string' || msg.text.length > MAX_CLIP_CHARS) return this._send({ t: 'clip-set', ok: false });
+        this.hub.clipSet(this, msg.text, msg.paste === true);
+        return;
       case 'mic':
         // The viewer turned their microphone on or off: the Mac plays what they say.
         if (typeof msg.on !== 'boolean' || msg.on === !!this.micOn) return;
@@ -483,6 +497,10 @@ export class Session {
   }
 
   sendWindows(list) { if (this.state === 'ready' && !this.guest) this._send({ t: 'windows', list }); }
+  sendClip(text, ok = true) {
+    if (this.state === 'ready' && !this.guest) this._send({ t: 'clip', ok: !!ok, text: ok ? String(text ?? '').slice(0, MAX_CLIP_CHARS) : '' });
+  }
+  sendClipSet(ok) { if (this.state === 'ready' && !this.guest) this._send({ t: 'clip-set', ok: !!ok }); }
   sendTextFocus(editable, secure) {
     if (this.state === 'ready' && !this.guest) this._send({ t: 'textfocus', editable: !!editable, secure: !!secure });
   }

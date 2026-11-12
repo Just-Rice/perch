@@ -237,6 +237,13 @@ export class Controller {
       case 'window-fit':
         this.active?.sendFit(ev.ok === true);
         break;
+      case 'clipboard':
+        if (this.clipAsker && this.clipAsker === this.active) this.clipAsker.sendClip(ev.text, ev.ok === true && typeof ev.text === 'string');
+        this.clipAsker = null;
+        break;
+      case 'clipboard-set':
+        this.active?.sendClipSet(ev.ok === true);
+        break;
       case 'text-focus':
         // A click just put the Mac's focus in a text box (or out of one): a phone can bring up its keyboard.
         this.active?.sendTextFocus(ev.editable === true, ev.secure === true);
@@ -397,6 +404,16 @@ export class Controller {
     if (session !== this.active) return;
     this.windowAsker = session;
     this.app.command('windows', {});
+  }
+
+  clipGet(session) {
+    if (session !== this.active) return;
+    this.clipAsker = session;
+    this.app.command('clipboard-get', {});
+  }
+
+  clipSet(session, text, paste) {
+    if (session === this.active) this.app.command('clipboard-set', { text, paste: !!paste });
   }
 
   // The owner's viewer turned its microphone on or off. The app plays it on the output chosen in Setup.
@@ -675,7 +692,7 @@ export class Controller {
   relayIceServers() { return this.relay.iceServers(); }
 
   // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
-  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus']; }
+  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus', 'clipboard']; }
 
   async relaySet(keyId, apiToken) {
     const replacing = this.relay.configured;

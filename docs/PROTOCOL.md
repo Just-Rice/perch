@@ -262,6 +262,10 @@ viewer sees is always what their clicks reach. Pointer positions stay 0..1 acros
 to the front when chosen. When it closes, is minimised or leaves the desktop, the Mac goes back to the whole display
 (`status.window` becomes `null`). Choosing another display forgets the window.
 
+For Macs with `clipboard` in `caps` (never for guests): `{t:"clip-set", text, paste?}` puts the text (at most 30,000
+UTF-16 units) on the Mac's clipboard and, with `paste: true`, presses ⌘V there; answered `{t:"clip-set", ok}`.
+`{t:"clip-get"}` asks for the Mac's clipboard text (cut to 30,000 units); answered `{t:"clip", ok, text}`.
+
 For Macs with `textfocus` in `caps`: after a left click the Mac sends `{t:"textfocus", editable, secure}` (whether its
 focused element now takes typing, and whether it is a password box), so a phone can bring up its keyboard by itself.
 
@@ -326,7 +330,8 @@ login-item-on | login-item-off | check-updates | update | quit`), `input-echo {e
 
 Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?}` (`window`: show only the part of the
 display that window covers, following it), `windows {}` (asks for a `windows` event), `window-fit {window, w, h}`
-(reshape it to `w:h` through Accessibility; never done in test runs), `mic {on, device?}` (start or stop playing
+(reshape it to `w:h` through Accessibility; never done in test runs), `clipboard-get {}` (answered with a `clipboard {ok, text}` event), `clipboard-set {text, paste?}` (answered with
+`clipboard-set {ok}`; test runs use a pretend clipboard), `mic {on, device?}` (start or stop playing
 MIC frames; only during a session), `keyframe {}`, `bitrate {kbps}`,
 `session {active, viewer?, route?, curtain?}` (menu light, notification, keeps the display awake while active;
 `curtain: true` blacks out the Mac's own displays with windows left out of the capture, lifted by three Esc presses

@@ -15,6 +15,7 @@ import { QUALITY } from '../shared/proto.js';
 const HIDE_AFTER_MS = 3500;  // the toolbar tucks itself away after this long without being used
 const SHOW_ZONE_PX = 56;     // moving the mouse this close to the top brings it back
 const PING_MS = 2000;
+const MAX_CLIP = 30000; // clipboard text, either way (the Mac has the same limit)
 
 export class Viewer {
   constructor({ root, session, hi, ready, prefs, env, apple, touchFirst, log = () => {}, onLeave, onReconnect, onHome }) {
@@ -72,7 +73,7 @@ export class Viewer {
       surface: this.surface, video: this.video, session,
       view: { get: () => this.view, set: v => this.setView(v) },
       size: () => [this.display.width || 0, this.display.height || 0],
-      enabled, onActivity: activity,
+      enabled, onActivity: activity, touchpad: () => this.touchFirst && !!this.prefs.get('touchpad'),
     });
     this.keys = new KeyboardInput({
       surface: this.surface, softkbd: this.$('softkbd'), keysBar: this.$('keysBar'), session,
@@ -92,6 +93,9 @@ export class Viewer {
     this._every(PING_MS, () => this._ping());
     this._every(1000, () => this._stats());
     this._ping();
+    // Keep this device's screen on while the Mac is on it (phones dim and lock after a minute or so).
+    this._keepAwake();
+    this._on(document, 'visibilitychange', () => { if (document.visibilityState === 'visible') this._keepAwake(); });
     if (window.visualViewport) {
       const vv = window.visualViewport;
       const fit = () => {
@@ -117,6 +121,7 @@ export class Viewer {
     if (this.over) return;
     this.over = true;
     this._micOff();
+    this._letSleep();
     if (document.pointerLockElement === this.surface) document.exitPointerLock();
     this.keys?.releaseAll();
     this._clearTimers();
@@ -132,6 +137,7 @@ export class Viewer {
   }
 
   destroy() {
+    this._letSleep();
     if (document.pointerLockElement === this.surface) document.exitPointerLock();
     clearTimeout(this.captureNoteTimer);
     clearTimeout(this.inviteTimer);
@@ -147,7 +153,9 @@ export class Viewer {
     if (this.video) { this.video.pause(); this.video.srcObject = null; }
     this.setView(IDENTITY);
     this.banners?.clear();
-    for (const id of ['ended', 'moreMenu', 'keysBar', 'soundPrompt']) this.$(id).hidden = true;
+    for (const id of ['ended', 'moreMenu', 'keysBar', 'soundPrompt', 'clipSheet']) this.$(id).hidden = true;
+    clearTimeout(this.clipNoteTimer);
+    this.clipWaiter = null;
     this.$('tbKeys').setAttribute('aria-pressed', 'false');
     this.root.classList.remove('tb-on', 'zoomed');
     this.root.hidden = true;
@@ -174,6 +182,11 @@ export class Viewer {
       if (typeof m.ts === 'number') this.pingMs = Math.max(0, performance.now() - m.ts);
     } else if (m.t === 'status') {
       this._applyStatus(m);
+    } else if (m.t === 'clip') {
+      this.clipWaiter?.(m);
+      this.clipWaiter = null;
+    } else if (m.t === 'clip-set') {
+      this._clipSetDone(m.ok === true);
     } else if (m.t === 'textfocus') {
       this._textFocus(m.editable === true, m.secure === true);
     } else if (m.t === 'windows') {
@@ -246,6 +259,101 @@ export class Viewer {
     if (Array.isArray(st.displays)) this._setDisplays(st.displays, st.display);
     // Which window is being shown, if any. Just after choosing one here the Mac's older notes still say otherwise.
     if ('window' in st && performance.now() >= (this.windowChosenAt ?? -Infinity) + 1500) this._showWindow(st.window ?? null);
+  }
+
+  // --- clipboard text ---
+
+  // Paste this device's clipboard on the Mac: straight away where the browser lets the page read it, otherwise
+  // through a box to paste into (iPhones without a prompt, Firefox, a refusal).
+  async _pasteToMac() {
+    this._toggleMenu(false);
+    let text = null;
+    try { text = await navigator.clipboard.readText(); } catch { text = null; }
+    if (typeof text === 'string' && text.length > 0 && text.length <= MAX_CLIP) return this._sendClip(text, true);
+    this._openClip('send', typeof text === 'string' && text.length > MAX_CLIP ? 'That text is too long to send in one go.' : '');
+  }
+
+  _sendClip(text, paste) {
+    if (!text) { this._clipStatus('There\u2019s no text to send.'); return; }
+    if (text.length > MAX_CLIP) { this._clipStatus('That text is too long to send in one go.'); return; }
+    this.clipPasting = paste;
+    this.session.send({ t: 'clip-set', text, paste });
+  }
+
+  _clipSetDone(ok) {
+    if (!ok) {
+      if (this.$('clipSheet').hidden) this._openClip('send', '');
+      this._clipStatus('Your Mac didn\u2019t take that text.');
+      return;
+    }
+    this._closeClip();
+    this.banners.show('clip', { kind: 'info', icon: this.clipPasting ? 'paste' : 'copy',
+      title: this.clipPasting ? 'Pasted on your Mac.' : 'On your Mac\u2019s clipboard.', dismissible: true });
+    clearTimeout(this.clipNoteTimer);
+    this.clipNoteTimer = setTimeout(() => this.banners.hide('clip'), 3000);
+  }
+
+  // Copy the Mac's clipboard to this device. Browsers only let a page write the clipboard during a click, and the
+  // Mac's answer comes a moment later, so the write is started now with the text still on its way (ClipboardItem
+  // takes a promise); where that isn't possible the text is shown, selected, to copy by hand.
+  _copyFromMac() {
+    this._toggleMenu(false);
+    const answer = new Promise(resolve => {
+      this.clipWaiter = resolve;
+      setTimeout(() => resolve({ ok: false, timeout: true }), 5000);
+    });
+    this.session.send({ t: 'clip-get' });
+    const text = answer.then(m => (m.ok && typeof m.text === 'string' ? m.text : Promise.reject(new Error('no text'))));
+    const done = n => {
+      this.banners.show('clip', { kind: 'info', icon: 'copy', title: n ? 'Copied from your Mac.' : 'Your Mac\u2019s clipboard has no text.', dismissible: true });
+      clearTimeout(this.clipNoteTimer);
+      this.clipNoteTimer = setTimeout(() => this.banners.hide('clip'), 3000);
+    };
+    const byHand = async () => {
+      let t = '';
+      try { t = await text; } catch { /* none */ }
+      if (!t) return done(0);
+      this._openClip('show', '', t);
+    };
+    let writing;
+    try {
+      if (typeof ClipboardItem === 'undefined' || !navigator.clipboard?.write) throw new Error('no ClipboardItem');
+      writing = navigator.clipboard.write([new ClipboardItem({ 'text/plain': text.then(t => new Blob([t], { type: 'text/plain' })) })]);
+    } catch {
+      writing = text.then(t => navigator.clipboard.writeText(t));
+    }
+    // A browser that neither writes nor refuses within a few seconds gets the text shown instead.
+    const stuck = new Promise((_, reject) => setTimeout(() => reject(new Error('stuck')), 6000));
+    Promise.race([writing, stuck]).then(async () => done((await text).length), () => byHand());
+  }
+
+  // The box for clipboard text: 'send' (to the Mac) or 'show' (the Mac's text, to copy by hand).
+  _openClip(mode, error, text = '') {
+    const $ = this.$;
+    const show = mode === 'show';
+    $('clipTitle').textContent = show ? 'Your Mac\u2019s clipboard' : 'Send text to your Mac';
+    $('clipHelp').textContent = show ? 'This browser can\u2019t copy it by itself. It\u2019s selected: copy it from here.'
+      : 'Paste or type it here.';
+    $('clipText').value = text;
+    $('clipText').readOnly = show;
+    $('clipGo').hidden = $('clipOnly').hidden = show;
+    $('clipClose').textContent = show ? 'Done' : 'Cancel';
+    this._clipStatus(error);
+    $('clipSheet').hidden = false;
+    $('clipText').focus({ preventScroll: true });
+    if (show) $('clipText').select();
+  }
+
+  _clipStatus(text) {
+    const el = this.$('clipStatus');
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+
+  _closeClip() {
+    this.$('clipSheet').hidden = true;
+    this.$('clipText').value = '';
+    this.surface.focus({ preventScroll: true });
   }
 
   // --- the microphone: what you say here is played on the Mac ---
@@ -531,6 +639,25 @@ export class Viewer {
       this.prefs.set('swapCtrlCmd', e.target.checked);
     });
     on('optZoom', 'click', () => { this.setView(IDENTITY); this._toggleMenu(false); });
+    // Touchpad mode, on phones and tablets.
+    $('touchpadWrap').hidden = $('touchpadHelp').hidden = !this.touchFirst || this.guest;
+    $('optTouchpad').checked = !!this.prefs.get('touchpad');
+    on('optTouchpad', 'change', e => {
+      this.prefs.set('touchpad', e.target.checked);
+      this.root.classList.toggle('touchpad', e.target.checked);
+    });
+    this.root.classList.toggle('touchpad', this.touchFirst && !!this.prefs.get('touchpad'));
+
+    // Clipboard text both ways, on Macs that offer it.
+    const canClip = !this.guest && !!this.session.caps?.includes('clipboard');
+    $('optPaste').hidden = $('optCopy').hidden = !canClip;
+    on('optPaste', 'click', () => this._pasteToMac());
+    on('optCopy', 'click', () => this._copyFromMac());
+    on('clipGo', 'click', () => this._sendClip($('clipText').value, true));
+    on('clipOnly', 'click', () => this._sendClip($('clipText').value, false));
+    on('clipClose', 'click', () => this._closeClip());
+    this._on($('clipSheet'), 'keydown', e => { if (e.key === 'Escape') { e.preventDefault(); this._closeClip(); } });
+
     // Talking through the Mac, where the Mac, the browser and the connection all can.
     this.micOn = false;
     $('optMic').hidden = this.guest || !this.session.canMic;
@@ -624,6 +751,18 @@ export class Viewer {
       this._showToolbar();
       if (!this.$('windowWrap').hidden) this.session.send({ t: 'windows' });
     }
+  }
+
+  async _keepAwake() {
+    if (this.over || !navigator.wakeLock || (this.wakeLock && !this.wakeLock.released)) return;
+    try { this.wakeLock = await navigator.wakeLock.request('screen'); } catch { /* not allowed here; no matter */ }
+    if (this.over) this._letSleep();
+  }
+
+  _letSleep() {
+    const w = this.wakeLock;
+    this.wakeLock = null;
+    w?.release?.().catch?.(() => {});
   }
 
   async _capture() {

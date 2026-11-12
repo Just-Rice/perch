@@ -5,6 +5,8 @@ const PATHS = {
   sound: 'M11 5 6 9H2v6h4l5 4V5zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13',
   mic: 'M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3M8 21h8',
   pointer: 'M5 3l14 8-6 1.5L10 19 5 3zM13 12.5l5 5',
+  paste: 'M9 4h6v3H9zM8 5H5v16h14V5h-3M8 12h8M8 16h5',
+  copy: 'M9 9h11v11H9zM5 15V4h11',
   muted: 'M11 5 6 9H2v6h4l5 4V5zM22 9l-6 6M16 9l6 6',
   fullscreen: 'M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3M16 21h3a2 2 0 0 0 2-2v-3',
   'fullscreen-exit': 'M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3',

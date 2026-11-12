@@ -248,6 +248,16 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
             case false?: capture.stop(reason: "requested")
             case nil: warn("capture without on")
             }
+        case "clipboard-get":
+            sendEvent(["e": "clipboard", "ok": true, "text": clipboardText()])
+        case "clipboard-set":
+            if let text = JSONValue.string(cmd["text"]), text.utf16.count <= Self.clipboardMax {
+                setClipboard(text)
+                if JSONValue.bool(cmd["paste"]) == true { input.pressPaste() }
+                sendEvent(["e": "clipboard-set", "ok": true])
+            } else {
+                sendEvent(["e": "clipboard-set", "ok": false])
+            }
         case "mic":
             setMic(JSONValue.bool(cmd["on"]) == true, device: JSONValue.string(cmd["device"]))
         case "windows":
@@ -303,6 +313,32 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
     }
 
     /// A warning in the log, also sent to the host so it shows up in its log next to whatever caused it.
+    // MARK: clipboard (text only)
+
+    /// The most text that goes either way at once (it has to fit in one message on the connection).
+    static let clipboardMax = 30_000
+    /// Test runs never touch the real clipboard of whoever is at this Mac.
+    private var testClipboard = ""
+
+    private func clipboardText() -> String {
+        guard systemChangesAllowed else { return testClipboard }
+        let text = NSPasteboard.general.string(forType: .string) ?? ""
+        // Cut on a whole character, so nothing half-encoded goes out.
+        var out = "", units = 0
+        for ch in text {
+            units += ch.utf16.count
+            if units > Self.clipboardMax { break }
+            out.append(ch)
+        }
+        return out
+    }
+
+    private func setClipboard(_ text: String) {
+        guard systemChangesAllowed else { testClipboard = text; return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
     /// Starts or stops playing the viewer's microphone on this Mac. Only while a session is on.
     private func setMic(_ on: Bool, device: String?) {
         guard on else {

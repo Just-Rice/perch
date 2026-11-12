@@ -757,6 +757,25 @@ async function textFocusChecks() {
   check('no text-focus after a right click', !got.events.slice(since).some(x => x.ev.e === 'text-focus'));
 }
 
+// Clipboard text both ways. Test runs use a pretend clipboard, never the real one.
+async function clipboardChecks() {
+  let since = got.events.length;
+  const text = 'Hello from the phone \u2014 caf\u00e9 \ud83d\udc26';
+  command('clipboard-set', { text, paste: true });
+  const set = await event('clipboard-set', { since });
+  check('clipboard-set: done', set.ok === true, JSON.stringify(set));
+  const pasted = await until(() => got.events.slice(since).filter(x => x.ev.e === 'input-echo').length >= 4 && got.events.slice(since), 2000, 'the paste keys');
+  const keys = pasted.filter(x => x.ev.e === 'input-echo').map(x => `${x.ev.ev.c}${x.ev.ev.d ? '\u2193' : '\u2191'}`);
+  check('paste: \u2318V pressed and let go, after the text was set', keys.join(' ') === 'MetaLeft\u2193 KeyV\u2193 KeyV\u2191 MetaLeft\u2191', keys.join(' '));
+  since = got.events.length;
+  command('clipboard-get');
+  const got1 = await event('clipboard', { since });
+  check('clipboard-get: the same text back', got1.ok === true && got1.text === text, JSON.stringify(got1));
+  since = got.events.length;
+  command('clipboard-set', { text: 'x'.repeat(30001) });
+  check('clipboard-set: too long is refused', (await event('clipboard-set', { since })).ok === false);
+}
+
 async function windowChecks(h) {
   let since = got.events.length;
   command('windows');
@@ -998,6 +1017,7 @@ async function main() {
   await section('input', () => inputChecks(h));
   await section('captured mouse', () => capturedMouseChecks(h));
   await section('text focus', () => textFocusChecks());
+  await section('clipboard', () => clipboardChecks());
   await section('windows', () => windowChecks(h));
   await section('microphone', () => micChecks(h));
   logChecks();

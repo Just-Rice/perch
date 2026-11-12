@@ -284,3 +284,12 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 
 /* A captured mouse: the page's pointer is gone (the browser hides it); the Mac's own pointer is in the picture. */
 .viewer.captured .surface { cursor: none; }
+
+/* Text to or from the Mac's clipboard */
+.clip-text {
+  width: 100%; min-height: 120px; max-height: 40vh; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--text); font: 16px/1.4 var(--mono); resize: vertical; margin: 8px 0 4px;
+}
+
+/* No numbers yet: no empty box */
+.stats:empty { display: none; }

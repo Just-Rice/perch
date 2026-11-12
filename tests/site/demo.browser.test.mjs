@@ -110,6 +110,54 @@ test('desktop: capturing the mouse, as games do: the Mac\u2019s pointer moves by
   await page.close();
 });
 
+test('clipboard: paste this device’s text on the Mac, copy the Mac’s text here, and the fallback box', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  // A stand-in for this device's clipboard, so no real clipboard is read or written: it can say yes or no.
+  await page.eval(`(() => {
+    const c = window.__clip = { text: 'hello from this computer', refuse: false, written: [] };
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      readText: async () => { if (c.refuse) throw new DOMException('no', 'NotAllowedError'); return c.text; },
+      writeText: async t => { if (c.refuse) throw new DOMException('no', 'NotAllowedError'); c.written.push(t); },
+      write: async items => { if (c.refuse) throw new DOMException('no', 'NotAllowedError');
+        for (const i of items) c.written.push(await (await i.getType('text/plain')).text()); },
+    } });
+  })()`);
+  const menu = async id => { await page.eval(`window.__perch.viewer._showToolbar()`); await page.click('#tbMore'); await page.click(id); };
+  let n = await count(page);
+  await menu('#optPaste');
+  await page.waitFor(`window.__perch.demoSession.clipboard === 'hello from this computer'`, { what: 'the text on the Mac' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'clip-set').map(m => [m.text, m.paste]), [['hello from this computer', true]]);
+  await page.waitFor(`/Pasted on your Mac/.test(document.getElementById('banners').textContent)`, { what: '"Pasted on your Mac."' });
+
+  // The browser won't read its clipboard: the box to paste into comes up, with "only the clipboard" too.
+  await page.eval(`window.__clip.refuse = true`);
+  await menu('#optPaste');
+  await page.waitFor(`!document.getElementById('clipSheet').hidden`, { what: 'the paste box' });
+  assert.equal(await page.eval(`document.activeElement.id`), 'clipText');
+  await page.shot('viewer-demo-paste-box-desktop');
+  await page.eval(`document.getElementById('clipText').value = 'just keep this'`);
+  await page.click('#clipOnly');
+  await page.waitFor(`window.__perch.demoSession.clipboard === 'just keep this' && document.getElementById('clipSheet').hidden`, { what: 'clipboard only' });
+  assert.equal((await messages(page)).filter(m => m.t === 'clip-set').at(-1).paste, false);
+
+  // Copy from the Mac.
+  await page.eval(`window.__clip.refuse = false; window.__perch.demoSession.clipboard = 'copied on the Mac — café'`);
+  await menu('#optCopy');
+  await page.waitFor(`window.__clip.written.length === 1`, { what: 'the Mac’s text on this device' });
+  assert.deepEqual(await page.eval(`window.__clip.written`), ['copied on the Mac — café']);
+  await page.waitFor(`/Copied from your Mac/.test(document.getElementById('banners').textContent)`, { what: '"Copied from your Mac."' });
+  // ...and where the browser won't write it, the text is shown, selected, to copy by hand.
+  await page.eval(`window.__clip.refuse = true`);
+  await menu('#optCopy');
+  await page.waitFor(`!document.getElementById('clipSheet').hidden`, { what: 'the text shown to copy' });
+  assert.equal(await page.eval(`document.getElementById('clipText').value`), 'copied on the Mac — café');
+  assert.deepEqual(await page.eval(`[document.getElementById('clipText').readOnly, document.getElementById('clipGo').hidden]`), [true, true]);
+  await page.click('#clipClose');
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
 test('desktop: mouse moves, clicks, double clicks, right clicks and scrolling', async () => {
   const page = await openPage(stack, demoUrl());
   await ready(page);
@@ -398,6 +446,37 @@ test('phone: tapping a text box on the Mac brings up the keyboard (Android) or a
   await page.eval(`document.getElementById('softkbd').blur()`);
   await page.eval(`window.__perch.demoSession.onmessage({ t: 'status', locked: true })`);
   assert.equal(await page.text('#kbdFabLabel'), 'Tap to type the password');
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('phone: touchpad mode moves the Mac\u2019s pointer by how far the finger goes, and taps click where it is', async () => {
+  const page = await openPage(stack, demoUrl({ log: '0' }), { view: PHONE, ua: UA.iphone, name: 'touchpad' });
+  await ready(page);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  assert.equal(await page.eval(`document.getElementById('touchpadWrap').hidden`), false);
+  await page.click('#optTouchpad');
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).touchpad`), true, 'remembered');
+  await page.eval(`window.__perch.viewer._toggleMenu(false)`);
+  const [sw] = await page.eval(`window.__perch.viewer.pointer.shownSize()`);
+  // Wherever the finger is, the Mac's pointer starts from where it was (the middle) and moves by the same amount.
+  let n = await count(page);
+  await page.touch('touchStart', [{ x: 60, y: 500 }]);
+  for (let x = 70; x <= 110; x += 10) { await page.touch('touchMove', [{ x, y: 500 }]); await sleep(20); }
+  await page.touch('touchEnd', []);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'm')`, { what: 'pointer moves' });
+  await sleep(100);
+  const last = (await messages(page, n)).filter(m => m.t === 'm').at(-1);
+  assert.ok(Math.abs(last.x - (0.5 + 50 * 1.6 / sw)) < 0.01, `pointer at ${last.x}`);
+  assert.ok(Math.abs(last.y - 0.5) < 0.01);
+  // A tap far away clicks where the Mac's pointer is.
+  await sleep(500);
+  n = await count(page);
+  await page.tap(300, 1500 / 2);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'the click' });
+  const clicks = (await messages(page, n)).filter(m => m.t === 'b');
+  assert.ok(clicks.every(c => Math.abs(c.x - last.x) < 1e-9 && Math.abs(c.y - last.y) < 1e-9), JSON.stringify(clicks));
   assert.deepEqual(page.problems(), []);
   await page.close();
 });

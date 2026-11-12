@@ -209,6 +209,16 @@ export class FakeApp extends EventEmitter {
         if (cmd.on && cmd.device === 'gone') this.event({ e: 'mic', on: false, ok: false, error: 'That sound output is not connected.' });
         else this.event({ e: 'mic', on: !!cmd.on, ok: true });
         break;
+      case 'clipboard-get':
+        this.event({ e: 'clipboard', ok: true, text: this.clipboard ?? '' });
+        break;
+      case 'clipboard-set':
+        if (typeof cmd.text === 'string' && cmd.text.length <= 30000) {
+          this.clipboard = cmd.text;
+          if (cmd.paste) this.pasted = (this.pasted ?? 0) + 1;
+          this.event({ e: 'clipboard-set', ok: true });
+        } else this.event({ e: 'clipboard-set', ok: false });
+        break;
       case 'windows':
         this.event({ e: 'windows', list: [{ id: 7, app: 'Test App', title: 'Test Window', width: 800, height: 600 }] });
         break;

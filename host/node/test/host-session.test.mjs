@@ -623,6 +623,22 @@ test('one window: the list, choosing it, reshaping it, and going back to the who
   assert.deepEqual([other.display, 'window' in other], [2, false]);
 });
 
+test('clipboard text both ways, for the signed-in owner only', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  const { v, end } = await passkey(t, ctx);
+  assert.equal(end.t, 'ready');
+  assert.ok(v.firstReply.caps.includes('clipboard'));
+  v.send({ t: 'clip-set', text: 'from the phone \u{1F426}', paste: true });
+  assert.deepEqual(await v.next(['clip-set']), { t: 'clip-set', ok: true });
+  assert.deepEqual([app.clipboard, app.pasted], ['from the phone \u{1F426}', 1]);
+  v.send({ t: 'clip-get' });
+  assert.deepEqual(await v.next(['clip']), { t: 'clip', ok: true, text: 'from the phone \u{1F426}' });
+  v.send({ t: 'clip-set', text: 'x'.repeat(30001) });
+  assert.equal((await v.next(['clip-set'])).ok, false);
+  assert.equal(app.clipboard, 'from the phone \u{1F426}', 'too long: nothing changed');
+});
+
 test('after a click, the viewer hears whether the Mac now waits for typing', async (t) => {
   const ctx = await pairedHost(t);
   const { v, end } = await passkey(t, ctx);

@@ -100,7 +100,8 @@ export function startDemo(app) {
   let shown = null;
   const session = {
     stream,
-    caps: ['window'],
+    caps: ['window', 'textfocus', 'clipboard'],
+    clipboard: 'Text copied on the demo Mac',
     onmessage: () => {},
     onstream: () => {},
     onlink: () => {},
@@ -112,6 +113,12 @@ export function startDemo(app) {
         shown = null;
         setSize(display);
         setTimeout(() => this.onmessage({ t: 'status', width: display.width, height: display.height, window: null }), 50);
+      }
+      if (m.t === 'clip-get') setTimeout(() => this.onmessage({ t: 'clip', ok: true, text: this.clipboard }), 30);
+      if (m.t === 'clip-set') {
+        const ok = typeof m.text === 'string' && m.text.length <= 30000;
+        if (ok) this.clipboard = m.text;
+        setTimeout(() => this.onmessage({ t: 'clip-set', ok }), 30);
       }
       if (m.t === 'windows') setTimeout(() => this.onmessage({ t: 'windows', list: WINDOWS }), 20);
       if (m.t === 'window') {

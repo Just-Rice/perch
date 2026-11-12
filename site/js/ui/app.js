@@ -225,6 +225,7 @@ async function runSession(app, target) {
     guestId: target.guest?.guestId, guestSecret: target.guest?.guestSecret,
     certificate: target.quick?.cert ?? null,
     brokers: env.brokers, iceServers: env.iceServers, log: app.log, onStage: s => ui.stage(s),
+    transport: target.transport ?? env.transport, allowLocalRelay: env.allowLocalRelay,
   });
   app.conn = conn;
   // Tests on this computer can't answer a microphone prompt, so they may ask for a generated tone instead.
@@ -259,6 +260,12 @@ async function runSession(app, target) {
     if (!(e instanceof PerchError)) {
       app.log(e);
       return showFailure(app, new PerchError('unexpected', { message: e.message }), target);
+    }
+    // The direct connection couldn't get through, but the Mac offered its Worker relay: try once more over that.
+    // (One-tap sign-in is tied to the direct connection, so the passkey is asked for again over the relay.)
+    if (e.kind === 'webrtc' && conn.relayOffer && conn.via !== 'relay' && target.transport !== 'relay') {
+      app.log('the direct connection failed: trying the Mac’s Worker relay');
+      return runSession(app, { ...target, transport: 'relay', quick: null });
     }
     if (e.kind === 'cancelled') return showHome(app);
     showFailure(app, e, target);

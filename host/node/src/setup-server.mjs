@@ -80,6 +80,8 @@ const ACTIONS = {
   relayRemove: [],
   relayOwnerSet: [['key', 'string']],
   relayOwnerRemove: [],
+  workerRelaySet: [['url', 'string']],
+  workerRelayRemove: [],
   updateSettings: [['patch', 'object']],
   disconnect: [],
   requestPermission: [['which', 'string']],

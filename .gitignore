@@ -9,3 +9,4 @@ tests/e2e/out/
 *.log
 .reference/
 .build-intel/
+.wrangler/

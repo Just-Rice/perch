@@ -13,6 +13,7 @@ import { PROTO, MIN_PEER_PROTO } from '../../../site/js/shared/proto.js';
 export const HELLOS_PER_MINUTE = 20;
 export const MAX_UNAUTHENTICATED = 3;
 export const MAX_SDP_BYTES = 32 * 1024;
+export const MAX_RELAY_TEXT = 8 * 1024;
 const ID16_RE = /^[A-Za-z0-9_-]{22}$/;   // 16 random bytes in base64url
 const MAX_OFFER_RESENDS = 3;
 const FORGET_AFTER_MS = 5 * 60 * 1000;
@@ -154,13 +155,18 @@ export class Signaling {
     if (no) return this._refuse(where, sid, no.reason, no.retryAfter);
     if (this.hub.unauthenticatedCount(kind) >= MAX_UNAUTHENTICATED) return this._refuse(where, sid, 'busy', 10);
 
-    let session, sdp, iceServers = [];
+    let session, sdp, iceServers = [], ws = null;
     try {
       session = this.hub.createSession(hello, kind);
       entry.session = session;
-      // The owner's relay logins, if any (relay.mjs), are fetched while the offer is being made.
+      // The owner's relay logins, if any (relay.mjs), are fetched while the offer is being made; so is the Worker
+      // relay offer (wsrelay.mjs), which a viewer whose network blocks WebRTC answers instead.
       const relay = this.hub.relayIceServers ? Promise.resolve(this.hub.relayIceServers()).catch(() => []) : [];
-      [sdp, iceServers] = await Promise.all([session.offer(), relay]);
+      const worker = this.hub.relayOffer ? Promise.resolve(this.hub.relayOffer(session)).catch(e => {
+        this.log?.warn(`worker relay offer: ${e.message}`);
+        return null;
+      }) : null;
+      [sdp, iceServers, ws] = await Promise.all([session.offer(), relay, worker]);
     } catch (e) {
       this.log?.error('could not make an offer:', e);
       session?.end('error', { sendBye: false });
@@ -169,7 +175,7 @@ export class Signaling {
     if (session.state !== 'offered') return; // ended while gathering (paused, timed out...)
     // caps: what this Mac can do beyond protocol 1 ("quick" = one-tap passkey sign-in, see bind.js).
     entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp, ...(this.hub.caps?.length ? { caps: this.hub.caps } : {}),
-      ...(iceServers.length ? { iceServers } : {}) };
+      ...(iceServers.length ? { iceServers } : {}), ...(ws ? { ws } : {}) };
     this.stats.offers++;
     await this._reply(where, sid, entry.offer);
   }
@@ -177,11 +183,18 @@ export class Signaling {
   async _answer(kind, where, msg) {
     const entry = typeof msg.sid === 'string' ? this.sids.get(msg.sid) : null;
     if (!entry || !entry.session || entry.topic !== where.topic) return this._drop('answer for an unknown session');
-    if (typeof msg.sdp !== 'string' || msg.sdp.length > MAX_SDP_BYTES || !msg.sdp.startsWith('v=0')) return this._drop('bad answer');
+    // A viewer answers either the WebRTC offer (sdp) or, on a network that blocks WebRTC, the Worker relay offer (ws).
+    const relay = typeof msg.ws === 'string' && !!entry.offer?.ws;
+    if (relay) {
+      if (msg.ws.length > MAX_RELAY_TEXT) return this._drop('bad relay answer');
+    } else if (typeof msg.sdp !== 'string' || msg.sdp.length > MAX_SDP_BYTES || !msg.sdp.startsWith('v=0')) {
+      return this._drop('bad answer');
+    }
     if (entry.session.state !== 'offered') return this._drop('second answer');
     this.stats.answers++;
     try {
-      await entry.session.answer(msg.sdp);
+      if (relay) await entry.session.answerRelay(msg.ws, (keys, text) => this.hub.relayPeer(entry.session, keys, text));
+      else await entry.session.answer(msg.sdp);
     } catch (e) {
       this.log?.warn(`answer rejected: ${e.message}`);
       entry.session.end('disconnected', { sendBye: false });

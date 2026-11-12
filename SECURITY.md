@@ -66,6 +66,15 @@ volunteer project, so please allow a few days.
   its private key. Perch's design doesn't rely on that check: the browser fully verifies the Mac's certificate (and its pin, from Perch 0.2), every sign-in proof
   answers a random number sent inside one specific encrypted session and must come back inside it, and the Mac sends
   nothing private before sign-in. See [PROTOCOL.md, Binding](docs/PROTOCOL.md#binding).
+- **The Worker relay (optional).** On networks that block WebRTC, a relay you deploy in your own Cloudflare account
+  can carry the connection over a WebSocket instead. Everything in it is end-to-end encrypted between the Mac and the
+  browser (fresh ECDH keys per connection, AES-GCM, every message numbered so none can be replayed, dropped or
+  reordered), the Mac signs its key with the same pinned certificate WebRTC uses, and sign-ins are bound to the
+  relay's offer and answer exactly as to WebRTC's. Cloudflare and the Worker see only encrypted bytes, their sizes and
+  timing, and the two ends' IP addresses. The relay only lets the Mac that claimed it open connections, so nobody else
+  can use up your free allowance; a stranger who learns a connection's room can only join as the viewer, and can't
+  read or forge anything. One-tap sign-in and the microphone aren't offered over the relay. See
+  [PROTOCOL.md, Worker relay](docs/PROTOCOL.md#worker-relay).
 - **The backup sign-in is weaker than a passkey.** A fake site or someone watching could capture the password, so it
   still needs the 6-digit code, it is off unless you set it up, and the Mac notifies you every time it is used. In an
   `about:blank` tab there's no address bar to check, so prefer the passkey there.

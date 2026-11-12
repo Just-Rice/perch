@@ -9,6 +9,8 @@ import { newMacName as makeMacName, suggestPassword } from './names.mjs';
 import { HostPeer, ensureDtlsIdentity } from './rtc.mjs';
 import { Session } from './session.mjs';
 import { Relay } from './relay.mjs';
+import { WorkerRelay, WsPeer } from './wsrelay.mjs';
+import { roomUrl, roomAuth } from '../../../site/js/shared/wsrelay.js';
 import { Signaling } from './signaling.mjs';
 import { silentLog } from './log.mjs';
 
@@ -59,6 +61,8 @@ export class Controller {
     Object.assign(this, { config, store, auth, rendezvous, app, log, updater, now, authTimeoutMs });
     this.signaling = new Signaling({ rendezvous, hub: this, log: log.child('rendezvous'), now });
     this.relay = relay ?? new Relay({ store, log: log.child('relay'), now, serviceUrl: config.relayServiceUrl });
+    this.workerRelay = new WorkerRelay({ store, log: log.child('worker-relay'), now, allowLocal: !!config?.test,
+      ...(config?.relayFetch ? { fetchImpl: config.relayFetch } : {}) });
     this.sessions = new Set();
     this.active = null;
     this.guests = new Set();   // signed-in guests (view only), besides the one active viewer
@@ -88,6 +92,7 @@ export class Controller {
     await this.signaling.setHost(this.store.hostId, this.store.sigKey);
     await this._applyListening();
     this.relay.warm(); // fetch relay logins now, so the first viewer's offer doesn't wait for them
+    this.workerRelay.warm();
     this.started = true;
     this._changed();
   }
@@ -156,12 +161,14 @@ export class Controller {
       totp: { set: !!s.config.totp.set, setAt: s.config.totp.setAt ?? null },
       backup: { set: !!s.config.backup.record, on: !!s.settings.backupOn, setAt: s.config.backup.setAt ?? null },
       relay: this.relay.state(),
+      workerRelay: this.workerRelay.state(),
       audioOutputs: this.audioOutputs.map(d => ({ ...d })),
       devices: s.devices.map(d => ({ ...publicDevice(d), site: this.auth.deviceRpId(d) })),
       sites: this.auth.sites().map(x => ({ origin: x.origin, url: x.url, builtIn: !!x.builtIn, addedAt: x.addedAt ?? null })),
       pairing: this.auth.pairingInfo(),
       guest: (g => g ? { ...g, watching: this.guests.size } : null)(this.auth.guestInfo()),
-      session: a ? { viewer: a.label, route: a.route, since: new Date(a.signedInAt).toISOString(), deviceId: a.deviceId } : null,
+      session: a ? { viewer: a.label, route: a.route, since: new Date(a.signedInAt).toISOString(), deviceId: a.deviceId,
+        transport: a.transport } : null,
       activity: s.config.log.slice(-ACTIVITY_SHOWN).reverse(),
       update: this.update,
       test: !!this.config.test,
@@ -702,6 +709,38 @@ export class Controller {
     this._changed();
   }
 
+  // --- the Worker relay: the owner's own Cloudflare Worker, no payment details needed (wsrelay.mjs) ---
+
+  // A Worker relay offer for this session (signaling.mjs puts it beside the WebRTC offer), or null without one.
+  async relayOffer(session) {
+    if (!this.workerRelay.configured) return null;
+    session.ws = await this.workerRelay.prepare(session.sid, this.store.dtlsKeys);
+    return session.ws?.offerText ?? null;
+  }
+
+  // The relay connection for a session whose viewer answered the Worker relay offer (session.answerRelay).
+  async relayPeer(session, keys, answerText) {
+    const { base, room, secret, offerText } = session.ws;
+    return new WsPeer({
+      url: roomUrl(base, room, 'mac', await roomAuth(secret, room)),
+      offerText, answerText, keys, log: this.log.child(`relay ${session.sid.slice(0, 6)}`),
+    });
+  }
+
+  async workerRelaySet(url) {
+    const replacing = this.workerRelay.configured;
+    await this.workerRelay.save(url);
+    this.store.activity('settings', replacing ? 'Worker relay replaced' : 'Worker relay for strict networks set up');
+    this._changed();
+    return { ok: true };
+  }
+
+  async workerRelayRemove() {
+    if (this.workerRelay.configured) this.store.activity('settings', 'Worker relay removed');
+    await this.workerRelay.remove();
+    this._changed();
+  }
+
   async backupRemove() {
     if (this.store.config.backup.record) this.store.activity('settings', 'Backup password removed; backup sign-in is off');
     this.store.setBackupRecord(null);
@@ -796,6 +835,7 @@ export class Controller {
     // pin and one-tap sign-in would stay off until Perch was next restarted.
     await ensureDtlsIdentity(this.store);
     this.relay.forget();
+    this.workerRelay.lastError = this.workerRelay.lastOkAt = null; // Start over removed its secret with the rest
     await this.signaling.setHost(this.store.hostId, this.store.sigKey);
     await this._applyListening();
     this.store.activity('settings', 'Perch was reset: new name and keys, no paired devices');

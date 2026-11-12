@@ -724,9 +724,10 @@ export class Controller {
           if (typeof v !== 'boolean') throw new Error(`${k} must be true or false.`);
           break;
         case 'idleMinutes':
-          // Tests may use a fraction of a minute so the idle timeout can be seen in seconds.
-          if (!(typeof v === 'number' && v <= 1440 && (this.config.test ? v > 0 : Number.isInteger(v) && v >= 1))) {
-            throw new Error('The idle time must be a whole number of minutes from 1 to 1440.');
+          // 0 is "Never" (Setup offers it). Tests may use a fraction of a minute so the idle timeout can be seen in
+          // seconds.
+          if (!(typeof v === 'number' && v <= 1440 && (v === 0 || (this.config.test ? v > 0 : Number.isInteger(v) && v >= 1)))) {
+            throw new Error('The idle time must be a whole number of minutes from 1 to 1440, or never.');
           }
           break;
         case 'quality':

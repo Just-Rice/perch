@@ -45,6 +45,12 @@ volunteer project, so please allow a few days.
 - **Guest links.** A guest link lets anyone who has it watch your screen and hear its sound until it runs out or you
   stop it. They can never control the Mac, and the link says nothing about how to reach the Mac otherwise. Treat it
   like a live window onto your screen: send it only to the person you mean, and close private things first.
+- **The shared relay.** Macs without a relay key of their own may get relay logins from Perch's relay service
+  (`relay-service/`), on its publisher's Cloudflare account. The relay only ever carries the encrypted connection. The
+  service sees each Mac's relay key (a random public key), its internet address and how much it relays. Limits stop
+  anyone from running up a bill: per Mac, for all other Macs together, and a hard ceiling of 990 GB in any 31 days.
+  Anyone can make new relay keys, so the per-Mac limit alone wouldn't stop a determined abuser; the two overall
+  limits do.
 - **Your microphone on the Mac.** A signed-in owner (never a guest) can have their microphone played on the Mac.
   That makes sound at the Mac, on the output chosen in Setup; it gives the viewer nothing new to see or hear. The
   Mac only accepts the sound while the viewer has switched it on, and limits how much it will take.

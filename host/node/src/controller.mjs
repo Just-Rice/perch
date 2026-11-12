@@ -58,7 +58,7 @@ export class Controller {
     authTimeoutMs = AUTH_TIMEOUT_MS, relay = null }) {
     Object.assign(this, { config, store, auth, rendezvous, app, log, updater, now, authTimeoutMs });
     this.signaling = new Signaling({ rendezvous, hub: this, log: log.child('rendezvous'), now });
-    this.relay = relay ?? new Relay({ store, log: log.child('relay'), now });
+    this.relay = relay ?? new Relay({ store, log: log.child('relay'), now, serviceUrl: config.relayServiceUrl });
     this.sessions = new Set();
     this.active = null;
     this.guests = new Set();   // signed-in guests (view only), besides the one active viewer
@@ -681,9 +681,24 @@ export class Controller {
     return { ok: true };
   }
 
+  async relayOwnerSet(key) {
+    await this.relay.saveOwnerKey(key);
+    this.store.activity('settings', 'This Mac is now one of the shared relay owner\u2019s Macs');
+    this._changed();
+    return { ok: true };
+  }
+
+  async relayOwnerRemove() {
+    if (this.store.relayOwnerKey) this.store.activity('settings', 'Shared relay owner key removed');
+    await this.relay.removeOwnerKey();
+    this.relay.warm();
+    this._changed();
+  }
+
   async relayRemove() {
     if (this.relay.configured) this.store.activity('settings', 'Relay for strict networks removed');
     await this.relay.remove();
+    this.relay.warm(); // the shared relay, if there is one, takes over
     this._changed();
   }
 
@@ -701,6 +716,7 @@ export class Controller {
     for (const [k, v] of Object.entries(patch)) {
       switch (k) {
         case 'loginItem': case 'keepAwake': case 'backupOn': case 'paused': case 'lockOnDisconnect': case 'curtain':
+        case 'sharedRelay':
           if (typeof v !== 'boolean') throw new Error(`${k} must be true or false.`);
           break;
         case 'idleMinutes':
@@ -738,6 +754,11 @@ export class Controller {
       this.app.command('session', { active: true, viewer: this.active.label, route: this.active.route, curtain: after.curtain });
     }
     if ('loginItem' in patch) this.app.command('login-item', { on: after.loginItem });
+    if ('sharedRelay' in patch && after.sharedRelay !== before.sharedRelay) {
+      this.relay.forget();
+      this.relay.warm();
+      this.store.activity('settings', after.sharedRelay ? 'Shared relay turned on' : 'Shared relay turned off');
+    }
     this._changed();
     return { ...after };
   }

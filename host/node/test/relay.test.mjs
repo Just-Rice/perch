@@ -8,6 +8,9 @@ import { join } from 'node:path';
 import { Store } from '../src/store.mjs';
 import { Relay } from '../src/relay.mjs';
 import { cleanIceServers, hasRelay } from '../../../site/js/shared/relay.js';
+import { DatabaseSync } from 'node:sqlite';
+import { handle } from '../../../relay-service/src/handler.js';
+import { LedgerCore, DEFAULT_LIMITS, GB } from '../../../relay-service/src/ledger.js';
 
 const KEY = { keyId: 'a1b2c3d4e5f60718293a4b5c6d7e8f90', apiToken: 'tok_' + 'x'.repeat(60) };
 const CLOUDFLARE = {
@@ -49,7 +52,9 @@ test('saving a key checks it with Cloudflare first, keeps the token secret, and 
   assert.deepEqual(list, [{ urls: ['turn:turn.cloudflare.com:3478?transport=udp', 'turn:turn.cloudflare.com:3478?transport=tcp',
     'turns:turn.cloudflare.com:5349?transport=tcp', 'turns:turn.cloudflare.com:443?transport=tcp'], username: 'u1', credential: 'c1' }],
     'relay entries only, port 53 dropped');
-  assert.deepEqual(r.state(), { set: true, setAt: s.config.relay.setAt, working: true, error: null });
+  const { shared, ...own } = r.state();
+  assert.deepEqual(own, { set: true, setAt: s.config.relay.setAt, working: true, error: null });
+  assert.deepEqual([shared.available, shared.using], [false, false], 'no shared service in this test');
   await r.remove();
   assert.equal(s.relayLogin, null);
   assert.deepEqual(await r.iceServers(), []);
@@ -119,4 +124,96 @@ test('the shared checker only lets plain STUN/TURN entries through', () => {
   assert.equal(cleanIceServers(Array(10).fill({ urls: 'stun:a.example:3478' })).length, 4, 'at most four entries');
   assert.equal(hasRelay([{ urls: 'stun:a.example:3478' }]), false);
   assert.equal(hasRelay(CLOUDFLARE.iceServers), true);
+});
+
+// --- Perch's shared relay service: the real service code (handler and ledger) stands in for the network ---
+
+function sharedService({ ownerKey = 'owner-key-for-the-host-tests-0123' } = {}) {
+  const db = new DatabaseSync(':memory:');
+  const sql = { exec(q, ...p) { const st = db.prepare(q); const rows = /^\s*SELECT/i.test(q) ? st.all(...p) : (st.run(...p), []); return { toArray: () => rows }; } };
+  const svc = { minted: [], revoked: [], usage: {}, requests: [] };
+  const turn = {
+    async mint({ ttl, customIdentifier }) {
+      const username = `s${svc.minted.length + 1}`;
+      svc.minted.push({ username, ttl, customIdentifier });
+      return { username, iceServers: [{ urls: ['turns:turn.cloudflare.com:443?transport=tcp'], username, credential: 'pw' }] };
+    },
+    async revoke(u) { svc.revoked.push(u); },
+    async usage({ to }) {
+      const byMac = { [to]: { ...svc.usage } };
+      return { total: { [to]: Object.values(svc.usage).reduce((a, b) => a + b, 0) }, byMac };
+    },
+  };
+  svc.ledger = new LedgerCore({ sql, turn, limits: DEFAULT_LIMITS });
+  svc.fetchImpl = async (url, opts) => {
+    svc.requests.push({ url, body: JSON.parse(opts.body) });
+    return handle(new Request(url, { method: opts.method, body: opts.body, headers: opts.headers }), { OWNER_KEY: ownerKey }, svc.ledger);
+  };
+  svc.ownerKey = ownerKey;
+  return svc;
+}
+
+test('shared relay: used when there is no key of your own, signed with this Mac’s own relay key', async () => {
+  const s = await store();
+  const svc = sharedService();
+  const r = new Relay({ store: s, fetchImpl: svc.fetchImpl, serviceUrl: 'https://relay.example/' });
+  const list = await r.iceServers();
+  assert.deepEqual(list, [{ urls: ['turns:turn.cloudflare.com:443?transport=tcp'], username: 's1', credential: 'pw' }]);
+  assert.equal(svc.requests[0].url, 'https://relay.example/v1/ice');
+  assert.equal(svc.minted[0].ttl, 3 * 3600, 'somebody else’s Mac as far as the service knows');
+  assert.ok(s.relayIdentity?.pub, 'a relay key was made and kept with the secrets');
+  assert.ok(!JSON.stringify(s.config).includes(s.relayIdentity.pkcs8), 'not in config.json');
+  const st = r.state().shared;
+  assert.deepEqual([st.available, st.on, st.using, st.owner, st.working], [true, true, true, false, true]);
+  assert.deepEqual([st.usage.macBytes, st.usage.macLimitBytes], [0, 20 * GB]);
+  // The same key next time: the service sees the same Mac.
+  const again = new Relay({ store: s, fetchImpl: svc.fetchImpl, serviceUrl: 'https://relay.example' });
+  await again.iceServers();
+  assert.equal(svc.minted[1].customIdentifier, svc.minted[0].customIdentifier);
+  // A key of your own wins; switching the shared relay off means no relay at all.
+  s.updateSettings({ sharedRelay: false });
+  const off = new Relay({ store: s, fetchImpl: svc.fetchImpl, serviceUrl: 'https://relay.example' });
+  assert.deepEqual(await off.iceServers(), []);
+  assert.equal(off.state().shared.using, false);
+});
+
+test('shared relay: over the limit, the Mac stops handing out its old logins and says why', async () => {
+  const s = await store();
+  const svc = sharedService();
+  let t = Date.now(); // the service checks the Mac's clock against its own
+  const r = new Relay({ store: s, fetchImpl: svc.fetchImpl, serviceUrl: 'https://relay.example', now: () => t });
+  assert.equal((await r.iceServers()).length, 1);
+  svc.usage[svc.minted[0].customIdentifier] = 21 * GB;
+  await svc.ledger.refresh();
+  assert.deepEqual(svc.revoked, ['s1']);
+  r.cache.refreshAt = t; // as if 45 minutes had passed: the next offer fetches again, in the background
+  await r.iceServers();
+  await r.refreshing;
+  assert.deepEqual(await r.iceServers({ waitMs: 50 }), [], 'the revoked login is not handed out again');
+  const st = r.state().shared;
+  assert.equal(st.working, false);
+  assert.match(st.error, /used its share/);
+  assert.ok(st.usage.macBytes >= 20 * GB);
+});
+
+test('shared relay: the owner key is checked with the service, and lifts this Mac’s limit', async () => {
+  const s = await store();
+  const svc = sharedService();
+  const r = new Relay({ store: s, fetchImpl: svc.fetchImpl, serviceUrl: 'https://relay.example' });
+  await assert.rejects(r.saveOwnerKey('short'), /doesn’t look right/);
+  await assert.rejects(r.saveOwnerKey('a-wrong-owner-key-0123456789'), /didn’t accept that owner key/);
+  assert.equal(s.relayOwnerKey, null, 'a key the service turned down is not kept');
+  await r.saveOwnerKey(` ${svc.ownerKey} `);
+  assert.equal(s.relayOwnerKey, svc.ownerKey);
+  assert.ok(!JSON.stringify(s.config).includes(svc.ownerKey), 'the owner key is kept with the secrets');
+  assert.ok(!JSON.stringify(svc.requests.at(-1).body).includes(svc.ownerKey), 'and never sent');
+  assert.equal(svc.minted.at(-1).ttl, 24 * 3600);
+  svc.usage[svc.minted.at(-1).customIdentifier] = 150 * GB;
+  await svc.ledger.refresh();
+  r.forget();
+  assert.equal((await r.iceServers()).length, 1, '150 GB is fine on the owner’s Mac');
+  const st = r.state().shared;
+  assert.deepEqual([st.owner, st.usage.owner, st.usage.macLimitBytes, st.usage.totalLimitBytes], [true, true, null, 990 * GB]);
+  await r.removeOwnerKey();
+  assert.equal(s.relayOwnerKey, null);
 });

@@ -1,0 +1,29 @@
+# Perch's relay service. Set up with the steps in README.md; secrets are added with `npx wrangler secret put NAME`.
+name = "perch-relay"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# Fresh usage numbers from Cloudflare every five minutes, and revoke logins that went over a limit.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[durable_objects.bindings]]
+name = "LEDGER"
+class_name = "Ledger"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Ledger"]
+
+[vars]
+# Gigabytes over the last 31 days. TOTAL_LIMIT_GB can be lowered but never raised above 990 (see src/ledger.js).
+MAC_LIMIT_GB = "20"       # each Mac that isn't yours
+OTHERS_LIMIT_GB = "900"   # all Macs that aren't yours, together (leaves 90 GB that only your Macs can use)
+TOTAL_LIMIT_GB = "990"    # everything on the Cloudflare account, your Macs included
+# ACCOUNT_ID = "..."      # your Cloudflare account ID (not a secret), added during setup
+
+# Secrets (never in this file):
+#   TURN_KEY_ID, TURN_KEY_API_TOKEN   the TURN key from Cloudflare's Realtime dashboard
+#   ANALYTICS_TOKEN                   an API token with "Account Analytics: Read"
+#   OWNER_KEY                         a long random key; typed into Setup on each of your own Macs

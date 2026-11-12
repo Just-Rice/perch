@@ -4,7 +4,7 @@
 // for the real RP ID and uses the public brokers. Test overrides are honoured ONLY when PERCH_TEST=1, so a stray
 // environment variable can never point a real Mac at some other website or broker. See docs/PROTOCOL.md, "Test mode".
 import { randomBytes } from 'node:crypto';
-import { APP_ORIGIN, RP_ID, CONNECT_URL, BROKERS, ICE_SERVERS } from '../../../site/js/shared/proto.js';
+import { APP_ORIGIN, RP_ID, CONNECT_URL, BROKERS, ICE_SERVERS, RELAY_SERVICE_URL } from '../../../site/js/shared/proto.js';
 import { toB64url } from '../../../site/js/shared/bytes.js';
 import { defaultHome } from './store.mjs';
 import pkg from '../package.json' with { type: 'json' };
@@ -55,6 +55,8 @@ export function loadConfig(env = process.env) {
     setupKey: t('PERCH_SETUP_KEY') ?? toB64url(randomBytes(24)),
     // PERCH_ICE=none: host candidates only, plus loopback so tests work on a Mac with no network.
     iceServers: iceNone ? [] : ICE_SERVERS,
+    // Tests point this at a relay service of their own (PERCH_RELAY_SERVICE, test mode only); 'none' turns it off.
+    relayServiceUrl: t('PERCH_RELAY_SERVICE') === 'none' ? '' : (t('PERCH_RELAY_SERVICE') ?? RELAY_SERVICE_URL),
     iceLoopback: iceNone,
     logLevel: ['debug', 'info', 'warn', 'error'].includes(env.PERCH_LOG) ? env.PERCH_LOG : (test ? 'debug' : 'info'),
     // Host tests drive the controller over this extra file descriptor (src/test-rpc.mjs).

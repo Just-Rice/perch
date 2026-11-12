@@ -73,6 +73,9 @@ Applications and open it. When macOS refuses, go to System Settings › Privacy 
   connection. An optional backup sign-in uses the Mac's name, a password (checked with OPAQUE, so the password
   itself is never sent) and the code.
 
+- **The relay service** (`relay-service/`, optional) is a small Cloudflare Worker that hands relay logins to Macs on
+  strict networks, within limits that keep its Cloudflare account inside the free tier. Its README says how to run it.
+
 [docs/PROTOCOL.md](docs/PROTOCOL.md) is the full contract between the three parts; [SECURITY.md](SECURITY.md) explains
 what Perch protects against and its known limitations.
 

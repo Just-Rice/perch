@@ -25,6 +25,10 @@ jobs:
         working-directory: host/node
         run: node --test --test-concurrency=1 --test-timeout=180000 $(ls test/*.test.mjs | grep -v -e browser -e chrome-smoke)
 
+      - name: Relay service tests
+        working-directory: relay-service
+        run: node --test test/*.test.mjs
+
       - name: Website tests
         run: node --test --test-concurrency=1 --test-timeout=180000 $(ls tests/site/*.test.mjs | grep -v browser)
 

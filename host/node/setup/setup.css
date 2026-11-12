@@ -363,3 +363,9 @@ main > section { scroll-margin-top: 136px; }
   .toc ul { width: auto; flex-direction: column; gap: 2px; padding: 0; overflow: visible; }
   .toc a { border-radius: 10px; white-space: normal; }
 }
+
+/* The shared relay inside the relay card */
+#sharedRelay .switch-row { border-top: 0; }
+#relayOwner { margin: 6px 0 4px; }
+#relayOwner summary { cursor: pointer; font-weight: 600; font-size: .92rem; }
+.own-relay-head { margin: 22px 0 4px; padding-top: 16px; border-top: 1px solid var(--line); }

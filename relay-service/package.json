@@ -1,0 +1,11 @@
+{
+  "name": "perch-relay-service",
+  "private": true,
+  "type": "module",
+  "description": "Perch's relay service on Cloudflare Workers: relay logins for Perch Macs on strict networks, within set limits.",
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "deploy": "npx wrangler@4 deploy"
+  },
+  "license": "Apache-2.0"
+}

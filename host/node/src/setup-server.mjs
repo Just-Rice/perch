@@ -78,6 +78,8 @@ const ACTIONS = {
   backupRemove: [],
   relaySet: [['keyId', 'string'], ['apiToken', 'string']],
   relayRemove: [],
+  relayOwnerSet: [['key', 'string']],
+  relayOwnerRemove: [],
   updateSettings: [['patch', 'object']],
   disconnect: [],
   requestPermission: [['which', 'string']],

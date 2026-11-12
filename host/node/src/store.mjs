@@ -29,6 +29,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   curtain: false,            // black out the Mac's own screen while a viewer is connected
   micOutput: '',             // where a viewer's microphone is played: '' = the Mac's current output, or a device UID
   quality: DEFAULT_QUALITY,
+  sharedRelay: true,         // use Perch's shared relay service when it exists and no relay key of your own is set
 });
 
 export function defaultHome() {
@@ -213,6 +214,21 @@ export class Store {
     this.secrets.relay = login ? { keyId: login.keyId, apiToken: login.apiToken } : null;
     await this.saveSecrets();
     this.config.relay = { set: !!login, setAt: login ? new Date().toISOString() : null };
+    this.save();
+  }
+
+  // --- the shared relay service: this Mac's relay key (Ed25519, made once, proves which Mac is asking) and, on the
+  // service owner's own Macs, the owner key that lifts the per-Mac limit ---
+  get relayIdentity() { return this.secrets.relayId ?? null; }
+  async setRelayIdentity(id) {
+    this.secrets.relayId = id ? { pkcs8: id.pkcs8, pub: id.pub } : null;
+    await this.saveSecrets();
+  }
+  get relayOwnerKey() { return this.secrets.relayOwner ?? null; }
+  async setRelayOwnerKey(key) {
+    this.secrets.relayOwner = key || null;
+    await this.saveSecrets();
+    this.config.relayOwner = { set: !!key, setAt: key ? new Date().toISOString() : null };
     this.save();
   }
 

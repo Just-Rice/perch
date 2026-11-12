@@ -23,6 +23,7 @@ import { startSetupServer } from '../src/setup-server.mjs';
 import { totp, base32, otpauthUri, fromBase32 } from '../src/totp.mjs';
 import { T, encodeJson, FrameReader } from '../src/ipc.mjs';
 import { createMockController } from './setup-mock-controller.mjs';
+import { startLocalRelayService } from '../../../relay-service/test/local-service.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const OUT = path.join(HERE, '..', '..', '..', 'tests', 'e2e', 'out', 'setup');
@@ -750,7 +751,7 @@ async function freePort() {
 // Starts src/main.mjs the way the Swift app does, but in test mode: a temporary home, secrets in a file there (never
 // the Keychain), the local test broker, no update checks. This plays the app's end of the pipe: it says HELLO and
 // records every command the host sends back, so nothing on this Mac is actually asked for anything.
-async function startRealHost(brokerUrl) {
+async function startRealHost(brokerUrl, { relayService = 'none' } = {}) {
   const home = mkdtempSync(path.join(tmpdir(), 'perch-setup-host-'));
   const port = await freePort();
   const key = randomBytes(32).toString('base64url');
@@ -758,6 +759,7 @@ async function startRealHost(brokerUrl) {
     env: {
       ...process.env, PERCH_TEST: '1', PERCH_HOME: home, PERCH_SECRETS: 'file', PERCH_BROKERS: brokerUrl,
       PERCH_SETUP_PORT: String(port), PERCH_SETUP_KEY: key, PERCH_ICE: 'none', PERCH_LOG: 'info',
+      PERCH_RELAY_SERVICE: relayService,
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -797,12 +799,14 @@ async function startRealHost(brokerUrl) {
 
 test('Setup page against the real host process', { skip: !existsSync(CHROME) && 'Google Chrome is not installed', timeout: 120_000 }, async (t) => {
   const broker = await startBroker();
-  const host = await startRealHost(broker.url);
+  const relaySvc = await startLocalRelayService();
+  const host = await startRealHost(broker.url, { relayService: relaySvc.url });
   const chrome = await launchChrome();
   t.after(async () => {
     await chrome.close().catch(() => {});
     await host.stop().catch(() => {});
     await broker.close().catch(() => {});
+    await relaySvc.close().catch(() => {});
   });
   const tab = await openPage(chrome, host.base);
   const { page } = tab;
@@ -932,6 +936,33 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     await shootAll(page, '07-real-host', { fullPage: true });
   });
 
+  await t.test('the shared relay: this Mac\u2019s share, the owner key, and the off switch', async () => {
+    await waitFor(page, `!document.getElementById('sharedRelay').hidden`, 'the shared relay section');
+    await waitFor(page, `/has used 0 GB of its 20 GB in the last 31 days/.test(document.getElementById('sharedRelayStatus').textContent)`,
+      'this Mac\u2019s share (the host asked the service at start)', 15000).catch(async e => {
+      throw new Error(`${e.message}; status: ${await text(page, '#sharedRelayStatus')}; state: ${JSON.stringify((await state()).relay)}; minted ${relaySvc.minted.length}`);
+    });
+    assert.equal(await evaluate(page, `document.getElementById('setSharedRelay').checked`), true);
+    // The owner key: a wrong one is turned down by the service, the right one is accepted.
+    await evaluate(page, `document.getElementById('relayOwner').open = true`);
+    await type(page, '#relayOwnerKey', 'not-the-owner-key-at-all-01234');
+    await click(page, '#relayOwnerSaveBtn');
+    await waitFor(page, `/didn\u2019t accept that owner key/.test(document.getElementById('relayOwnerError').textContent)`, 'refused');
+    await type(page, '#relayOwnerKey', relaySvc.ownerKey);
+    await click(page, '#relayOwnerSaveBtn');
+    await waitFor(page, `!document.getElementById('relayOwnerOk').hidden`, 'accepted');
+    await waitFor(page, `/^Your Mac: 0 GB .* Everyone: 0 GB of 990 GB/.test(document.getElementById('sharedRelayStatus').textContent)`, 'everyone\u2019s use');
+    assert.equal((await state()).relay.shared.owner, true);
+    assert.equal(await evaluate(page, `document.getElementById('relayOwnerKey').value`), '', 'the box is emptied');
+    assert.equal(relaySvc.minted.at(-1).ttl, 24 * 3600);
+    // Off, then on again.
+    await click(page, '#setSharedRelay');
+    await waitFor(page, `document.getElementById('sharedRelayStatus').textContent === 'Off.'`, 'off');
+    assert.equal((await state()).settings.sharedRelay, false);
+    await click(page, '#setSharedRelay');
+    await until(async () => (await state()).settings.sharedRelay === true, 'on again');
+  });
+
   await t.test('Start over on the real host', async () => {
     const before = (await state()).macName;
     await click(page, '#resetBtn');
@@ -947,8 +978,8 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
 
   await t.test('no console errors, no security-policy violations, no pop-up dialogs', async () => {
     // The deliberate refusals: three addresses the sites section must not accept (and "Never" idle, if refused).
-    const refusals = await checkCleanConsole(page, tab, host.base, ['/api/siteAdd', ...(idleRefused ? ['/api/updateSettings'] : [])]);
-    assert.deepEqual(refusals, ['/api/siteAdd', '/api/siteAdd', '/api/siteAdd', ...(idleRefused ? ['/api/updateSettings'] : [])]);
+    const refusals = await checkCleanConsole(page, tab, host.base, ['/api/siteAdd', '/api/relayOwnerSet', ...(idleRefused ? ['/api/updateSettings'] : [])]);
+    assert.deepEqual(refusals.sort(), ['/api/siteAdd', '/api/siteAdd', '/api/siteAdd', '/api/relayOwnerSet', ...(idleRefused ? ['/api/updateSettings'] : [])].sort());
     assert.doesNotMatch(host.log, /uncaught exception|unhandled rejection|ERROR/);
   });
 });

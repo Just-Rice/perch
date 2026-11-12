@@ -23,6 +23,10 @@ export const BROKERS = [
   'wss://public:public@public.cloud.shiftr.io/',
 ];
 
+// Perch's shared relay service (relay-service/): relay logins for Macs on strict networks, within monthly limits.
+// Empty until the service is running; a Mac then uses only a relay key of its owner's own, if any.
+export const RELAY_SERVICE_URL = '';
+
 // Public STUN servers: they tell each side its public address so the two can connect directly.
 export const ICE_SERVERS = [
   { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },

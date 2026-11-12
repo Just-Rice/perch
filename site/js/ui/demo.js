@@ -129,7 +129,11 @@ export function startDemo(app) {
         }, 50);
       }
     },
-    sendInput(m) { log('input', m); },
+    sendInput(m) {
+      log('input', m);
+      // The demo's pretend text box is the top half of the screen, as in the Mac app's test runs.
+      if (m.t === 'b' && m.d === false && m.b === 0) setTimeout(() => this.onmessage({ t: 'textfocus', editable: m.y < 0.5, secure: false }), 40);
+    },
     sendPointer(m) { log('pointer', m); },
     async getStats() { return new Map(); },
     close() {},

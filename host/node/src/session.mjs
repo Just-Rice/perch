@@ -483,6 +483,9 @@ export class Session {
   }
 
   sendWindows(list) { if (this.state === 'ready' && !this.guest) this._send({ t: 'windows', list }); }
+  sendTextFocus(editable, secure) {
+    if (this.state === 'ready' && !this.guest) this._send({ t: 'textfocus', editable: !!editable, secure: !!secure });
+  }
   sendFit(ok) { if (this.state === 'ready' && !this.guest) this._send({ t: 'fit', ok: !!ok }); }
   sendMic(on, error) { if (this.state === 'ready' && !this.guest) this._send({ t: 'mic', on: !!on, ...(error ? { error } : {}) }); }
 

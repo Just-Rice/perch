@@ -207,12 +207,14 @@
       <input type="range" id="tbVolume" min="0" max="1" step="0.05" value="1" title="Volume">
     </label>
     <button type="button" id="tbFull" class="tb-btn" data-icon="fullscreen" title="Full screen" aria-label="Full screen"></button>
+    <button type="button" id="tbCapture" class="tb-btn" data-icon="pointer" title="Capture the mouse (Esc lets go)" aria-label="Capture the mouse" aria-pressed="false" hidden></button>
     <button type="button" id="tbStats" class="tb-btn" data-icon="stats" title="Connection details" aria-label="Connection details" aria-pressed="false"></button>
     <button type="button" id="tbMore" class="tb-btn" data-icon="more" title="More" aria-label="More options" aria-expanded="false" aria-controls="moreMenu"></button>
     <button type="button" id="tbBye" class="tb-btn tb-bye" data-icon="power" title="Disconnect" aria-label="Disconnect"></button>
   </div>
 
   <div id="moreMenu" class="menu" role="group" aria-label="More options" hidden>
+    <label class="check" id="captureClickWrap" hidden><input type="checkbox" id="optCaptureClick"> Capture the mouse when I click the screen</label>
     <label class="check" id="swapWrap"><input type="checkbox" id="optSwap"> Ctrl acts as ⌘ (Command)</label>
     <p class="fine" id="swapHelp">Ctrl+C copies, Ctrl+V pastes, as on this keyboard. Turn off to send Ctrl itself.</p>
     <label class="tb-select" id="windowWrap" hidden>
@@ -255,6 +257,7 @@
        again closes the keyboard. What's typed goes to the Mac (viewer/keyboard.js). -->
   <div id="kbdFab" class="kbd-fab" hidden>
     <span class="kbd-fab-icon" data-icon="keyboard" aria-hidden="true"></span>
+    <span class="kbd-fab-label" id="kbdFabLabel" aria-live="polite"></span>
     <textarea id="softkbd" class="softkbd" aria-label="Type on your Mac" autocapitalize="off" autocomplete="off"
       autocorrect="off" spellcheck="false" enterkeyhint="enter" rows="1"></textarea>
   </div>

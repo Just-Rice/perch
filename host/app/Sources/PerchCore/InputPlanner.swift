@@ -55,6 +55,11 @@ public struct PlannedEvent: Equatable {
     public var point: CGPoint
     public var clickState: Int
     public var flags: UInt64
+    /// How far a move went, in points. Games and 3D apps read this rather than the position (and keep reading it at
+    /// the edge of the screen, where the position stops changing).
+    public var delta: CGVector = .zero
+    /// The viewer sent the movement itself (its mouse is captured), so tests see it.
+    public var explicitDelta = false
 
     public init(_ kind: Kind, point: CGPoint = .zero, clickState: Int = 0, flags: UInt64 = 0) {
         self.kind = kind; self.point = point; self.clickState = clickState; self.flags = flags
@@ -65,7 +70,9 @@ public struct PlannedEvent: Equatable {
         let x = (Double(point.x) * 100).rounded() / 100, y = (Double(point.y) * 100).rounded() / 100
         switch kind {
         case .move(let drag):
-            return ["type": drag.map { "\(Self.name($0))MouseDragged" } ?? "mouseMoved", "x": x, "y": y, "flags": flags]
+            var j: [String: Any] = ["type": drag.map { "\(Self.name($0))MouseDragged" } ?? "mouseMoved", "x": x, "y": y, "flags": flags]
+            if explicitDelta { j["dx"] = (Double(delta.dx) * 100).rounded() / 100; j["dy"] = (Double(delta.dy) * 100).rounded() / 100 }
+            return j
         case .down(let b):
             return ["type": "\(Self.name(b))MouseDown", "button": b.rawValue, "x": x, "y": y, "click": clickState, "flags": flags]
         case .up(let b):
@@ -163,8 +170,18 @@ public final class InputPlanner {
 
     private func planMove(_ msg: [String: Any]) -> [PlannedEvent] {
         guard let p = point(msg) else { return [] }
+        let before = cursor
         cursor = p
-        return [PlannedEvent(.move(drag: dragButton), point: p, flags: currentFlags)]
+        var e = PlannedEvent(.move(drag: dragButton), point: p, flags: currentFlags)
+        if let dx = JSONValue.number(msg["dx"]), let dy = JSONValue.number(msg["dy"]) {
+            // A captured mouse: the movement as the viewer measured it (fractions of the picture), even where the
+            // position is pinned at the screen's edge.
+            e.delta = CGVector(dx: min(max(dx, -1), 1) * bounds.width, dy: min(max(dy, -1), 1) * bounds.height)
+            e.explicitDelta = true
+        } else if let b = before {
+            e.delta = CGVector(dx: p.x - b.x, dy: p.y - b.y)
+        }
+        return [e]
     }
 
     /// Buttons and scrolls carry their own position; if the pointer isn't there yet (a lost or late move), move it
@@ -339,6 +356,8 @@ public final class InputPoster {
             }
             guard let ev = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: e.point,
                                    mouseButton: Self.cgButton(drag ?? .left)) else { return [] }
+            ev.setIntegerValueField(.mouseEventDeltaX, value: Int64(e.delta.dx.rounded()))
+            ev.setIntegerValueField(.mouseEventDeltaY, value: Int64(e.delta.dy.rounded()))
             return [apply(ev, e.flags)]
         case .down(let b), .up(let b):
             let isDown: Bool

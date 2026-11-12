@@ -623,6 +623,19 @@ test('one window: the list, choosing it, reshaping it, and going back to the who
   assert.deepEqual([other.display, 'window' in other], [2, false]);
 });
 
+test('after a click, the viewer hears whether the Mac now waits for typing', async (t) => {
+  const ctx = await pairedHost(t);
+  const { v, end } = await passkey(t, ctx);
+  assert.equal(end.t, 'ready');
+  assert.ok(v.firstReply.caps.includes('textfocus'));
+  v.sendInput({ t: 'b', b: 0, d: true, x: 0.3, y: 0.2, n: 1 });
+  v.sendInput({ t: 'b', b: 0, d: false, x: 0.3, y: 0.2, n: 1 });
+  assert.deepEqual(await v.next(['textfocus']), { t: 'textfocus', editable: true, secure: false });
+  v.sendInput({ t: 'b', b: 0, d: true, x: 0.3, y: 0.8, n: 1 });
+  v.sendInput({ t: 'b', b: 0, d: false, x: 0.3, y: 0.8, n: 1 });
+  assert.equal((await v.next(['textfocus'])).editable, false);
+});
+
 test('quality, display and keyframe requests reach the app; junk during sign-in ends it', async (t) => {
   const ctx = await pairedHost(t);
   const { app } = ctx;

@@ -172,6 +172,10 @@ export class FakeApp extends EventEmitter {
       const ev = JSON.parse(payload.toString('utf8'));
       this.inputs.push({ ev, at: Date.now() });
       this.event({ e: 'input-echo', ev });
+      // As the app does after a left click is let go: the pretend text box is the top half of the screen.
+      if (ev.t === 'b' && ev.d === false && ev.b === 0) {
+        setTimeout(() => this.event({ e: 'text-focus', editable: ev.y < 0.5, secure: false }), 30);
+      }
       this.emit('input', ev);
     } else if (type === T.MIC) {
       this.mic.push({ seq: payload.readUInt16BE(0), bytes: payload.length - 2 });

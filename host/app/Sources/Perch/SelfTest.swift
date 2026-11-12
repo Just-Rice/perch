@@ -337,6 +337,17 @@ enum SelfTest {
         check("capture size: longest edge, aspect, even, never upscaled", wrong.isEmpty, "\(wrong)")
         let r = CaptureRequest(command: ["c": "capture", "on": true, "maxEdge": 99999, "fps": 0, "kbps": 0, "audio": false, "display": 7])
         check("capture request is clamped", r.maxEdge == 4096 && r.fps == 1 && r.kbps == 100 && !r.audio && r.displayID == 7)
+        // Moves say how far they went, for games: worked out from the last position, or as the viewer measured it.
+        let mp = InputPlanner(bounds: CGRect(x: 0, y: 0, width: 1000, height: 800))
+        _ = mp.plan(["t": "m", "x": 0.5, "y": 0.5])
+        let rel = mp.plan(["t": "m", "x": 0.6, "y": 0.45])
+        let pinned = mp.plan(["t": "m", "x": 1.0, "y": 0.45, "dx": 0.05, "dy": 0])
+        let ev = InputPoster().events(for: rel[0])
+        check("moves carry their distance (games read that, not the position)",
+              rel.first?.delta == CGVector(dx: 100, dy: -40) && pinned.first?.delta == CGVector(dx: 50, dy: 0)
+              && pinned.first?.explicitDelta == true
+              && ev.first?.getIntegerValueField(.mouseEventDeltaX) == 100 && ev.first?.getIntegerValueField(.mouseEventDeltaY) == -40,
+              "\(String(describing: rel.first?.delta)) \(String(describing: pinned.first?.delta))")
         check("capture request: a window id, or none", r.window == nil
             && CaptureRequest(command: ["on": true, "window": 4242]).window == 4242
             && CaptureRequest(command: ["on": true, "window": 0]).window == nil

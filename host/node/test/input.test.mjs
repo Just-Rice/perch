@@ -6,6 +6,10 @@ import { validateInput, RateLimiter, MAX_TEXT_CHARS, MAX_SCROLL } from '../src/i
 test('pointer moves: only on the pointer channel, coordinates clamped to the screen, extra fields dropped', () => {
   assert.deepEqual(validateInput({ t: 'm', x: 0.25, y: 0.75, evil: 1 }, 'pointer'), { t: 'm', x: 0.25, y: 0.75 });
   assert.deepEqual(validateInput({ t: 'm', x: -3, y: 9 }, 'pointer'), { t: 'm', x: 0, y: 1 });
+  assert.deepEqual(validateInput({ t: 'm', x: 1, y: 0.5, dx: 0.01, dy: -7 }, 'pointer'), { t: 'm', x: 1, y: 0.5, dx: 0.01, dy: -1 },
+    'a captured mouse\u2019s movement, kept within one picture width');
+  assert.equal(validateInput({ t: 'm', x: 1, y: 0.5, dx: '1', dy: 0 }, 'pointer'), null);
+  assert.equal(validateInput({ t: 'm', x: 1, y: 0.5, dx: 0.1 }, 'pointer'), null);
   assert.equal(validateInput({ t: 'm', x: 0.5, y: 0.5 }, 'input'), null, 'moves belong on the pointer channel');
   assert.equal(validateInput({ t: 'k', c: 'KeyA', d: true }, 'pointer'), null, 'keys never on the pointer channel');
   for (const bad of [{ t: 'm', x: '0.5', y: 0.5 }, { t: 'm', x: NaN, y: 0 }, { t: 'm', x: Infinity, y: 0 }, { t: 'm', x: 0.5 }]) {

@@ -237,6 +237,10 @@ export class Controller {
       case 'window-fit':
         this.active?.sendFit(ev.ok === true);
         break;
+      case 'text-focus':
+        // A click just put the Mac's focus in a text box (or out of one): a phone can bring up its keyboard.
+        this.active?.sendTextFocus(ev.editable === true, ev.secure === true);
+        break;
       case 'audio-outputs':
         // Where the viewer's voice can be played: the Mac's sound outputs, for the picker in Setup.
         this.audioOutputs = cleanOutputs(ev.list);
@@ -671,7 +675,7 @@ export class Controller {
   relayIceServers() { return this.relay.iceServers(); }
 
   // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
-  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic']; }
+  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus']; }
 
   async relaySet(keyId, apiToken) {
     const replacing = this.relay.configured;

@@ -728,6 +728,35 @@ async function micChecks(h) {
 
 // One window: the list, a picture that is just that window, input that lands inside it, reshaping it, and what
 // happens when it goes away. The pretend window in synthetic mode is 800x600 points at (200, 100).
+// A captured mouse: the position pins at the screen's edge but the movement still goes through, for games.
+async function capturedMouseChecks(h) {
+  const main = h.synthetic ? { width: 1920, height: 1080 } : h.displays.find(d => d.main);
+  await echo({ t: 'm', x: 0.5, y: 0.5 });
+  const out = await echo({ t: 'm', x: 1, y: 0.5, dx: 0.05, dy: -0.01 });
+  check('captured mouse: the movement is passed on even where the pointer is pinned at the edge',
+    out.length === 1 && out[0].type === 'mouseMoved' && out[0].x === main.width - 1
+      && Math.abs(out[0].dx - 0.05 * main.width) < 0.02 && Math.abs(out[0].dy + 0.01 * main.height) < 0.02, JSON.stringify(out));
+}
+
+// After a left click is let go the app says whether a text box now has focus (test runs pretend the top half of the
+// screen is one), so a phone can bring up its keyboard.
+async function textFocusChecks() {
+  let since = got.events.length;
+  sendInput({ t: 'b', b: 0, d: true, x: 0.3, y: 0.2, n: 1 });
+  sendInput({ t: 'b', b: 0, d: false, x: 0.3, y: 0.2, n: 1 });
+  const yes = await event('text-focus', { since, ms: 2000 });
+  check('text-focus after a click in a text box', yes.editable === true && yes.secure === false, JSON.stringify(yes));
+  since = got.events.length;
+  sendInput({ t: 'b', b: 0, d: true, x: 0.3, y: 0.8, n: 1 });
+  sendInput({ t: 'b', b: 0, d: false, x: 0.3, y: 0.8, n: 1 });
+  check('text-focus after a click elsewhere', (await event('text-focus', { since, ms: 2000 })).editable === false);
+  since = got.events.length;
+  sendInput({ t: 'b', b: 1, d: true, x: 0.3, y: 0.2, n: 1 });
+  sendInput({ t: 'b', b: 1, d: false, x: 0.3, y: 0.2, n: 1 });
+  await sleep(700);
+  check('no text-focus after a right click', !got.events.slice(since).some(x => x.ev.e === 'text-focus'));
+}
+
 async function windowChecks(h) {
   let since = got.events.length;
   command('windows');
@@ -967,6 +996,8 @@ async function main() {
   await section('commands', () => commandChecks(h));
   await section('capture', () => captureChecks(h));
   await section('input', () => inputChecks(h));
+  await section('captured mouse', () => capturedMouseChecks(h));
+  await section('text focus', () => textFocusChecks());
   await section('windows', () => windowChecks(h));
   await section('microphone', () => micChecks(h));
   logChecks();

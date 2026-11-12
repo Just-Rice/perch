@@ -90,6 +90,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         input.displayID = { [weak self] in self?.capture.displayID }
         input.region = { [weak self] in self?.capture.inputBounds }
         input.onEcho = { [weak self] e in self?.sendEvent(e) }
+        input.onTextFocus = { [weak self] e in self?.sendEvent(e) }
 
         watch.onPermissions = { [weak self] p in self?.sendEvent(["e": "permissions", "screen": p.screen, "accessibility": p.accessibility]) }
         watch.onLock = { [weak self] locked in self?.sendEvent(["e": "lock", "locked": locked]) }

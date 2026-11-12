@@ -10,6 +10,10 @@ import PerchMedia
 final class InputHandler: @unchecked Sendable {
     /// Where an echo goes (only used with --echo-input).
     var onEcho: (([String: Any]) -> Void)?
+    /// After each click: whether the Mac now waits for typing (a `text-focus` event), so a phone can open its keyboard.
+    var onTextFocus: (([String: Any]) -> Void)?
+    private let focusQueue = DispatchQueue(label: "perch.text-focus", qos: .userInitiated)
+    private var focusCheck = 0
     /// The display being captured; input maps onto it (the main display when nothing is captured).
     var displayID: () -> UInt32? = { nil }
     /// When one window is being shown: the part of the screen in the picture (global points). Input maps onto that.
@@ -37,6 +41,29 @@ final class InputHandler: @unchecked Sendable {
             }
             planner.bounds = bounds()
             perform(planner.plan(msg), for: msg)
+            if JSONValue.string(msg["t"]) == "b", JSONValue.bool(msg["d"]) == false, JSONValue.int(msg["b"]) == 0 {
+                checkTextFocus(x: JSONValue.number(msg["x"]) ?? 0, y: JSONValue.number(msg["y"]) ?? 0)
+            }
+        }
+    }
+
+    /// A moment after a left click is let go, ask what has focus now; and again a little later for apps that are
+    /// slow to move it (a web page, an app just brought to the front). The second answer is sent only if it differs.
+    private func checkTextFocus(x: Double, y: Double) {
+        focusCheck += 1
+        let mine = focusCheck
+        // Test runs click nothing for real, so they get a pretend text box: the top half of the screen.
+        let pretend = echo || synthetic
+        let ask: () -> TextFocus.Answer? = { pretend ? TextFocus.Answer(editable: y < 0.5, secure: false) : TextFocus.current() }
+        var first: TextFocus.Answer?
+        focusQueue.asyncAfter(deadline: .now() + .milliseconds(150)) { [weak self] in
+            guard let self, self.queue.sync(execute: { mine == self.focusCheck }) else { return }
+            first = ask()
+            if let a = first { self.onTextFocus?(a.json) }
+        }
+        focusQueue.asyncAfter(deadline: .now() + .milliseconds(500)) { [weak self] in
+            guard let self, self.queue.sync(execute: { mine == self.focusCheck }) else { return }
+            if let a = ask(), a != first { self.onTextFocus?(a.json) }
         }
     }
 

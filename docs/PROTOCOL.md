@@ -262,6 +262,9 @@ viewer sees is always what their clicks reach. Pointer positions stay 0..1 acros
 to the front when chosen. When it closes, is minimised or leaves the desktop, the Mac goes back to the whole display
 (`status.window` becomes `null`). Choosing another display forgets the window.
 
+For Macs with `textfocus` in `caps`: after a left click the Mac sends `{t:"textfocus", editable, secure}` (whether its
+focused element now takes typing, and whether it is a password box), so a phone can bring up its keyboard by itself.
+
 For Macs with `mic` in `caps` (never for guests): the sound line of the offer is `sendrecv`, and a viewer that
 answers `sendrecv` may send its microphone back on it as Opus. `{t:"mic", on}` says the viewer has turned it on or
 off; only while it is on does the Mac pass the packets to the app, which plays them on the sound output chosen in
@@ -286,7 +289,7 @@ having arrived:
 
 | Message | Meaning |
 |---|---|
-| `{t:"m", x, y}` | pointer moved |
+| `{t:"m", x, y, dx?, dy?}` | pointer moved; with the viewer's mouse captured (pointer lock), `dx`/`dy` say how far it moved in fractions of the picture (−1..1), passed on as the event's movement even where the position is pinned at the screen's edge. Every move carries its movement in the Quartz event (`mouseEventDeltaX/Y`), which games and 3D apps read |
 | `{t:"b", b, d, x, y, n}` | button `b` (0 left, 1 middle, 2 right) down (`d:true`) or up, `n` = click count |
 | `{t:"w", dx, dy, x, y}` | scroll, DOM `WheelEvent` deltas in CSS pixels (positive `dy` = page moves up) |
 | `{t:"k", c, k, d, m}` | key: DOM `code` (`"KeyA"`), DOM `key`, down/up, modifiers bitmask (1 shift, 2 ctrl, 4 alt, 8 meta) |
@@ -310,7 +313,8 @@ stdout (host → app). stderr is the host's log. Every frame is `[u32 big-endian
 | `0x11` INPUT | host → app | JSON input message from the table above, already validated |
 | `0x12` MIC | host → app | `u16 BE sequence number` · one Opus packet of the viewer's microphone |
 
-Events (`e`): `permissions {screen, accessibility}`, `displays {displays}`, `capture-started {display, width, height, fps, window?}`,
+Events (`e`): `text-focus {editable, secure}` (a moment after each left click: whether the focused element now takes
+typing, from Accessibility; test runs pretend the top half of the screen is a text box), `permissions {screen, accessibility}`, `displays {displays}`, `capture-started {display, width, height, fps, window?}`,
 `audio-outputs {list: [{uid, name, main}]}` (after HELLO and whenever the Mac's sound outputs change),
 `mic {on, ok, error?}`, `mic-level {packets, frames, late, rms}` (test runs only, which decode but never play),
 `windows {list}`, `window-gone {window}` (the window being shown left the screen; the app is already showing the

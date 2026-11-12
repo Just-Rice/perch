@@ -19,6 +19,10 @@ export class PointerInput {
     this.gestureTimer = null;
     this.buttons = new Set();
     this.listeners = [];
+    // A captured mouse (pointer lock): the page's own pointer is hidden and stays put, so the Mac's pointer is moved
+    // by how far the mouse goes, from where it last was.
+    this.locked = false;
+    this.last = { x: 0.5, y: 0.5 };
   }
 
   attach() {
@@ -34,6 +38,27 @@ export class PointerInput {
     // Safari's own pinch-to-zoom of the whole page would fight the local zoom.
     on(s, 'gesturestart', e => e.preventDefault());
     on(s, 'dragstart', e => e.preventDefault());
+    on(document, 'pointerlockchange', () => {
+      this.locked = document.pointerLockElement === s;
+      this.pendingMove = null;
+    });
+  }
+
+  // Where an event is on the Mac's screen: under the page's pointer, or, with the mouse captured, wherever the
+  // Mac's pointer has been moved to.
+  pos(e) {
+    if (this.locked) return { ...this.last };
+    const p = this.map(e.clientX, e.clientY);
+    this.last = { x: p.x, y: p.y };
+    return p;
+  }
+
+  // How wide and tall the picture is on screen, in page pixels (zoom included).
+  shownSize() {
+    const box = this.surface.getBoundingClientRect();
+    const [w, h] = this.pictureSize();
+    const s = Math.min(box.width / w, box.height / h) * (this.view.get().scale ?? 1);
+    return [w * s, h * s];
   }
 
   detach() {
@@ -65,8 +90,8 @@ export class PointerInput {
     if (e.button > 2) return; // back/forward buttons: nothing on the Mac to map them to
     e.preventDefault();
     this.surface.focus({ preventScroll: true });
-    try { this.surface.setPointerCapture(e.pointerId); } catch {}
-    const p = this.map(e.clientX, e.clientY);
+    if (!this.locked) { try { this.surface.setPointerCapture(e.pointerId); } catch {} }
+    const p = this.pos(e);
     const n = this.clicks.down(e.button, e.clientX, e.clientY, e.timeStamp);
     this.buttons.add(e.button);
     this._flushMove();
@@ -77,7 +102,19 @@ export class PointerInput {
     if (!this.enabled()) return;
     if (e.pointerType === 'touch') return this._touch('move', e);
     this.onActivity(e);
-    const p = this.map(e.clientX, e.clientY);
+    if (this.locked) {
+      const [sw, sh] = this.shownSize();
+      if (!(sw > 0 && sh > 0) || (!e.movementX && !e.movementY)) return;
+      const dx = e.movementX / sw, dy = e.movementY / sh;
+      const clamp = v => Math.min(1, Math.max(0, v));
+      this.last = { x: clamp(this.last.x + dx), y: clamp(this.last.y + dy) };
+      // Several moves between two screen refreshes go out as one: the newest position, and all the movement.
+      const m = this.pendingMove?.dx !== undefined ? this.pendingMove : { dx: 0, dy: 0 };
+      this.pendingMove = { t: 'm', x: this.last.x, y: this.last.y, dx: m.dx + dx, dy: m.dy + dy };
+      this._schedule();
+      return;
+    }
+    const p = this.pos(e);
     this._queueMove(p.x, p.y);
   }
 
@@ -85,7 +122,7 @@ export class PointerInput {
     if (e.pointerType === 'touch') return this._touch('up', e);
     if (!this.buttons.has(e.button)) return;
     this.buttons.delete(e.button);
-    const p = this.map(e.clientX, e.clientY);
+    const p = this.pos(e);
     this._flushMove();
     this.session.sendInput({ t: 'b', b: e.button, d: false, x: p.x, y: p.y, n: this.clicks.up(e.button) });
   }
@@ -96,7 +133,7 @@ export class PointerInput {
   }
 
   _releaseButtons(e) {
-    const p = this.map(e.clientX, e.clientY);
+    const p = this.pos(e);
     for (const b of this.buttons) this.session.sendInput({ t: 'b', b, d: false, x: p.x, y: p.y, n: 1 });
     this.buttons.clear();
   }
@@ -106,7 +143,7 @@ export class PointerInput {
     e.preventDefault();
     this.onActivity(e);
     const { dx, dy } = wheelPixels(e, { pageWidth: this.surface.clientWidth, pageHeight: this.surface.clientHeight });
-    const p = this.map(e.clientX, e.clientY);
+    const p = this.pos(e);
     this.wheel.add(dx, dy, p.x, p.y);
     this._schedule();
   }

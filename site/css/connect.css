@@ -223,6 +223,17 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .kbd-fab[hidden] { display: none; }
 .kbd-fab.open { background: #2dd4bf; color: #04201d; border-color: #2dd4bf; }
 .kbd-fab .icon { width: 26px; height: 26px; pointer-events: none; }
+/* A text box on the Mac was tapped but this phone won't open its keyboard by itself (iPhones need a tap on a real
+   text field): the button grows into a labelled pill that says so. */
+.kbd-fab-label { display: none; pointer-events: none; font-weight: 700; font-size: 1rem; white-space: nowrap; }
+.kbd-fab.invite {
+  width: auto; border-radius: 28px; padding: 0 20px 0 16px; grid-auto-flow: column; gap: 8px;
+  background: #2dd4bf; color: #04201d; border-color: #2dd4bf; animation: kbd-invite 1.6s ease-in-out infinite;
+}
+.kbd-fab.invite .kbd-fab-label { display: block; }
+.kbd-fab.invite .softkbd { border-radius: 28px; }
+@keyframes kbd-invite { 50% { box-shadow: 0 0 0 10px rgba(45, 212, 191, .25), 0 4px 16px rgba(0, 0, 0, .35); } }
+@media (prefers-reduced-motion: reduce) { .kbd-fab.invite { animation: none; } }
 .viewer:has(.keysbar:not([hidden])) .kbd-fab { bottom: calc(var(--kb-inset, 0px) + env(safe-area-inset-bottom) + 80px); }
 @supports (backdrop-filter: blur(8px)) { .kbd-fab:not(.open) { backdrop-filter: blur(12px); } }
 .softkbd {
@@ -270,3 +281,6 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
   .tb-mac { max-width: 84px; }
   .tb-btn { width: 40px; }
 }
+
+/* A captured mouse: the page's pointer is gone (the browser hides it); the Mac's own pointer is in the picture. */
+.viewer.captured .surface { cursor: none; }

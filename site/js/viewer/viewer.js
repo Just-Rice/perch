@@ -117,6 +117,7 @@ export class Viewer {
     if (this.over) return;
     this.over = true;
     this._micOff();
+    if (document.pointerLockElement === this.surface) document.exitPointerLock();
     this.keys?.releaseAll();
     this._clearTimers();
     this.$('endedTitle').textContent = m.title;
@@ -131,6 +132,9 @@ export class Viewer {
   }
 
   destroy() {
+    if (document.pointerLockElement === this.surface) document.exitPointerLock();
+    clearTimeout(this.captureNoteTimer);
+    clearTimeout(this.inviteTimer);
     this.pointer?.detach();
     this.keys?.detach();
     for (const [el, type, fn, opts] of this.listeners) el.removeEventListener(type, fn, opts);
@@ -170,6 +174,8 @@ export class Viewer {
       if (typeof m.ts === 'number') this.pingMs = Math.max(0, performance.now() - m.ts);
     } else if (m.t === 'status') {
       this._applyStatus(m);
+    } else if (m.t === 'textfocus') {
+      this._textFocus(m.editable === true, m.secure === true);
     } else if (m.t === 'windows') {
       this._setWindows(Array.isArray(m.list) ? m.list : []);
     } else if (m.t === 'mic') {
@@ -198,9 +204,14 @@ export class Viewer {
       if (st.locked) {
         this.banners.show('locked', { kind: 'info', icon: 'lock', title: 'Your Mac is locked.',
           body: "You can try typing its password here; if that doesn't work, unlock it at the Mac." });
+        if (this.touchFirst && this.inputAllowed !== false && document.activeElement !== this.$('softkbd')) {
+          this._inviteKeyboard('Tap to type the password', { stay: true });
+        }
       } else {
         this.banners.hide('locked');
+        if (this.wasLocked) this._inviteKeyboard(null);
       }
+      this.wasLocked = !!st.locked;
     }
     if ('input' in st) {
       this.inputAllowed = !this.guest && st.input !== false;
@@ -474,6 +485,36 @@ export class Viewer {
     $('tbFull').hidden = !canFull;
     on('tbFull', 'click', () => this._toggleFullscreen());
 
+    // Capture the mouse, as games do: this computer's pointer disappears and the mouse moves only the Mac's.
+    const canCapture = !this.touchFirst && !this.guest && 'requestPointerLock' in this.surface;
+    $('tbCapture').hidden = !canCapture;
+    $('captureClickWrap').hidden = !canCapture;
+    $('optCaptureClick').checked = !!this.prefs.get('captureOnClick');
+    on('optCaptureClick', 'change', e => this.prefs.set('captureOnClick', e.target.checked));
+    on('tbCapture', 'click', () => (this.pointer?.locked ? document.exitPointerLock() : this._capture()));
+    this._on(this.surface, 'pointerdown', e => {
+      if (canCapture && e.pointerType === 'mouse' && !this.pointer?.locked && this.prefs.get('captureOnClick') && this.inputAllowed) this._capture();
+    });
+    this._on(document, 'pointerlockchange', () => {
+      const locked = document.pointerLockElement === this.surface;
+      $('tbCapture').setAttribute('aria-pressed', String(locked));
+      $('tbCapture').setAttribute('aria-label', locked ? 'Let go of the mouse' : 'Capture the mouse');
+      this.root.classList.toggle('captured', locked);
+      if (locked) {
+        this._hideToolbar(true);
+        this.banners.show('capture', { kind: 'info', icon: 'pointer', title: 'The mouse is captured.',
+          body: 'It moves only your Mac\u2019s pointer. Press Esc to let go.', dismissible: true });
+        clearTimeout(this.captureNoteTimer);
+        this.captureNoteTimer = setTimeout(() => this.banners.hide('capture'), 4000);
+      } else {
+        this.banners.hide('capture');
+      }
+    });
+    this._on(document, 'pointerlockerror', () => {
+      this.banners.show('capture', { kind: 'warn', icon: 'warn', title: "This browser didn't let Perch capture the mouse.",
+        body: 'Click the Mac\u2019s screen first, then try again.', dismissible: true });
+    });
+
     on('tbStats', 'click', () => {
       const panel = $('stats');
       panel.hidden = !panel.hidden;
@@ -519,7 +560,7 @@ export class Viewer {
     this._on($('moreMenu'), 'keydown', e => this._toolbarKey(e));
     // On the whole viewer, not just the picture: at the top in the middle the mouse is over the handle instead.
     this._on(this.root, 'pointermove', e => {
-      if (e.pointerType !== 'touch' && e.clientY < SHOW_ZONE_PX) this._showToolbar();
+      if (e.pointerType !== 'touch' && !this.pointer?.locked && e.clientY < SHOW_ZONE_PX) this._showToolbar();
     });
     this._on(this.surface, 'pointerdown', () => this._toggleMenu(false));
   }
@@ -585,15 +626,27 @@ export class Viewer {
     }
   }
 
+  async _capture() {
+    if (this.over || !this.inputAllowed) return;
+    this._toggleMenu(false);
+    this.surface.focus({ preventScroll: true });
+    // Raw mouse movement (no acceleration) where the browser offers it, as games want.
+    try {
+      await this.surface.requestPointerLock({ unadjustedMovement: true });
+    } catch {
+      try { await this.surface.requestPointerLock(); } catch { /* pointerlockerror says so */ }
+    }
+  }
+
   _showToolbar() {
     this.root.classList.add('tb-on');
     clearTimeout(this.hideTimer);
     this.hideTimer = setTimeout(() => this._hideToolbar(), HIDE_AFTER_MS);
   }
 
-  _hideToolbar() {
+  _hideToolbar(now = false) {
     const tb = this.$('toolbar');
-    const busy = !this.$('moreMenu').hidden || tb.matches(':hover') || tb.contains(document.activeElement);
+    const busy = !now && (!this.$('moreMenu').hidden || tb.matches(':hover') || tb.contains(document.activeElement));
     if (busy) {
       this.hideTimer = setTimeout(() => this._hideToolbar(), HIDE_AFTER_MS);
       return;
@@ -637,6 +690,10 @@ export class Viewer {
     this._on(box, 'touchstart', closeIfOpen, { passive: false });
     this._on(box, 'mousedown', closeIfOpen);
     this._on(box, 'focus', () => {
+      // Opened by itself for a text box on the Mac, or by hand with this button.
+      this.autoKeyboard = this.openingAuto === true;
+      this.openingAuto = false;
+      this._inviteKeyboard(null);
       fab.classList.add('open');
       fab.setAttribute('aria-label', 'Hide the keyboard');
       barWasHidden = bar.hidden;
@@ -654,9 +711,42 @@ export class Viewer {
     this._syncKeyboardButton();
   }
 
+  // The Mac says whether the last tap left it waiting for typing. Bring the keyboard up for a text box (where the
+  // browser lets a page do that), or invite a tap on the keyboard button (iPhones and iPads only open it for a tap);
+  // put it away again after a tap elsewhere, if it came up by itself.
+  _textFocus(editable, secure) {
+    if (!this.touchFirst || !this.inputAllowed || this.over) return;
+    const box = this.$('softkbd');
+    if (!editable) {
+      if (!this.status.locked) this._inviteKeyboard(null);
+      if (this.autoKeyboard && document.activeElement === box) this.keys.hideSoftKeyboard();
+      return;
+    }
+    if (document.activeElement === box) return;
+    if (canOpenKeyboardNow()) {
+      this.openingAuto = true;
+      this.keys.showSoftKeyboard();
+      if (document.activeElement === box) return;
+      this.openingAuto = false;
+    }
+    this._inviteKeyboard(secure ? 'Tap to type the password' : 'Tap to type');
+  }
+
+  _inviteKeyboard(text, { stay = false } = {}) {
+    const fab = this.$('kbdFab');
+    clearTimeout(this.inviteTimer);
+    fab.classList.toggle('invite', !!text && !fab.hidden);
+    this.$('kbdFabLabel').textContent = text ?? '';
+    if (text && !stay) this.inviteTimer = setTimeout(() => this._inviteKeyboard(null), 8000);
+  }
+
   _syncKeyboardButton() {
     const fab = this.$('kbdFab');
     fab.hidden = !(this.touchFirst && this.inputAllowed);
+    // Locked: typing the password is the next thing to do.
+    if (!fab.hidden && this.status.locked && document.activeElement !== this.$('softkbd')) {
+      this._inviteKeyboard('Tap to type the password', { stay: true });
+    }
     if (fab.hidden && document.activeElement === this.$('softkbd')) this.$('softkbd').blur();
   }
 
@@ -699,4 +789,11 @@ export class Viewer {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
   }
+}
+
+// Whether this browser will open its on-screen keyboard for a text field focused by the page itself, now: only just
+// after the person touched the screen, and never on iPhones and iPads (they insist on a tap on the field itself).
+function canOpenKeyboardNow() {
+  const apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  return !apple && navigator.userActivation?.isActive === true;
 }

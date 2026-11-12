@@ -21,7 +21,11 @@ export function validateInput(msg, channel) {
   if (channel === 'pointer') {
     if (msg.t !== 'm') return null;
     const x = coord(msg.x), y = coord(msg.y);
-    return x === null || y === null ? null : { t: 'm', x, y };
+    if (x === null || y === null) return null;
+    // A captured mouse also says how far it moved (fractions of the picture), for games on the Mac.
+    if (msg.dx === undefined && msg.dy === undefined) return { t: 'm', x, y };
+    if (!isNum(msg.dx) || !isNum(msg.dy)) return null;
+    return { t: 'm', x, y, dx: clamp(msg.dx, -1, 1), dy: clamp(msg.dy, -1, 1) };
   }
   if (channel !== 'input') return null;
   switch (msg.t) {

@@ -59,6 +59,57 @@ test('desktop: the viewer shows the test picture, with the toolbar', async () =>
   await page.close();
 });
 
+test('desktop: capturing the mouse, as games do: the Mac\u2019s pointer moves by how far the mouse goes', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  assert.equal(await page.eval(`document.getElementById('tbCapture').hidden`), false);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  // Start from a known place: the middle of the Mac's screen.
+  const mid = await page.eval(`(() => { const r = document.getElementById('surface').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: mid.x, y: mid.y });
+  await page.click('#tbCapture');
+  const real = await page.waitFor(`document.pointerLockElement === document.getElementById('surface')`, { what: 'pointer lock', timeoutMs: 3000 })
+    .then(() => true, () => false);
+  if (!real) {
+    // Headless Chrome may refuse pointer lock: play the browser's part (as it would report a lock).
+    await page.eval(`(() => { const s = document.getElementById('surface');
+      Object.defineProperty(document, 'pointerLockElement', { configurable: true, get: () => s });
+      document.dispatchEvent(new Event('pointerlockchange')); })()`);
+  }
+  // The browser announces the lock a moment after granting it.
+  await page.waitFor(`document.getElementById('viewer').classList.contains('captured')`, { what: 'the page noticing the capture' });
+  assert.equal(await page.eval(`document.getElementById('tbCapture').getAttribute('aria-pressed')`), 'true');
+  assert.ok(await page.eval(`!!document.querySelector('#banners [data-id="capture"]')`), 'the "Press Esc to let go" note');
+  const n = await count(page);
+  // Movement only: the page's pointer stays put while the Mac's moves. A tenth of the picture to the right, then a
+  // long way up past the top edge, where the position stops but the movement still counts.
+  const shown = await page.eval(`window.__perch.viewer.pointer.shownSize()`);
+  const move = (dx, dy) => page.eval(`document.getElementById('surface').dispatchEvent(new PointerEvent('pointermove',
+    { pointerType: 'mouse', bubbles: true, clientX: ${mid.x}, clientY: ${mid.y}, movementX: ${dx}, movementY: ${dy} }))`);
+  await move(shown[0] / 10, 0);
+  await sleep(80);
+  await move(0, -shown[1]);
+  await sleep(80);
+  await page.eval(`document.getElementById('surface').dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', bubbles: true, button: 0, buttons: 1, clientX: 5, clientY: 5 }))`);
+  await page.eval(`document.getElementById('surface').dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse', bubbles: true, button: 0, clientX: 5, clientY: 5 }))`);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'the click' });
+  const sent = (await messages(page, n)).filter(m => m.t === 'm' || m.t === 'b');
+  const r = v => Math.round(v * 1000) / 1000;
+  const moves = sent.filter(m => m.t === 'm');
+  assert.deepEqual(moves.map(m => [r(m.x), r(m.y), r(m.dx), r(m.dy)]), [[0.6, 0.5, 0.1, 0], [0.6, 0, 0, -1]]);
+  const clicks = sent.filter(m => m.t === 'b');
+  assert.deepEqual(clicks.map(m => [r(m.x), r(m.y)]), [[0.6, 0], [0.6, 0]], 'clicks land where the Mac\u2019s pointer is, not under the hidden one');
+  if (real) {
+    await page.eval(`document.exitPointerLock()`);
+  } else {
+    await page.eval(`delete document.pointerLockElement; document.dispatchEvent(new Event('pointerlockchange'))`);
+  }
+  await page.waitFor(`!document.getElementById('viewer').classList.contains('captured')`, { what: 'let go' });
+  // Back to ordinary: positions follow the page's pointer again.
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
 test('desktop: mouse moves, clicks, double clicks, right clicks and scrolling', async () => {
   const page = await openPage(stack, demoUrl());
   await ready(page);
@@ -310,6 +361,44 @@ test('Windows keyboard: "Ctrl acts as ⌘" is on by default and swaps Control an
   await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 2`);
   assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}${m.m}`),
     ['ControlLeft↓2', 'ControlLeft↑0']);
+  await page.close();
+});
+
+test('phone: tapping a text box on the Mac brings up the keyboard (Android) or asks for one tap (iPhone)', async () => {
+  // The demo's pretend text box is the top half of the Mac's screen; the picture fills the middle of the phone.
+  const pic = async () => page.eval(`(() => { const r = document.getElementById('video').getBoundingClientRect();
+    const v = document.getElementById('video'); const s = Math.min(r.width / v.videoWidth, r.height / v.videoHeight);
+    const h = v.videoHeight * s; const top = r.top + (r.height - h) / 2; return { top, h }; })()`);
+  let page = await openPage(stack, demoUrl({ log: '0' }), { view: PHONE, ua: UA.android, name: 'android-kbd' });
+  await ready(page);
+  let p = await pic();
+  await page.tap(195, p.top + p.h * 0.2);
+  await page.waitFor(`document.activeElement === document.getElementById('softkbd')`, { what: 'the keyboard, by itself' });
+  assert.equal(await page.eval(`document.getElementById('kbdFab').classList.contains('open')`), true);
+  // A tap outside any text box puts it away again, because it came up by itself.
+  await sleep(300);
+  await page.tap(195, p.top + p.h * 0.9);
+  await page.waitFor(`document.activeElement !== document.getElementById('softkbd')`, { what: 'the keyboard put away' });
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+
+  page = await openPage(stack, demoUrl({ log: '0' }), { view: PHONE, ua: UA.iphone, name: 'iphone-kbd' });
+  await ready(page);
+  p = await pic();
+  await page.tap(195, p.top + p.h * 0.2);
+  await page.waitFor(`document.getElementById('kbdFab').classList.contains('invite')`, { what: 'the "Tap to type" button' });
+  assert.equal(await page.text('#kbdFabLabel'), 'Tap to type');
+  assert.notEqual(await page.eval(`document.activeElement?.id`), 'softkbd', 'not opened without a tap of its own');
+  await page.shot('viewer-demo-tap-to-type-phone');
+  const fab = await page.eval(`(() => { const r = document.getElementById('kbdFab').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.tap(fab.x, fab.y);
+  await page.waitFor(`document.activeElement === document.getElementById('softkbd')`, { what: 'the keyboard after one tap' });
+  assert.equal(await page.eval(`document.getElementById('kbdFab').classList.contains('invite')`), false);
+  // A locked Mac: the button asks for the password, and stays until it's tapped.
+  await page.eval(`document.getElementById('softkbd').blur()`);
+  await page.eval(`window.__perch.demoSession.onmessage({ t: 'status', locked: true })`);
+  assert.equal(await page.text('#kbdFabLabel'), 'Tap to type the password');
+  assert.deepEqual(page.problems(), []);
   await page.close();
 });
 

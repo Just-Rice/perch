@@ -8,7 +8,23 @@ import { minutesSeconds, ago, duration, toMs } from '../setup/lib/time.js';
 import { groupSecret } from '../setup/sections/totp.js';
 import { toneOf } from '../setup/sections/activity.js';
 import { pillFor } from '../setup/sections/header.js';
-import { suggestPassword } from '../src/names.mjs';
+import { suggestPassword, newMacName } from '../src/names.mjs';
+import * as setupNames from '../setup/lib/names.js';
+import * as sharedNames from '../../../site/js/shared/rendezvous.js';
+
+test('Mac names: the Setup page’s copy of the rules is the website’s, and both kinds of name are accepted', () => {
+  assert.equal(setupNames.CUSTOM_MAC_NAME_RE.source, sharedNames.CUSTOM_MAC_NAME_RE.source);
+  for (const s of ['  Jordan MacBook ', 'room_204', 'A-B', 'x'.repeat(50)]) {
+    assert.equal(setupNames.normalizeMacName(s), sharedNames.normalizeMacName(s), s);
+  }
+  const { isMacName, normalizeMacName } = sharedNames;
+  for (let i = 0; i < 50; i++) assert.ok(isMacName(newMacName()), 'every made-up name');
+  for (const ok of ['jordan-macbook', 'room204', 'mac1', 'a-b-c-d', 'x'.repeat(40)]) assert.ok(isMacName(ok), ok);
+  assert.equal(normalizeMacName('  Jordan MacBook  '), 'jordan-macbook');
+  for (const bad of ['abc', 'x'.repeat(41), 'my--mac', '-mac1', 'mac1-', 'my.mac', 'mäc1', 'my mac', '']) {
+    assert.equal(isMacName(bad), false, JSON.stringify(bad));
+  }
+});
 
 test('password strength: refuses short, guessable and name-based passwords; Perch\'s suggestion is strong', () => {
   assert.equal(MIN_LENGTH, 12);

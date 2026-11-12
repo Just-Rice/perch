@@ -15,7 +15,7 @@ Protocol version: **1** (`PROTO` in `site/js/shared/proto.js`). Shared code for 
 |---|---|---|---|
 | `hostId` | 16 random bytes | `config.json` | Which Mac. Hashed into the rendezvous topic. |
 | `sigKey` | 32 random bytes | secrets | Seals rendezvous messages for passkey sign-ins and pairing. |
-| `macName` | e.g. `amber-otter-4821` | `config.json` | Human name; the username for backup sign-in. |
+| `macName` | e.g. `amber-otter-4821` | `config.json` | Human name; the username for backup sign-in. Made up by Perch (`MAC_NAME_RE`), or chosen by the owner in Setup (`CUSTOM_MAC_NAME_RE`: 4–40 letters, digits and single hyphens; not recommended). |
 | TOTP secret | 20 random bytes | secrets | Authenticator app codes (RFC 6238, SHA-1, 6 digits, 30 s). |
 | OPAQUE server setup | library string | secrets | Backup sign-in server key. |
 | OPAQUE registration record | library string | `config.json` | Backup password verifier (not the password). |

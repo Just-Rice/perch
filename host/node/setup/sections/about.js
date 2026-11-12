@@ -1,6 +1,7 @@
-// About: version and updates, links, and the big switches: a new name, Start over and Uninstall.
-import { $, setText, show, busy } from '../lib/dom.js';
+// About: version and updates, links, and the big switches: a new name (made up, or chosen), Start over and Uninstall.
+import { $, setText, show, say, busy } from '../lib/dom.js';
 import { confirmInline } from '../lib/confirm.js';
+import { normalizeMacName, CUSTOM_MAC_NAME_RE } from '../lib/names.js';
 
 const RELEASES = 'https://github.com/Just-Rice/perch/releases';
 const safeReleaseUrl = (url) => (typeof url === 'string' && url.startsWith(`${RELEASES}/`) ? url : RELEASES);
@@ -36,6 +37,37 @@ export function about(ctx) {
         (hasBackup ? ' The backup password is removed, so you\'ll need to set it again.' : ''),
       yes: 'Get a new name', no: 'Keep this name',
       onYes: async () => { await ctx.post('newMacName'); $('macName').focus(); },
+    });
+  });
+
+  // A name the owner picks: allowed, but not recommended (it is easier to guess than a made-up one).
+  const customName = $('customName');
+  const customError = $('customNameError');
+  customName.addEventListener('input', () => say(customError, ''));
+  $('customNameForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = normalizeMacName(customName.value);
+    if (!CUSTOM_MAC_NAME_RE.test(name)) {
+      say(customError, 'Use 4 to 40 letters or numbers, with single hyphens between words, like jordan-macbook.');
+      customName.focus();
+      return;
+    }
+    const hasBackup = ctx.state?.backup?.set === true;
+    confirmInline($('customNameBtn'), {
+      text: `Rename this Mac to “${name}”? It's easier to guess than a made-up name. Your devices keep working.` +
+        (hasBackup ? ' The backup password is removed, so you\'ll need to set it again.' : ''),
+      yes: 'Use this name', no: 'Cancel',
+      onYes: async () => {
+        try {
+          await ctx.post('customMacName', { name });
+        } catch (err) {
+          say(customError, err.message);
+          return;
+        }
+        customName.value = '';
+        $('customNameBox').open = false;
+        $('macName').focus();
+      },
     });
   });
 

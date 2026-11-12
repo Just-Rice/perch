@@ -6,6 +6,7 @@
 // may be async; errors are thrown as Error with a plain-language message safe to show the user.
 import { QUALITY, DEFAULT_QUALITY, PAIR_TTL_MS, AUTH_TIMEOUT_MS } from '../../../site/js/shared/proto.js';
 import { newMacName as makeMacName, suggestPassword } from './names.mjs';
+import { normalizeMacName, CUSTOM_MAC_NAME_RE } from '../../../site/js/shared/rendezvous.js';
 import { HostPeer, ensureDtlsIdentity } from './rtc.mjs';
 import { Session } from './session.mjs';
 import { Relay } from './relay.mjs';
@@ -774,7 +775,21 @@ export class Controller {
   }
 
   async newMacName() {
-    const name = makeMacName();
+    return this._rename(makeMacName());
+  }
+
+  // A name the owner chose (Setup marks this "not recommended": a made-up name is far harder to guess, and the name is
+  // the username for backup sign-in and its meeting point). Same effect as newMacName otherwise.
+  async customMacName(name) {
+    const clean = normalizeMacName(name);
+    if (!CUSTOM_MAC_NAME_RE.test(clean)) {
+      throw new Error('Use 4 to 40 letters or numbers, with single hyphens between words, like jordan-macbook.');
+    }
+    if (clean === this.store.macName) throw new Error('That is already this Mac’s name.');
+    return this._rename(clean);
+  }
+
+  async _rename(name) {
     const hadBackup = !!this.store.config.backup.record;
     this._endSessions(s => s.route === 'backup', 'removed');
     this.store.setMacName(name);

@@ -8,7 +8,7 @@
 import * as opaque from '@serenity-kit/opaque';
 import { newSecret, base32, otpauthUri, checkCode } from '../src/totp.mjs';
 import { newMacName, suggestPassword } from '../src/names.mjs';
-import { normalizeMacName } from '../../../site/js/shared/rendezvous.js';
+import { normalizeMacName, CUSTOM_MAC_NAME_RE } from '../../../site/js/shared/rendezvous.js';
 import { toB64url, randomBytes } from '../../../site/js/shared/bytes.js';
 import { CONNECT_URL, PAIR_TTL_MS, DEFAULT_QUALITY } from '../../../site/js/shared/proto.js';
 
@@ -226,6 +226,19 @@ export async function createMockController({ version = '0.1.0', test = true, mac
     newMacName() {
       call('newMacName');
       s.macName = newMacName();
+      s.backup = { record: null, setAt: null };
+      s.settings.backupOn = false;
+      note('settings', `Mac renamed to ${s.macName}`);
+      changed();
+      return s.macName;
+    },
+
+    customMacName(name) {
+      call('customMacName', name);
+      const clean = normalizeMacName(name);
+      if (!CUSTOM_MAC_NAME_RE.test(clean)) throw new Error('Use 4 to 40 letters or numbers, with single hyphens between words, like jordan-macbook.');
+      if (clean === s.macName) throw new Error('That is already this Mac’s name.');
+      s.macName = clean;
       s.backup = { record: null, setAt: null };
       s.settings.backupOn = false;
       note('settings', `Mac renamed to ${s.macName}`);

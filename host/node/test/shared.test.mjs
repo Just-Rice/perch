@@ -37,7 +37,8 @@ test('envelopes open only with the right key, topic and freshness', async () => 
   assert.equal(await open(key, topic, env, 1_000_000 + 6 * 60_000), null, 'too old');
   assert.equal(await open(key, topic, env, 1_000_000 - 6 * 60_000), null, 'from the future');
   const tampered = JSON.parse(env);
-  tampered.c = tampered.c.slice(0, -2) + (tampered.c.endsWith('A') ? 'B' : 'A') + tampered.c.slice(-1);
+  // Change the second-to-last character, always to a different one (it was sometimes 'A' already, a 1-in-64 flake).
+  tampered.c = tampered.c.slice(0, -2) + (tampered.c.at(-2) === 'A' ? 'B' : 'A') + tampered.c.slice(-1);
   assert.equal(await open(key, topic, JSON.stringify(tampered), 1_000_000), null, 'tampered');
   assert.equal(await open(key, topic, 'not json', 1_000_000), null);
   assert.equal(await open(key, topic, 'x'.repeat(70_000), 1_000_000), null, 'oversized');

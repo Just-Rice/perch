@@ -37,6 +37,11 @@ jobs:
           swift build -c release --package-path host/app
           host/app/.build/release/Perch --selftest
 
+      # Perch supports macOS 13.5 Ventura and later. Building for macOS 13 makes the compiler reject any newer API
+      # that isn't behind #available; this checks the target didn't drift.
+      - name: The app still targets macOS 13
+        run: vtool -show-build host/app/.build/release/Perch | tee /dev/stderr | grep -q 'minos 13\.0'
+
       - name: Website and host end to end
         run: |
           run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/full.test.mjs; }

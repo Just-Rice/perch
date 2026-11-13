@@ -8,7 +8,9 @@ import PackageDescription
 
 let package = Package(
     name: "Perch",
-    platforms: [.macOS(.v14)],
+    // macOS 13 Ventura is the floor for ScreenCaptureKit sound and SMAppService; the few macOS 14 calls are behind
+    // #available. Info.plist asks for 13.5, which the bundled Node.js needs.
+    platforms: [.macOS(.v13)],
     products: [
         .executable(name: "Perch", targets: ["Perch"]),
     ],

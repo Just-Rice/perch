@@ -61,7 +61,7 @@ CODE_VERSION="$(sed -n 's/.*static let version = "\(.*\)".*/\1/p' "$PKG/Sources/
 # 1. Build.
 # The Intel version is built into its own folder (.build-intel), so it never replaces the Apple silicon build.
 BUILD_ARGS=(-c release)
-[ "$INTEL" = 1 ] && BUILD_ARGS+=(--triple x86_64-apple-macosx14.0 --scratch-path .build-intel)
+[ "$INTEL" = 1 ] && BUILD_ARGS+=(--triple x86_64-apple-macosx13.0 --scratch-path .build-intel)
 if [ "$BUILD" = 1 ]; then
   say "building Perch $VERSION (release$([ "$INTEL" = 1 ] && echo ", Intel"))…"
   (cd "$PKG" && swift build "${BUILD_ARGS[@]}")

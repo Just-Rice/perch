@@ -30,7 +30,7 @@ It downloads the latest release from this repository, checks it against its publ
 Applications folder and opens it. Perch lives in the menu bar and opens its **Setup** page in your browser, which
 walks you through the rest:
 
-1. **Two macOS permissions.** Screen & System Audio Recording shows your screen and plays its sound. Accessibility
+1. **Two macOS permissions.** Screen & System Audio Recording (called Screen Recording before macOS 15) shows your screen and plays its sound. Accessibility
    lets Perch click and type for you.
 2. **Your authenticator app** (Apple Passwords, Google Authenticator, 1Password, …) for the 6-digit codes.
 3. **Pairing your first device.** Scan the code Setup shows. Your device makes a passkey (Face ID or Touch ID), then
@@ -46,7 +46,7 @@ Applications and open it. When macOS refuses, go to System Settings › Privacy 
 
 **Needs:**
 
-- **The Mac:** macOS 14 Sonoma or later, on Apple silicon (M1 or later) or Intel. The Intel version is new and has
+- **The Mac:** macOS 13.5 Ventura or later, on Apple silicon (M1 or later) or Intel. The Intel version is new and has
   only been tested in emulation so far.
 - **The viewing device:** a recent Safari, Chrome, Edge or Firefox.
 - **While you use it**, the Mac must be on, awake and logged in.

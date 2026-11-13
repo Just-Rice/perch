@@ -1,0 +1,9 @@
+# Hosts the Perch website (site/) on Cloudflare at https://perch.<your-subdomain>.workers.dev, as plain files.
+# In Cloudflare: Workers & Pages > Create > Import a repository > this repository; deploy command: npx wrangler deploy
+# (The relay service in relay-service/ is a separate Worker with its own wrangler.toml.)
+name = "perch"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+[assets]
+directory = "./site"

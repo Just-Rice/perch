@@ -453,6 +453,26 @@ test('backup sign-in: wrong password, right password and code; its lockout leave
   assert.equal((await app.call('debug')).signaling.listening.name, null);
 });
 
+test('a name the owner chose: checked, normalized, and backup sign-in works with it', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app, macName } = ctx;
+  for (const bad of ['abc', 'a'.repeat(41), 'my--mac', '-mymac', 'mymac-', 'my.mac', 'mäc-book', '']) {
+    await assert.rejects(app.call('customMacName', bad), /4 to 40 letters or numbers/, JSON.stringify(bad));
+  }
+  await assert.rejects(app.call('customMacName', macName), /already this Mac/);
+  assert.equal(await app.call('customMacName', '  Jordan MacBook  '), 'jordan-macbook');
+  const st = await app.call('state');
+  assert.equal(st.macName, 'jordan-macbook');
+  assert.equal(st.devices.length, 1, 'devices keep working');
+  assert.ok(st.activity.some(a => /renamed to jordan-macbook/.test(a.text)));
+  // The chosen name is the backup sign-in's username, as a made-up one is.
+  await setBackupPassword(app, 'correct-horse-battery-staple');
+  const v = viewer(t);
+  await v.open({ route: 'backup', macName: 'Jordan-MacBook' });
+  const end = await v.signInBackup({ password: 'correct-horse-battery-staple', code: () => app.freshCode() });
+  assert.equal(end.t, 'ready', 'signed in with the backup password under the chosen name');
+});
+
 test('backup sign-in: a right password followed by a wrong code is one failure, not two', async (t) => {
   const ctx = await pairedHost(t);
   const { app, macName } = ctx;

@@ -81,6 +81,12 @@ volunteer project, so please allow a few days.
 - **The backup sign-in is weaker than a passkey.** A fake site or someone watching could capture the password, so it
   still needs the 6-digit code, it is off unless you set it up, and the Mac notifies you every time it is used. In an
   `about:blank` tab there's no address bar to check, so prefer the passkey there.
+- **A Mac name you choose yourself.** Setup lets you pick the Mac's name instead of Perch's made-up one, and says it
+  isn't recommended. A made-up name is one of about 590 million; one you choose (like `jordan-macbook`) can be guessed.
+  The name is the backup sign-in's username, and its meeting point's key is made from it, so whoever guesses it can
+  reach the backup sign-in and try passwords. Each try still needs the password and a 6-digit code, wrong tries lock
+  the route, and the Mac notifies you. Passkey sign-ins don't use the name. With backup sign-in off, the name isn't
+  listened for at all.
 - **The message services see some metadata.** They see when a viewer contacts a Mac, roughly how big the encrypted
   notes are, and the IP addresses of both ends. So do the public STUN servers both ends use to discover their
   addresses.

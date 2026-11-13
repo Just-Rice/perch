@@ -10,7 +10,7 @@ const METHODS = new Set([
   'state', 'totpStart', 'totpConfirm', 'pairStart', 'pairCancel', 'deviceRename', 'deviceRemove', 'devicesRemoveAll',
   'siteAdd', 'siteRemove', 'relaySet', 'relayRemove', 'relayOwnerSet', 'relayOwnerRemove', 'workerRelaySet', 'workerRelayRemove', 'guestStart', 'guestStop',
   'suggestPassword', 'backupRegisterStart', 'backupRegisterFinish', 'backupRemove', 'updateSettings', 'disconnect',
-  'requestPermission', 'newMacName', 'reset', 'checkForUpdates', 'testInputEcho', 'testState', 'debug',
+  'requestPermission', 'newMacName', 'customMacName', 'reset', 'checkForUpdates', 'testInputEcho', 'testState', 'debug',
 ]);
 
 export function startTestRpc(fd, controller, log, extras = {}) {

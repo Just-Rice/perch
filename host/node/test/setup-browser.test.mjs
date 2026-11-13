@@ -675,6 +675,29 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.equal(await text(page, '#backupUser'), mock.raw.macName);
   });
 
+  await t.test('About: choosing a name of your own, behind a "not recommended" warning', async () => {
+    assert.equal(await evaluate(page, `document.getElementById('customNameBox').open`), false, 'tucked away until opened');
+    await evaluate(page, `document.getElementById('customNameBox').open = true`);
+    assert.match(await text(page, '#customNameBox summary'), /not recommended/);
+    assert.match(await text(page, '#customNameBox p'), /easier to guess/);
+    // Checked as typed: nothing reaches the Mac until the name is usable.
+    await type(page, '#customName', 'my.mac');
+    await click(page, '#customNameBtn');
+    await waitFor(page, `!document.getElementById('customNameError').hidden`);
+    assert.match(await text(page, '#customNameError'), /4 to 40 letters or numbers/);
+    assert.equal(mock.callsOf('customMacName').length, 0);
+    await type(page, '#customName', 'Room 204 Mac');
+    assert.equal(await visible(page, '#customNameError'), false, 'the message goes as soon as they type');
+    await click(page, '#customNameBtn');
+    await waitFor(page, `!!document.querySelector('#customNameHost .confirm')`);
+    assert.match(await text(page, '#customNameHost .confirm p'), /room-204-mac.*easier to guess/);
+    await click(page, '#customNameHost .confirm .btn.primary');
+    await until(() => mock.callsOf('customMacName').length === 1, 'custom name');
+    await waitFor(page, `document.getElementById('macName').textContent === 'room-204-mac'`);
+    assert.equal(await text(page, '#backupUser'), 'room-204-mac');
+    assert.equal(await evaluate(page, `document.getElementById('customNameBox').open`), false, 'closed again');
+  });
+
   await t.test('About: Start over, with an inline confirmation', async () => {
     await click(page, '#resetBtn');
     await waitFor(page, `!!document.querySelector('#resetHost .confirm')`);

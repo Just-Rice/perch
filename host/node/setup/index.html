@@ -542,6 +542,22 @@ npx wrangler deploy</pre></li>
         <div class="confirm-host" id="renameMacHost">
           <button type="button" class="btn" id="renameMacBtn">Get a new name</button>
         </div>
+        <details id="customNameBox">
+          <summary class="small">Choose your own name (not recommended)</summary>
+          <p class="small muted">A name Perch makes up is one of about 590 million, so nobody can guess it. One you choose
+            is much easier to guess. Anyone who guesses it can try the backup sign-in (they still need the backup
+            password and a 6-digit code, and wrong tries are slowed down), and the Mac answers them. Passkey sign-ins
+            don't use the name.</p>
+          <form id="customNameForm" novalidate>
+            <label for="customName">New name</label>
+            <input id="customName" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="40"
+              placeholder="like jordan-macbook">
+            <div class="confirm-host" id="customNameHost">
+              <button type="submit" class="btn" id="customNameBtn">Use this name</button>
+            </div>
+          </form>
+          <p class="msg bad" id="customNameError" role="alert" hidden></p>
+        </details>
       </div>
       <div class="zone-item">
         <h3>Start over</h3>

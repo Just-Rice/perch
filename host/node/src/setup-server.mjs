@@ -86,6 +86,7 @@ const ACTIONS = {
   disconnect: [],
   requestPermission: [['which', 'string']],
   newMacName: [],
+  customMacName: [['name', 'string']],
   reset: [],
   uninstall: [],
   checkForUpdates: [],

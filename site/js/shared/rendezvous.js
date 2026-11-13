@@ -9,10 +9,19 @@ import { BROKERS, ENVELOPE_MAX_BYTES, ENVELOPE_MAX_SKEW_MS, TOPIC_PREFIX } from 
 
 // --- names, topics and keys ---
 
+// The names Perch makes up: adjective-animal-number, like amber-otter-4821.
 export const MAC_NAME_RE = /^[a-z]{2,12}-[a-z]{2,12}-[0-9]{4}$/;
+// A name the owner chose instead (not recommended: it is easier to guess). Letters and digits, single hyphens between
+// them, 4 to 40 characters once normalized.
+export const CUSTOM_MAC_NAME_RE = /^(?=.{4,40}$)[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export function normalizeMacName(s) {
   return String(s ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
+}
+
+// Could this (normalized) be a Mac's name, made up by Perch or chosen by its owner?
+export function isMacName(name) {
+  return MAC_NAME_RE.test(name) || CUSTOM_MAC_NAME_RE.test(name);
 }
 
 const shortHash = async (label, bytes) => toB64url(await sha256(utf8(label), bytes)).slice(0, 22);

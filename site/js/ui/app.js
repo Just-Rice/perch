@@ -15,7 +15,7 @@ import { fillIcons, icon } from './icons.js';
 import { openInBlankTab } from '../blank.js';
 import { Viewer } from '../viewer/viewer.js';
 import { toB64url, fromB64url, randomBytes } from '../shared/bytes.js';
-import { normalizeMacName, MAC_NAME_RE } from '../shared/rendezvous.js';
+import { normalizeMacName, isMacName } from '../shared/rendezvous.js';
 import { relayBase, relayBroker } from '../shared/wsrelay.js';
 
 const $ = id => document.getElementById(id);
@@ -209,8 +209,8 @@ function showBackup(app, { error, name } = {}) {
 function submitBackup(app) {
   const name = normalizeMacName($('macName').value);
   const password = $('password').value;
-  if (!MAC_NAME_RE.test(name)) {
-    app.ui.showError('backupError', "That doesn't look like a Mac name. It has three parts, like amber-otter-4821.");
+  if (!isMacName(name)) {
+    app.ui.showError('backupError', "That doesn't look like a Mac name. It's shown in Perch's Setup, like amber-otter-4821.");
     $('macName').focus();
     return;
   }

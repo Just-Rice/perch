@@ -128,7 +128,14 @@ test('a slow GitHub times out instead of hanging', async () => {
   });
   const logs = [];
   const started = Date.now();
-  assert.equal(await checkForUpdate('0.1.0', { fetchImpl: hanging, log: (m) => logs.push(m), timeoutMs: 150 }), null);
+  // AbortSignal.timeout's timer doesn't hold the process open, and nothing else here does, so without this the test
+  // runner sees an empty event loop and cancels the test before the timeout can fire.
+  const keepAlive = setTimeout(() => {}, 5000);
+  try {
+    assert.equal(await checkForUpdate('0.1.0', { fetchImpl: hanging, log: (m) => logs.push(m), timeoutMs: 150 }), null);
+  } finally {
+    clearTimeout(keepAlive);
+  }
   assert.ok(Date.now() - started < 2000);
   assert.match(logs[0], /timed out/);
 });

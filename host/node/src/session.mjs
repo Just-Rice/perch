@@ -10,6 +10,7 @@ import { toB64url, fromB64url, equalBytes } from '../../../site/js/shared/bytes.
 import { PROTO, AUTH_TIMEOUT_MS, QUALITY } from '../../../site/js/shared/proto.js';
 import { AuthError } from './auth.mjs';
 import { MediaSender, ResolutionGovernor, ladderAtLeast } from './media.mjs';
+import { readAnswer, sessionKeys } from '../../../site/js/shared/wsrelay.js';
 import { validateInput, RateLimiter, POINTER_RATE, INPUT_RATE, CONTROL_RATE } from './input.mjs';
 
 const ANSWER_TIMEOUT_MS = 15000; // offer sent, no answer yet
@@ -70,19 +71,35 @@ export class Session {
       }
     }, Math.min(authTimeoutMs, ANSWER_TIMEOUT_MS));
 
+    this.transport = 'webrtc';
+    this.ws = null;            // the Worker relay offer made alongside the WebRTC one, if the Mac has a relay
+    this.peerSubs = [];
+    this._attach(peer);
+  }
+
+  // Listens to a peer's channels and state: the WebRTC peer, or the relay peer (wsrelay.mjs) that replaces it when
+  // the viewer answers over the Worker relay. Both have the same three channels.
+  _attach(peer) {
     const { control, input, pointer } = peer.channels;
-    this.subs.push(control.stateChanged.subscribe(s => {
+    const subs = this.peerSubs = [];
+    subs.push(control.stateChanged.subscribe(s => {
       if (s === 'open') this._onControlOpen().catch(e => { this.log?.error('hi failed:', e); this.end('error'); });
       else if (s === 'closed') this.end('disconnected', { sendBye: false });
     }));
-    this.subs.push(control.onMessage.subscribe(d => this._onControl(d)));
-    this.subs.push(input.onMessage.subscribe(d => this._onInput(d, 'input')));
-    this.subs.push(pointer.onMessage.subscribe(d => this._onInput(d, 'pointer')));
+    subs.push(control.onMessage.subscribe(d => this._onControl(d)));
+    subs.push(input.onMessage.subscribe(d => this._onInput(d, 'input')));
+    subs.push(pointer.onMessage.subscribe(d => this._onInput(d, 'pointer')));
     peer.onMicRtp = rtp => this._onMic(rtp);
     const unwatch = peer.onConnectionState(s => {
       if (s === 'failed' || s === 'closed') this.end('disconnected', { sendBye: false });
     });
-    this.subs.push({ unSubscribe: unwatch });
+    subs.push({ unSubscribe: unwatch });
+  }
+
+  _detach() {
+    for (const s of this.peerSubs) s.unSubscribe?.();
+    this.peerSubs = [];
+    this.peer.onMicRtp = null;
   }
 
   get signedIn() { return this.state === 'ready'; }
@@ -112,6 +129,25 @@ export class Session {
     if (this.state !== 'offered') return;
     this.state = 'connecting';
     await this.peer.acceptAnswer(sdp);
+  }
+
+  // The viewer answered over the Worker relay instead (its network blocks WebRTC). The WebRTC peer is closed and a
+  // relay peer takes its place; from here on everything (hi, binding, sign-in, media) is the same, over the relay.
+  // `makePeer(keys, answerText)` builds the relay peer (the hub knows the relay's address and secret).
+  async answerRelay(text, makePeer) {
+    if (this.state !== 'offered' || !this.ws) return;
+    this.state = 'connecting';
+    const { eph } = readAnswer(text, { sid: this.sid });
+    const keys = await sessionKeys(this.ws.privateKey, eph, this.ws.offerText, text, 'mac');
+    if (this.state !== 'connecting') return;
+    const webrtc = this.peer;
+    this._detach();
+    webrtc.close();
+    this.peer = await makePeer(keys, text);
+    this.transport = 'relay';
+    if (this.state !== 'connecting') { this.peer.close(); return; }
+    this._attach(this.peer);
+    this.peer.connect();
   }
 
   async _onControlOpen() {
@@ -337,14 +373,15 @@ export class Session {
     this.quality = info.quality;
     this.governor.setFps((QUALITY[this.quality] ?? QUALITY.balanced).fps);
     this.display = info.display.id;
-    this.media = new MediaSender({
-      video: this.peer.videoSender,
-      audio: this.peer.audioSender,
+    const mediaOptions = {
       quality: this.quality,
       log: this.log,
       onKeyframe: () => this.hub.keyframe(this),
       onBitrate: kbps => this.hub.bitrate(this, kbps),
-    });
+    };
+    // Over the Worker relay, whole frames go over the WebSocket instead of RTP (wsrelay.mjs).
+    this.media = this.peer.createMediaSender ? this.peer.createMediaSender(mediaOptions)
+      : new MediaSender({ video: this.peer.videoSender, audio: this.peer.audioSender, ...mediaOptions });
     this._send({ t: 'ready', name: this.store.macName, hv: this.hub.hv, ...info });
     this.media.start();
     // Rates are measured over each status period. A status sent early because something changed (capture started,
@@ -535,6 +572,8 @@ export class Session {
     if (sendBye && BYE_REASONS.includes(reason)) this._send({ t: 'bye', reason });
     for (const s of this.subs) s.unSubscribe?.();
     this.subs = [];
+    for (const s of this.peerSubs) s.unSubscribe?.();
+    this.peerSubs = [];
     if (wasReady) this.log?.info(`session ended (${reason})`);
     // A moment's grace so the last message (bye or denied) actually leaves before the connection closes.
     const closeTimer = setTimeout(() => this.peer.close(), CLOSE_DELAY_MS);

@@ -108,6 +108,68 @@ for other people's Macs, 24 for the owner's, and 1 hour for everyone within 40 G
 can't be read for 30 minutes, other people's Macs get no new logins. `GET /v1/status` with `Authorization: Bearer
 <owner key>` shows everything.
 
+## Worker relay
+
+Optional, per Mac, and needing no payment details: the owner's own Cloudflare Worker (`relay/`, deployed with
+`wrangler deploy`; Durable Objects on the Workers free plan). When WebRTC can't get through, the two ends talk over
+WebSockets to it instead, and it passes bytes between them. Shared code: `site/js/shared/wsrelay.js`; Mac side
+`host/node/src/wsrelay.mjs`; viewer side `site/js/ui/connection.js` and `site/js/ui/relaymedia.js`.
+
+**Setting it up.** Setup saves the Worker's address (`https://<name>.workers.dev` only: the website's CSP allows
+`wss://*.workers.dev` and nothing else). The Mac reads `GET /v1/info` (`{perch: "relay", v: 1, claimed}`); if the
+relay is unclaimed it claims it with `POST /v1/claim {secret}` (32 random bytes, hex), and the first claim wins (or
+the Worker's `RELAY_SECRET`, if its owner set one). It then proves it holds the secret with
+`GET /v1/check?auth=HMAC-SHA256(secret, "perch relay check v1")` and keeps `{url, secret}` with the secrets.
+
+**Offer and answer.** With a relay set up, every offer also carries `ws`, the relay offer text:
+`{"v":1, sid, url, room, eph, cert?, sig?}` — `room` 16 random bytes (base64url), `eph` the Mac's fresh ECDH P-256 key
+(65-byte uncompressed point), `cert` the Mac's DTLS certificate (DER) and `sig` its ECDSA P-256 signature (IEEE P1363)
+over `SHA-256("perch ws offer v1" ‖ sid ‖ "\n" ‖ url ‖ "\n" ‖ room ‖ eph)`. A viewer with the Mac's pin requires
+`cert` and `sig`, the first 16 bytes of `SHA-256(cert)` = pin, and a valid signature; without a pin (backup sign-in)
+the binding protects it, as below. A viewer that uses the relay answers `{t:"answer", sid, ws}` instead of `sdp`, with
+`ws` = `{"v":1, sid, eph}` (its own fresh key).
+
+The viewer uses the relay when the Mac offers one and its browser has WebCodecs `VideoDecoder`, and either its answer
+has no `srflx` or `relay` candidate although STUN servers were asked (UDP is blocked: WebRTC can't work), or a WebRTC
+attempt failed before `hi` (it then connects again, over the relay). On the relay the viewer leaves out the `quick`
+and `mic` caps: one-tap sign-in is tied to a WebRTC certificate, and there is no microphone line.
+
+**Keys.** `shared = ECDH(eph_mac, eph_viewer)`; `salt = SHA-256("perch ws salt v1" ‖ SHA-256(offerText) ‖
+SHA-256(answerText))`; two AES-256-GCM keys `HKDF-SHA256(shared, salt, "perch ws mac to viewer v1" | "perch ws viewer
+to mac v1")`. **Binding**: `offerSdp` and `answerSdp` in the binding (see Binding) are the relay offer and answer texts,
+exactly as sent and received, so a party that swapped either key makes every sign-in proof fail.
+
+**Rooms.** The Mac opens `wss://…/v1/room/<room>?role=mac&auth=HMAC-SHA256(secret, "perch relay room v1" ‖ room)`
+once the answer arrives; the viewer opens `…?role=viewer` once it has sent it. A room holds one of each; each gets the
+text `peer` when the other is there (within 30 s, or both are closed), and only then are the channels open. Binary
+messages go across unchanged; `ping` is answered `pong`; either side leaving closes the other.
+
+**Messages.** Every binary message is `[u64 BE counter][AES-GCM(key, iv = 0⁴ ‖ counter, aad "perch ws v1",
+u8 flags ‖ u8 type ‖ payload)]`. Counters start at 0 in each direction and must go up by exactly one (anything else
+ends the connection). Payloads over 256 KB are split; flag bit 0 means more pieces follow. Types: `1` control, `2`
+input, `3` pointer (UTF-8 JSON, exactly as on the WebRTC data channels of those names); `16` video: `u8 flags` (bit 0
+keyframe) · `u64 BE pts µs` · the H.264 Annex-B access unit; `17` audio: `u8 count` · count × (`u64 BE pts µs` ·
+`u16 BE length` · one Opus packet), up to three packets per message.
+
+**Rendezvous through the relay.** The relay is also a broker: `wss://…/v1/mqtt` speaks the MQTT subset Perch's
+client uses (CONNECT, QoS 0 PUBLISH and SUBSCRIBE, UNSUBSCRIBE, PINGREQ, DISCONNECT), for exact topics under
+`perch/v1/` only (no wildcards; at most 8 per connection; a publish is at most 70 KB and limited to a burst of 60 and
+2 a second per connection). Everything published there is the same sealed envelope as on the public brokers. The Mac
+adds it to its brokers while a relay is set up, and names the relay to signed-in viewers in `ready` (`relay`, its
+https address), which remember it with the Mac (`perch.macs.v1`, `relay`) and add its broker the next time.
+
+**The website from the relay.** The relay Worker also serves `site/` (Workers static assets) from its own address. A
+page whose origin is a `workers.dev` relay (`GET /v1/info` answers `{perch: "relay"}`) puts that relay's broker first,
+so it can find the Mac even on a first visit where only `*.workers.dev` gets through. Passkeys belong to that address,
+so it is one of the Mac's sites (Setup, "Sites that can sign in"), and devices pair there once.
+
+**Media.** There are no receiver reports: the Mac drops video frames while more than about half a second of the
+target bitrate is waiting in its WebSocket (asking for a keyframe, since what follows can't be decoded), and feeds the
+share of dropped frames to the same bitrate controller as WebRTC's loss. The viewer decodes with WebCodecs
+(`VideoDecoder`, codec from the SPS; `AudioDecoder` for Opus when the browser has it) onto a canvas and an
+AudioContext, and hands the viewer an ordinary MediaStream from `canvas.captureStream()` and a
+`MediaStreamAudioDestinationNode`. A viewer that falls behind skips to the next keyframe (`{t:"keyframe"}`).
+
 ## WebRTC
 
 The Mac is the offerer. Its offer has:

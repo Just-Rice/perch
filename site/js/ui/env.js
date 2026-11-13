@@ -1,6 +1,6 @@
 // What kind of page this is: the real site, or a copy served from this computer for testing.
-// Test switches (?brokers=, ?test=1, ?demo=1) only work on localhost/127.0.0.1, so a link to the real site can never
-// point it at someone else's message server or turn on the demo.
+// Test switches (?brokers=, ?test=1, ?demo=1, ?transport=relay) only work on localhost/127.0.0.1, so a link to the real
+// site can never point it at someone else's message server or turn on the demo.
 import { BROKERS, ICE_SERVERS, RP_ID } from '../shared/proto.js';
 
 export function pageEnv(loc = globalThis.location) {
@@ -21,6 +21,9 @@ export function pageEnv(loc = globalThis.location) {
     brokers,
     // In tests the Mac and the browser are on the same computer; no public STUN server is needed (or wanted).
     iceServers: test ? [] : ICE_SERVERS,
+    // Tests: always use the Mac's Worker relay (when it has one), and accept a relay on this computer.
+    transport: test && q.get('transport') === 'relay' ? 'relay' : 'auto',
+    allowLocalRelay: test,
     // Passkeys belong to the real site's domain; a local copy can only use its own hostname.
     rpId: loc.hostname === RP_ID ? RP_ID : loc.hostname,
     params: q,

@@ -232,6 +232,15 @@ export class Store {
     this.save();
   }
 
+  // --- the optional Worker relay (the owner's own Cloudflare Worker; its secret lives with the other secrets) ---
+  get workerRelay() { return this.secrets.workerRelay ?? null; }
+  async setWorkerRelay(login) {
+    this.secrets.workerRelay = login ? { url: login.url, secret: login.secret } : null;
+    await this.saveSecrets();
+    this.config.workerRelay = { set: !!login, url: login?.url ?? null, setAt: login ? new Date().toISOString() : null };
+    this.save();
+  }
+
   // --- devices ---
   get devices() { return this.config.devices; }
   findDevice(id) { return this.config.devices.find(d => d.id === id) ?? null; }

@@ -30,6 +30,7 @@
       <li><a href="#backupCard">Backup sign-in</a></li>
       <li><a href="#guestCard">Guest link</a></li>
       <li><a href="#relayCard">School or office Wi-Fi</a></li>
+      <li><a href="#workerRelayCard">Relay without a card</a></li>
       <li><a href="#sitesCard">Sites</a></li>
       <li><a href="#settingsCard">Settings</a></li>
       <li><a href="#sessionCard">Current session</a></li>
@@ -342,6 +343,46 @@
     <p class="msg bad" id="relayError" role="alert" hidden></p>
     <div class="confirm-host" id="relayRemoveHost" hidden>
       <button type="button" class="btn danger-quiet" id="relayRemoveBtn">Remove the relay</button>
+    </div>
+  </section>
+
+  <!-- Worker relay for strict networks: no payment details, no data allowance -->
+  <section class="card" id="workerRelayCard" aria-labelledby="hWorkerRelay">
+    <h2 id="hWorkerRelay">Relay without a card <span class="optional">optional</span></h2>
+    <p class="lead">Another way through strict Wi-Fi: a small relay you run in your own free Cloudflare account, as a
+      Worker. It needs no payment details and has no monthly data allowance to use up. It only passes along
+      encrypted data: it can't see your screen. If both relays are set up, the one above is tried first.</p>
+    <p class="small"><b>Status:</b> <span id="workerRelayStatus">Not set up</span></p>
+    <details id="workerRelayHow">
+      <summary>How to set up the relay (about 5 minutes, needs Node.js)</summary>
+      <ol class="small">
+        <li>Sign up or sign in at <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com</a> (a free account is enough).</li>
+        <li>On any computer with <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>, open Terminal and run:
+          <pre class="code">git clone https://github.com/Just-Rice/perch
+cd perch/relay
+npx wrangler login
+npx wrangler deploy</pre></li>
+        <li>Wrangler prints the relay's address, such as <i>https://perch-relay.your-name.workers.dev</i>. Paste it below.</li>
+      </ol>
+      <p class="small muted">The first Mac to save a relay becomes its owner; no other Mac can use it. For a second Mac,
+        deploy another copy under a different name (change <i>name</i> in <i>relay/wrangler.toml</i>).</p>
+      <p class="small muted">If the Perch website or the public message services are blocked where you are, the relay
+        stands in for both: add its address under <b>Sites that can sign in</b>, pair your device on that site once,
+        and sign in at the relay's address from then on.</p>
+    </details>
+    <form id="workerRelayForm" novalidate>
+      <label for="workerRelayUrl">Relay address</label>
+      <input id="workerRelayUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off"
+        placeholder="https://perch-relay.your-name.workers.dev">
+      <div class="actions">
+        <button type="submit" class="btn primary" id="workerRelaySaveBtn">Check and save</button>
+      </div>
+      <p class="small muted">Perch keeps the relay's secret in this Mac's Keychain.</p>
+    </form>
+    <p class="msg ok" id="workerRelayOk" role="status" hidden></p>
+    <p class="msg bad" id="workerRelayError" role="alert" hidden></p>
+    <div class="confirm-host" id="workerRelayRemoveHost" hidden>
+      <button type="button" class="btn danger-quiet" id="workerRelayRemoveBtn">Remove the relay</button>
     </div>
   </section>
 

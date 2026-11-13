@@ -369,3 +369,7 @@ main > section { scroll-margin-top: 136px; }
 #relayOwner { margin: 6px 0 4px; }
 #relayOwner summary { cursor: pointer; font-weight: 600; font-size: .92rem; }
 .own-relay-head { margin: 22px 0 4px; padding-top: 16px; border-top: 1px solid var(--line); }
+
+/* Commands to copy (the Worker relay's set-up steps). */
+pre.code { font-family: var(--mono); font-size: .85rem; line-height: 1.5; background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: 8px; padding: .6rem .8rem; margin: .4rem 0; overflow-x: auto; white-space: pre; user-select: all; }

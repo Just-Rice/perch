@@ -16,6 +16,7 @@ import { openInBlankTab } from '../blank.js';
 import { Viewer } from '../viewer/viewer.js';
 import { toB64url, fromB64url, randomBytes } from '../shared/bytes.js';
 import { normalizeMacName, MAC_NAME_RE } from '../shared/rendezvous.js';
+import { relayBase, relayBroker } from '../shared/wsrelay.js';
 
 const $ = id => document.getElementById(id);
 
@@ -35,6 +36,8 @@ export function start() {
     log: env.test || env.demo ? (...a) => console.debug('[perch]', ...a) : () => {},
   };
   app.prefs = new Prefs({ apple: app.apple });
+  // Asked once, straight away: is this copy of the site served by a Mac owner's own relay (relay/)?
+  app.ownBroker = ownRelayBroker(env);
   // Tests and the demo look inside through this; the real site never sets it.
   if (env.test || env.demo) window.__perch = app;
 
@@ -59,6 +62,23 @@ export function start() {
   if (guest?.error) return showMessage(app, failureMessage('bad-link'), null);
   if (guest) return runSession(app, { route: 'guest', guest });
   showHome(app);
+}
+
+// A copy of this site served by the owner's own relay Worker (relay/ deploys it alongside the relay): that relay is
+// then also a rendezvous broker, and it is reachable wherever this page itself loaded, even on networks that block
+// the public brokers. Resolves to its broker address, or null (the official site, or anything else).
+async function ownRelayBroker(env) {
+  try {
+    const origin = location.origin;
+    // Only a workers.dev address can be a relay (tests on this computer say so with ?relaysite=1).
+    const local = env.allowLocalRelay && env.params.get('relaysite') === '1';
+    if (!relayBase(origin, { allowLocal: local })) return null;
+    const r = await fetch(new URL('/v1/info', origin), { cache: 'no-store', signal: AbortSignal.timeout(2500) });
+    const info = r.ok ? await r.json() : null;
+    return info?.perch === 'relay' ? relayBroker(relayBase(origin, { allowLocal: local })) : null;
+  } catch {
+    return null;
+  }
 }
 
 // --- home ---
@@ -220,11 +240,19 @@ async function runSession(app, target) {
   // The Mac's certificate pin, from its passkey, a remembered Mac or the pairing link: only that Mac is trusted.
   const pin = route === 'pair' ? pair.pin ?? null : route === 'guest' ? target.guest.pin ?? null
     : route === 'passkey' && mac?.pin ? fromB64url(mac.pin) : null;
+  // Where to look for the Mac: this page's own relay (when the owner's relay serves this copy of the site), the
+  // relay the Mac named last time, then the public brokers.
+  const run = app.run = {};
+  const own = await app.ownBroker;
+  if (app.run !== run) return; // cancelled, or another session started, while we waited
+  const known = mac?.relay && relayBase(mac.relay, { allowLocal: env.allowLocalRelay }) === mac.relay ? relayBroker(mac.relay) : null;
+  const brokers = [...new Set([own, known, ...env.brokers].filter(Boolean))];
   const conn = new Connection({
     route, ...ids, macName: target.macName, pairId: pair?.pairId, label: app.label, pin,
     guestId: target.guest?.guestId, guestSecret: target.guest?.guestSecret,
     certificate: target.quick?.cert ?? null,
-    brokers: env.brokers, iceServers: env.iceServers, log: app.log, onStage: s => ui.stage(s),
+    brokers, iceServers: env.iceServers, log: app.log, onStage: s => ui.stage(s),
+    transport: target.transport ?? env.transport, allowLocalRelay: env.allowLocalRelay,
   });
   app.conn = conn;
   // Tests on this computer can't answer a microphone prompt, so they may ask for a generated tone instead.
@@ -247,7 +275,11 @@ async function runSession(app, target) {
     const { hi, ready } = await signIn(conn, ctx, ui);
     if (app.conn !== conn) return;
     const name = ready.name || hi.name || shownName;
-    if (saved) saved = app.macs.update(saved.hostId, { name, lastUsed: Date.now() }) || saved;
+    // The Mac names its Worker relay (if it has one) once signed in: remembered, so next time the Mac can be found
+    // through it even where the public brokers are blocked. A Mac without one any more clears it.
+    const relay = typeof ready.relay === 'string' && relayBase(ready.relay, { allowLocal: env.allowLocalRelay }) === ready.relay
+      ? ready.relay : undefined;
+    if (saved) saved = app.macs.update(saved.hostId, { name, lastUsed: Date.now(), relay }) || saved;
     // What "Reconnect" does later: a paired or known Mac signs in with its passkey; backup asks for the password again.
     const again = route === 'guest' ? { route: 'guest', guest: target.guest }
       : saved ? { route: 'passkey', mac: saved } : { route: 'backup-form', macName: target.macName };
@@ -259,6 +291,12 @@ async function runSession(app, target) {
     if (!(e instanceof PerchError)) {
       app.log(e);
       return showFailure(app, new PerchError('unexpected', { message: e.message }), target);
+    }
+    // The direct connection couldn't get through, but the Mac offered its Worker relay: try once more over that.
+    // (One-tap sign-in is tied to the direct connection, so the passkey is asked for again over the relay.)
+    if (e.kind === 'webrtc' && conn.relayOffer && conn.via !== 'relay' && target.transport !== 'relay') {
+      app.log('the direct connection failed: trying the Mac’s Worker relay');
+      return runSession(app, { ...target, transport: 'relay', quick: null });
     }
     if (e.kind === 'cancelled') return showHome(app);
     showFailure(app, e, target);
@@ -273,6 +311,7 @@ function cancel(app) {
 }
 
 function closeCurrent(app) {
+  app.run = null;
   if (app.viewer) { app.viewer.destroy(); app.viewer = null; }
   if (app.conn) { const c = app.conn; app.conn = null; c.close({ bye: true }); }
   $('viewer').hidden = true;

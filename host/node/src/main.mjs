@@ -132,7 +132,7 @@ async function main() {
   await controller.start();
   pushStatus();
   rendezvous.start(15000).then(
-    () => log.info(`rendezvous: ${rendezvous.connectedCount} of ${config.brokers.length} brokers connected`),
+    () => log.info(`rendezvous: ${rendezvous.connectedCount} of ${rendezvous.brokers.length} brokers connected`),
     e => log.warn(`${e.message}; still trying in the background`));
 
   // --- Setup page (built separately; optional so the host still works without it) ---

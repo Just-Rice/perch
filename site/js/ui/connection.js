@@ -8,7 +8,16 @@
 //
 // After that, control messages are handed out with next(types): the sign-in steps in ui/signin.js read them one at a
 // time, and once signed in everything goes to onmessage for the viewer.
+//
+// When the Mac's owner set up a Worker relay (docs/PROTOCOL.md, "Worker relay") the offer also carries a relay offer.
+// On a network that blocks WebRTC (no public address found for this browser), or when asked to (`transport: 'relay'`),
+// step 2 answers that instead: the same channels, then run over an encrypted WebSocket through the owner's Worker,
+// and the binding is made over the relay offer and answer texts. Video and sound arrive as whole frames and are
+// turned into a MediaStream (ui/relaymedia.js), so the viewer can't tell the difference.
 import { cleanIceServers, hasRelay } from '../shared/relay.js';
+import { readOffer, makeAnswer, newEcdh, sessionKeys, roomUrl, Channel as RelayCipher, T as RELAY_T, readVideo, readAudio,
+  fromUtf8 } from '../shared/wsrelay.js';
+import { RelayMedia, relayMediaSupported } from './relaymedia.js';
 import { offerMatchesPin } from './quick.js';
 import {
   Rendezvous, hostTopic, nameTopic, guestTopic, replyTopic, hostEnvelopeKey, nameEnvelopeKey, guestEnvelopeKey,
@@ -39,15 +48,54 @@ export class PerchError extends Error {
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// An answer with no public (server-reflexive) or relay candidate, though STUN servers were asked: UDP is blocked, so a
+// direct connection can't work from here.
+export function looksBlocked(answerSdp, iceServers) {
+  if (!iceServers?.length || typeof answerSdp !== 'string') return false;
+  return !/ typ (srflx|relay)\b/.test(answerSdp);
+}
+
+const RELAY_PING_MS = 25000;
+const RELAY_PEER_TIMEOUT_MS = 20000;
+
+// What the viewer code expects of an RTCDataChannel (readyState, bufferedAmount, send, close, onmessage, onclose),
+// carried over the Worker relay.
+class RelayDataChannel {
+  constructor(conn, label, type) {
+    this.conn = conn;
+    this.label = label;
+    this.type = type;
+    this.readyState = 'connecting';
+    this.onmessage = null;
+    this.onclose = null;
+  }
+  get bufferedAmount() { return (this.conn.relaySocket?.bufferedAmount ?? 0) + (this.conn.relayCipher?.queued ?? 0); }
+  send(text) {
+    if (this.readyState !== 'open') throw new Error('channel not open');
+    this.conn.relayCipher.send(this.type, text);
+  }
+  close() {
+    if (this.readyState === 'closed') return;
+    this.readyState = 'closed';
+  }
+}
+
 export class Connection {
   // pin: the Mac's certificate pin (16 bytes), when known; certificate: an RTCCertificate to use (one-tap sign-in).
+  // transport: 'auto' (WebRTC, or the Worker relay when this network blocks WebRTC) or 'relay' (always the relay, when
+  // the Mac has one). allowLocalRelay: accept a loopback relay address (tests on this computer only).
   constructor({ route, hostId, sigKey, macName, pairId, guestId = null, guestSecret = null, label, brokers, iceServers, pin = null,
-    certificate = null, log = () => {}, onStage = () => {}, PeerConnection = globalThis.RTCPeerConnection }) {
+    certificate = null, log = () => {}, onStage = () => {}, PeerConnection = globalThis.RTCPeerConnection,
+    transport = 'auto', allowLocalRelay = false, WebSocketImpl = globalThis.WebSocket }) {
     Object.assign(this, { route, hostId, sigKey, macName, pairId, guestId, guestSecret, label, brokers, iceServers, pin, certificate,
-      log, onStage, PeerConnection });
+      log, onStage, PeerConnection, transport, allowLocalRelay, WebSocketImpl });
     this.sid = toB64url(randomBytes(16));
     this.rdv = null;
     this.pc = null;
+    this.via = 'webrtc';       // or 'relay' once the Worker relay was chosen
+    this.relayOffer = null;    // the Mac's Worker relay offer text, when it has a relay
+    this.relaySocket = null;
+    this.media = null;         // RelayMedia, over the relay
     this.channels = {};
     this.stream = null;
     this.offerSdp = null;
@@ -121,8 +169,21 @@ export class Connection {
     this.offerSdp = first.sdp;
     // The Mac's own relay (if its owner set one up), for networks that block direct connections.
     this.relayServers = cleanIceServers(first.iceServers);
-    await this._answer();
-    await this.rdv.send(topic, key, { t: 'answer', sid: this.sid, sdp: this.answerSdp });
+    this.relayOffer = typeof first.ws === 'string' && relayMediaSupported() ? first.ws : null;
+    if (this.relayOffer && this.transport === 'relay') {
+      await this._answerRelay();
+    } else {
+      await this._answer();
+      if (this.relayOffer && this.transport === 'auto' && looksBlocked(this.answerSdp, this.iceServers)) {
+        // Not even a STUN server answered: this network blocks what WebRTC needs. Don't wait for it to fail.
+        this.log('this network seems to block direct connections: using the Mac’s Worker relay');
+        this._dropPeerConnection();
+        await this._answerRelay();
+      }
+    }
+    await this.rdv.send(topic, key, this.via === 'relay' ? { t: 'answer', sid: this.sid, ws: this.answerSdp }
+      : { t: 'answer', sid: this.sid, sdp: this.answerSdp });
+    if (this.via === 'relay') this._openRelaySocket();
 
     this.onStage('checking');
     const hi = await this.next(['hi'], HI_TIMEOUT_MS, 'webrtc');
@@ -278,6 +339,92 @@ export class Connection {
     this.answerSdp = pc.localDescription.sdp;
   }
 
+  // --- the Worker relay ---
+
+  // Answers the Mac's relay offer: checks it (with a pin, it must be signed by the pinned Mac), makes this side's key
+  // and the session keys, and readies the channels. The answer text becomes answerSdp: the binding is made over the
+  // relay texts, exactly as sent and received.
+  async _answerRelay() {
+    let offer, keys;
+    try {
+      offer = await readOffer(this.relayOffer, { sid: this.sid, pin: this.pin, allowLocal: this.allowLocalRelay });
+      const { privateKey, pub } = await newEcdh();
+      this.answerSdp = makeAnswer({ sid: this.sid, eph: pub });
+      keys = await sessionKeys(privateKey, offer.eph, this.relayOffer, this.answerSdp, 'viewer');
+    } catch (e) {
+      throw this._fail(new PerchError('webrtc', { message: `relay: ${e.message}` }));
+    }
+    this._check();
+    this.via = 'relay';
+    this.offerSdp = this.relayOffer;
+    this.relayUrl = roomUrl(offer.url, offer.room, 'viewer');
+    // One-tap sign-in is tied to a WebRTC certificate, and the relay has no microphone line: neither is offered here.
+    this.caps = (this.caps ?? []).filter(c => c !== 'quick' && c !== 'mic');
+    this.media = new RelayMedia({ log: this.log, onKeyframeNeeded: () => { if (this.live) this.send({ t: 'keyframe' }); } });
+    this.stream = this.media.stream;
+    const byType = {};
+    for (const [label, type] of [[CONTROL_CHANNEL, RELAY_T.CONTROL], [INPUT_CHANNEL, RELAY_T.INPUT], [POINTER_CHANNEL, RELAY_T.POINTER]]) {
+      const ch = new RelayDataChannel(this, label, type);
+      byType[type] = ch;
+      this._adoptChannel(ch);
+    }
+    this.relayCipher = new RelayCipher({
+      keys,
+      out: bytes => { try { this.relaySocket?.send(bytes); } catch {} },
+      deliver: (type, payload) => {
+        if (type === RELAY_T.VIDEO) { const v = readVideo(payload); if (v) this.media.video(v); return; }
+        if (type === RELAY_T.AUDIO) { this.media.audioPackets(readAudio(payload)); return; }
+        const ch = byType[type];
+        if (ch?.readyState === 'open') ch.onmessage?.({ data: fromUtf8(payload) });
+      },
+      onError: e => { this.log(`relay: ${e.message}`); this._shutdown(new PerchError(this.live ? 'lost' : 'webrtc')); },
+    });
+  }
+
+  _openRelaySocket() {
+    let ws;
+    try {
+      ws = this.relaySocket = new this.WebSocketImpl(this.relayUrl);
+    } catch (e) {
+      throw this._fail(new PerchError('webrtc', { message: `relay: ${e.message}` }));
+    }
+    ws.binaryType = 'arraybuffer';
+    this._relayGiveUp = setTimeout(() => {
+      if (!this.relayPeer) this._shutdown(new PerchError('webrtc', { message: 'relay: the Mac never arrived' }));
+    }, RELAY_PEER_TIMEOUT_MS);
+    ws.onmessage = ev => {
+      if (typeof ev.data === 'string') {
+        if (ev.data === 'peer' && !this.relayPeer) {
+          this.relayPeer = true;
+          clearTimeout(this._relayGiveUp);
+          for (const ch of Object.values(this.channels)) ch.readyState = 'open';
+          this._relayPing = setInterval(() => { try { ws.send('ping'); } catch {} }, RELAY_PING_MS);
+          this.onlink('connected');
+        }
+        return;
+      }
+      this.relayCipher.open(new Uint8Array(ev.data));
+    };
+    ws.onclose = () => {
+      if (this.closed) return;
+      for (const ch of Object.values(this.channels)) ch.readyState = 'closed';
+      this._shutdown(new PerchError(this.live ? 'lost' : 'webrtc'));
+    };
+    ws.onerror = () => {}; // onclose follows
+  }
+
+  // The WebRTC answer was made but won't be used (the relay was chosen instead).
+  _dropPeerConnection() {
+    const pc = this.pc;
+    this.pc = null;
+    if (!pc) return;
+    pc.ontrack = pc.ondatachannel = pc.onconnectionstatechange = null;
+    try { pc.close(); } catch {}
+    this.stream = null;
+    this.audioLine = null;
+    this.channels = {};
+  }
+
   _adoptChannel(ch) {
     this.channels[ch.label] = ch;
     if (ch.label !== CONTROL_CHANNEL) return;
@@ -361,6 +508,11 @@ export class Connection {
     for (const ch of Object.values(this.channels)) { ch.onmessage = ch.onclose = null; try { ch.close(); } catch {} }
     try { this.stopMic(); } catch {}
     try { this.pc?.close(); } catch {}
+    clearTimeout(this._relayGiveUp);
+    clearInterval(this._relayPing);
+    if (this.relaySocket) { this.relaySocket.onclose = this.relaySocket.onmessage = null; try { this.relaySocket.close(); } catch {} }
+    this.relaySocket = null;
+    try { this.media?.close(); } catch {}
     if (err.kind !== 'cancelled') {
       try { this.onclose(err, byeMsg); } catch (e) { this.log(e); }
     }

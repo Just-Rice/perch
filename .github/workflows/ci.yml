@@ -42,6 +42,12 @@ jobs:
           run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/full.test.mjs; }
           run || { echo "::warning::end-to-end tests failed once; retrying"; run; }
 
+      - name: Worker relay end to end (the real relay Worker, under wrangler dev)
+        run: |
+          (cd relay && npm ci)
+          run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/relay.test.mjs; }
+          run || { echo "::warning::relay end-to-end tests failed once; retrying"; run; }
+
       - name: Website, host and the real app end to end
         run: |
           run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/app.test.mjs; }

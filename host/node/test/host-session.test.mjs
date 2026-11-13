@@ -704,6 +704,20 @@ test('no input for the idle time ends the session', async (t) => {
   assert.ok((await app.call('state')).activity.some(a => /no input for a while/.test(a.text)));
 });
 
+test('"Never" keeps a session however long there is no input', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  await assert.rejects(app.call('updateSettings', { idleMinutes: -1 }), /from 1 to 1440, or never/);
+  await app.call('updateSettings', { idleMinutes: 0 });
+  assert.equal((await app.call('state')).settings.idleMinutes, 0);
+  const { v, end } = await passkey(t, ctx);
+  assert.equal(end.t, 'ready');
+  await sleep(3000); // longer than the ~2 s test idle time below, with no input at all
+  assert.ok(!v.all.some(m => m.t === 'bye'), 'still connected with "Never"');
+  assert.ok((await app.call('state')).session, 'the session is still there');
+  v.send({ t: 'bye' });
+});
+
 test('pausing ends the session and refuses viewers until resumed; the menu works the same', async (t) => {
   const ctx = await pairedHost(t);
   const { app } = ctx;

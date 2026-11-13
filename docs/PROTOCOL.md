@@ -345,7 +345,7 @@ change),
 (`signed-in-elsewhere | paused | quit | idle | removed | disconnected`).
 
 Only one viewer is signed in at a time: a newly signed-in viewer takes over and the old one gets
-`bye signed-in-elsewhere`. A session with no input for `idleMinutes` (default 60) ends with `bye idle`.
+`bye signed-in-elsewhere`. A session with no input for `idleMinutes` (default 60; 0 = never) ends with `bye idle`.
 
 ## Input and pointer channels
 

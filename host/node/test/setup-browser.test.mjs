@@ -814,7 +814,6 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
   const command = (c, fields = {}) => until(
     () => host.commands.some(x => x.c === c && Object.entries(fields).every(([k, v]) => x[k] === v)),
     `the app was sent ${c} ${JSON.stringify(fields)}`);
-  let idleRefused = false;
 
   await t.test('loads with the host\'s name, state and permissions', async () => {
     await page.navigate(host.url);
@@ -916,17 +915,10 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     await until(async () => (await state()).settings.quality === 'sharp', 'quality saved');
     await evaluate(page, `(() => { const s = document.getElementById('setIdle'); s.value = '30'; s.dispatchEvent(new Event('change')); })()`);
     await until(async () => (await state()).settings.idleMinutes === 30, 'idle 30 saved');
-    // "Never": saved if the host supports it; otherwise the host's reason is shown and the choice goes back.
+    // "Never" is saved like any other choice.
     await evaluate(page, `(() => { const s = document.getElementById('setIdle'); s.value = '0'; s.dispatchEvent(new Event('change')); })()`);
-    await waitFor(page, `document.getElementById('settingsSaved').textContent === 'Saved.' || !document.getElementById('settingsError').hidden`, 'never: saved or refused');
-    if (!(await visible(page, '#settingsError'))) {
-      assert.equal((await state()).settings.idleMinutes, 0);
-    } else {
-      idleRefused = true;
-      t.diagnostic(`the host refused idleMinutes 0 ("never"): ${await text(page, '#settingsError')}`);
-      assert.equal(await value(page, '#setIdle'), '30', 'the choice went back');
-      assert.equal((await state()).settings.idleMinutes, 30);
-    }
+    await until(async () => (await state()).settings.idleMinutes === 0, 'idle never saved');
+    assert.equal(await visible(page, '#settingsError'), false, 'no error for "Never"');
   });
 
   await t.test('activity and the header follow the host', async () => {
@@ -978,8 +970,8 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
 
   await t.test('no console errors, no security-policy violations, no pop-up dialogs', async () => {
     // The deliberate refusals: three addresses the sites section must not accept (and "Never" idle, if refused).
-    const refusals = await checkCleanConsole(page, tab, host.base, ['/api/siteAdd', '/api/relayOwnerSet', ...(idleRefused ? ['/api/updateSettings'] : [])]);
-    assert.deepEqual(refusals.sort(), ['/api/siteAdd', '/api/siteAdd', '/api/siteAdd', '/api/relayOwnerSet', ...(idleRefused ? ['/api/updateSettings'] : [])].sort());
+    const refusals = await checkCleanConsole(page, tab, host.base, ['/api/siteAdd', '/api/relayOwnerSet']);
+    assert.deepEqual(refusals.sort(), ['/api/siteAdd', '/api/siteAdd', '/api/siteAdd', '/api/relayOwnerSet'].sort());
     assert.doesNotMatch(host.log, /uncaught exception|unhandled rejection|ERROR/);
   });
 });

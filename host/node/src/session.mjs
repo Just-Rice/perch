@@ -409,12 +409,16 @@ export class Session {
   }
 
   _watchIdle() {
+    // idleMinutes 0 is "Never": the session stays however long nothing is typed or clicked. The setting can change
+    // during a session, so the limit is read at every check (and a session that started on "Never" checks twice a
+    // minute, in case it's changed).
     const idleMs = () => this.store.settings.idleMinutes * 60000;
     const check = () => {
       if (this.state !== 'ready') return;
-      if (this.now() - this.lastInputAt >= idleMs()) this.end('idle');
+      const limit = idleMs();
+      if (limit > 0 && this.now() - this.lastInputAt >= limit) this.end('idle');
     };
-    this._timer(check, Math.max(50, Math.min(30000, idleMs() / 4)), true);
+    this._timer(check, Math.max(50, Math.min(30000, (idleMs() || 120000) / 4)), true);
   }
 
   // --- during a session ---

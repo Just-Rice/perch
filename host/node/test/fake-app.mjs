@@ -209,12 +209,17 @@ export class FakeApp extends EventEmitter {
         if (cmd.on && cmd.device === 'gone') this.event({ e: 'mic', on: false, ok: false, error: 'That sound output is not connected.' });
         else this.event({ e: 'mic', on: !!cmd.on, ok: true });
         break;
-      case 'clipboard-get':
-        this.event({ e: 'clipboard', ok: true, text: this.clipboard ?? '' });
+      case 'clipboard-get': {
+        const ev = { e: 'clipboard', ok: true, text: this.clipboard ?? '' };
+        if (cmd.images && this.clipboardImage) Object.assign(ev, { image: this.clipboardImage, mime: 'image/png' });
+        if (cmd.auto) ev.auto = true;
+        this.event(ev);
         break;
+      }
       case 'clipboard-set':
-        if (typeof cmd.text === 'string' && cmd.text.length <= 30000) {
-          this.clipboard = cmd.text;
+        if ((typeof cmd.text === 'string' && cmd.text.length <= 30000) || (cmd.text === undefined && typeof cmd.image === 'string')) {
+          this.clipboard = cmd.text ?? '';
+          this.clipboardImage = cmd.image ?? null;
           if (cmd.paste) this.pasted = (this.pasted ?? 0) + 1;
           this.event({ e: 'clipboard-set', ok: true });
         } else this.event({ e: 'clipboard-set', ok: false });

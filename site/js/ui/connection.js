@@ -227,6 +227,8 @@ export class Connection {
   }
 
   send(msg) { this._sendOn(CONTROL_CHANNEL, msg); }
+  // Bytes waiting to go out on the control channel (big clipboard pictures wait for it to drain).
+  controlBacklog() { return this.channels[CONTROL_CHANNEL]?.bufferedAmount ?? 0; }
   sendInput(msg) { this._sendOn(INPUT_CHANNEL, msg); }
 
   // Pointer moves go on the unordered channel; if it is backed up, newer moves will replace this one anyway.

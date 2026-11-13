@@ -100,7 +100,8 @@ export function startDemo(app) {
   let shown = null;
   const session = {
     stream,
-    caps: ['window', 'textfocus', 'clipboard'],
+    caps: ['window', 'textfocus', 'clipboard', 'clipimg'],
+    controlBacklog: () => 0,
     clipboard: 'Text copied on the demo Mac',
     onmessage: () => {},
     onstream: () => {},
@@ -115,9 +116,13 @@ export function startDemo(app) {
         setTimeout(() => this.onmessage({ t: 'status', width: display.width, height: display.height, window: null }), 50);
       }
       if (m.t === 'clip-get') setTimeout(() => this.onmessage({ t: 'clip', ok: true, text: this.clipboard }), 30);
+      if (m.t === 'clip-part') (this.clipParts ??= []).push(m);
+      if (m.t === 'clip-sync') this.clipSync = m.on;
       if (m.t === 'clip-set') {
-        const ok = typeof m.text === 'string' && m.text.length <= 30000;
-        if (ok) this.clipboard = m.text;
+        const img = m.img && (this.clipParts ?? []).filter(p => p.id === m.img.id);
+        const ok = (typeof m.text === 'string' && m.text.length <= 30000) || (m.text === undefined && img?.length > 0);
+        if (ok) { this.clipboard = m.text ?? ''; this.clipboardImage = img ? img.map(p => p.data).join('') : null; }
+        this.clipParts = [];
         setTimeout(() => this.onmessage({ t: 'clip-set', ok }), 30);
       }
       if (m.t === 'windows') setTimeout(() => this.onmessage({ t: 'windows', list: WINDOWS }), 20);

@@ -175,6 +175,84 @@ test('clipboard: paste this device’s text on the Mac, copy the Mac’s text he
   await page.close();
 });
 
+test('clipboard: ⌘V pastes this device’s picture or text on the Mac, and what’s copied on the Mac comes here', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  await page.click(null, { x: 640, y: 400 });
+  assert.equal(await page.eval(`document.getElementById('clipSyncWrap').hidden`), false);
+  await page.waitFor(`window.__perch.demoSession.clipSync === true`, { what: 'the viewer asks for the Mac’s copies' });
+  await page.eval(`(() => {
+    const c = window.__clip = { written: [] };
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      write: async items => { for (const i of items) c.written.push(i.types.slice().sort()); },
+      writeText: async t => c.written.push(['text:' + t]),
+    } });
+    // ⌘V as the browser sees it, then (optionally) the browser's paste event with this device's clipboard.
+    window.__pasteKey = (fill) => {
+      const kd = new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', metaKey: true, bubbles: true, cancelable: true });
+      document.body.dispatchEvent(kd);
+      if (fill) {
+        const dt = new DataTransfer();
+        fill(dt);
+        document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      }
+      document.body.dispatchEvent(new KeyboardEvent('keyup', { key: 'v', code: 'KeyV', metaKey: true, bubbles: true, cancelable: true }));
+      return kd.defaultPrevented;
+    };
+  })()`);
+  const keys = async from => (await messages(page, from)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}${m.m}`);
+
+  // A picture (bigger than one piece) on this device's clipboard.
+  let n = await count(page);
+  const prevented = await page.eval(`window.__pasteKey(dt => {
+    const bytes = new Uint8Array(100 * 1024).map((_, i) => i % 251);
+    dt.items.add(new File([bytes], 'shot.png', { type: 'image/png' }));
+  })`);
+  assert.equal(prevented, false, 'the browser’s paste is let through');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 4`, { what: '⌘V on the Mac' });
+  const sent = await messages(page, n);
+  const parts = sent.filter(m => m.t === 'clip-part');
+  assert.equal(parts.length, 3);
+  assert.deepEqual(sent.filter(m => m.t === 'clip-set').map(m => [m.paste, m.text, m.img?.mime]), [[false, undefined, 'image/png']]);
+  assert.equal(await page.eval(`atob(window.__perch.demoSession.clipboardImage).length`), 100 * 1024);
+  assert.deepEqual(await keys(n), ['MetaLeft↓8', 'KeyV↓8', 'KeyV↑8', 'MetaLeft↑0'], 'pasted after the picture arrived, V never sent early');
+  await page.waitFor(`/Pasted on your Mac/.test(document.getElementById('banners').textContent)`, { what: '"Pasted on your Mac."' });
+
+  // Text.
+  n = await count(page);
+  await page.eval(`window.__pasteKey(dt => dt.setData('text/plain', 'from the Chromebook'))`);
+  await page.waitFor(`window.__perch.demoSession.clipboard === 'from the Chromebook'`, { what: 'the text on the Mac' });
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 4`, { what: '⌘V' });
+
+  // Nothing here, or no paste event at all: the Mac pastes its own clipboard.
+  for (const fill of ['dt => {}', 'null']) {
+    n = await count(page);
+    await page.eval(`window.__pasteKey(${fill})`);
+    await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 4`, { what: '⌘V' });
+    assert.deepEqual((await messages(page, n)).filter(m => m.t.startsWith('clip')), []);
+    assert.deepEqual(await keys(n), ['MetaLeft↓8', 'KeyV↓8', 'KeyV↑8', 'MetaLeft↑0']);
+  }
+
+  // Copied on the Mac (a picture and its text): onto this device's clipboard by itself.
+  await page.eval(`(() => {
+    const s = window.__perch.demoSession;
+    s.onmessage({ t: 'clip-part', id: 'm1', i: 0, n: 1, data: btoa('not really a png') });
+    s.onmessage({ t: 'clip', ok: true, text: 'caption', img: { id: 'm1', mime: 'image/png' }, auto: true });
+  })()`);
+  await page.waitFor(`window.__clip.written.length === 1`, { what: 'the Mac’s copy here' });
+  assert.deepEqual(await page.eval(`window.__clip.written[0]`), ['image/png', 'text/plain']);
+  await page.waitFor(`/Picture copied from your Mac/.test(document.getElementById('banners').textContent)`, { what: 'the note' });
+
+  // Turned off: the Mac is told.
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.click('#optClipSync');
+  await page.waitFor(`window.__perch.demoSession.clipSync === false`, { what: 'sharing off' });
+  await page.eval(`localStorage.clear()`);
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
 test('desktop: mouse moves, clicks, double clicks, right clicks and scrolling', async () => {
   const page = await openPage(stack, demoUrl());
   await ready(page);

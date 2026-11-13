@@ -18,6 +18,13 @@ const ANSWER_TIMEOUT_MS = 15000; // offer sent, no answer yet
 export const MAX_CONTROL_BYTES = 64 * 1024;
 export const MAX_INPUT_BYTES = 4096;
 export const MAX_CLIP_CHARS = 30000; // clipboard text, either way (the Mac app has the same limit)
+// Clipboard images go in pieces of CLIP_PART_CHARS base64 characters, each in its own control message, followed by the
+// clip-set or clip that names them. At most MAX_CLIP_IMAGE bytes (the Mac app has the same limit).
+export const MAX_CLIP_IMAGE = 20 * 1024 * 1024;
+export const CLIP_PART_CHARS = 48 * 1024;
+const MAX_CLIP_B64 = Math.ceil(MAX_CLIP_IMAGE / 3) * 4;
+const CLIP_PART_RATE = { rate: 400, burst: 600 }; // pieces of an image only; everything else has CONTROL_RATE
+const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 export const STATUS_EVERY_MS = 2000;
 export const MAX_CODE_TRIES = 3;
 export const BYE_REASONS = ['signed-in-elsewhere', 'paused', 'quit', 'idle', 'removed', 'disconnected'];
@@ -50,6 +57,7 @@ export class Session {
     this.endReason = null;
     this.chain = Promise.resolve();
     this.controlRate = new RateLimiter(CONTROL_RATE);
+    this.clipPartRate = new RateLimiter(CLIP_PART_RATE);
     this.inputRate = new RateLimiter(INPUT_RATE);
     this.pointerRate = new RateLimiter(POINTER_RATE);
     this.micRate = new RateLimiter({ rate: 120, burst: 120 });
@@ -165,7 +173,9 @@ export class Session {
   _onControl(data) {
     if (this.state === 'ended') return;
     if (typeof data !== 'string' || data.length > MAX_CONTROL_BYTES) return this._protocol('control message too big or not text');
-    if (!this.controlRate.take()) return;
+    // Pieces of a clipboard image come many at once; they have their own allowance, for a signed-in viewer only.
+    const part = this.state === 'ready' && data.startsWith('{"t":"clip-part"');
+    if (!(part ? this.clipPartRate : this.controlRate).take()) return;
     let msg;
     try { msg = JSON.parse(data); } catch { return this._protocol('control message is not JSON'); }
     if (!msg || typeof msg !== 'object' || typeof msg.t !== 'string') return this._protocol('control message has no type');
@@ -473,13 +483,31 @@ export class Session {
         const now = this.now();
         if (now - (this.clipAt ?? -Infinity) < 300) return;
         this.clipAt = now;
-        this.hub.clipGet(this);
+        this.hub.clipGet(this, msg.images === true);
         return;
       }
-      case 'clip-set':
-        // Text from the viewer onto the Mac's clipboard, and pasted there if asked. Answered with {t:'clip-set', ok}.
-        if (typeof msg.text !== 'string' || msg.text.length > MAX_CLIP_CHARS) return this._send({ t: 'clip-set', ok: false });
-        this.hub.clipSet(this, msg.text, msg.paste === true);
+      case 'clip-part':
+        return this._clipPart(msg);
+      case 'clip-set': {
+        // Text and/or an image (sent before in clip-part pieces) from the viewer onto the Mac's clipboard, and pasted
+        // there if asked. Answered with {t:'clip-set', ok}.
+        const text = msg.text === undefined ? undefined : msg.text;
+        let image;
+        if (msg.img !== undefined) {
+          const c = this.clipIn;
+          this.clipIn = null;
+          if (!c || !msg.img || msg.img.id !== c.id || c.got !== c.n) return this._send({ t: 'clip-set', ok: false });
+          image = c.parts.join('');
+        }
+        if ((text !== undefined && (typeof text !== 'string' || text.length > MAX_CLIP_CHARS)) || (text === undefined && !image)) {
+          return this._send({ t: 'clip-set', ok: false });
+        }
+        this.hub.clipSet(this, text, msg.paste === true, image);
+        return;
+      }
+      case 'clip-sync':
+        // The viewer wants whatever is copied on the Mac from now on, as {t:'clip', auto: true, ...}.
+        this.clipSync = msg.on === true;
         return;
       case 'mic':
         // The viewer turned their microphone on or off: the Mac plays what they say.
@@ -538,8 +566,33 @@ export class Session {
   }
 
   sendWindows(list) { if (this.state === 'ready' && !this.guest) this._send({ t: 'windows', list }); }
-  sendClip(text, ok = true) {
-    if (this.state === 'ready' && !this.guest) this._send({ t: 'clip', ok: !!ok, text: ok ? String(text ?? '').slice(0, MAX_CLIP_CHARS) : '' });
+  // The Mac's clipboard: text, and a PNG (base64) sent ahead in clip-part pieces. auto: copied on the Mac just now.
+  sendClip(text, ok = true, { image = null, auto = false } = {}) {
+    if (this.state !== 'ready' || this.guest) return;
+    const m = { t: 'clip', ok: !!ok, text: ok ? String(text ?? '').slice(0, MAX_CLIP_CHARS) : '' };
+    if (ok && typeof image === 'string' && image.length > 0 && image.length <= MAX_CLIP_B64) {
+      const id = toB64url(randomBytes(9)), n = Math.ceil(image.length / CLIP_PART_CHARS);
+      for (let i = 0; i < n; i++) this._send({ t: 'clip-part', id, i, n, data: image.slice(i * CLIP_PART_CHARS, (i + 1) * CLIP_PART_CHARS) });
+      m.img = { id, mime: 'image/png' };
+    }
+    if (auto) m.auto = true;
+    this._send(m);
+  }
+
+  // One piece of a clipboard image from the viewer. A new id starts over; pieces must come in order.
+  _clipPart(msg) {
+    const { id, i, n, data } = msg;
+    const maxParts = Math.ceil(MAX_CLIP_B64 / CLIP_PART_CHARS);
+    if (typeof id !== 'string' || id.length < 1 || id.length > 32 || !Number.isInteger(n) || n < 1 || n > maxParts ||
+        !Number.isInteger(i) || i < 0 || i >= n || typeof data !== 'string' || data.length > CLIP_PART_CHARS || !B64_RE.test(data)) {
+      this.clipIn = null;
+      return;
+    }
+    if (i === 0) this.clipIn = { id, n, got: 0, parts: [] };
+    const c = this.clipIn;
+    if (!c || c.id !== id || c.n !== n || c.got !== i) { this.clipIn = null; return; }
+    c.parts.push(data);
+    c.got++;
   }
   sendClipSet(ok) { if (this.state === 'ready' && !this.guest) this._send({ t: 'clip-set', ok: !!ok }); }
   sendTextFocus(editable, secure) {

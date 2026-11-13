@@ -17,9 +17,10 @@ public enum FrameType: UInt8 {
 
 public enum IPC {
     public static let version = 1
-    /// The host only ever sends us small JSON. Anything bigger means the stream is out of step (or the host is not
-    /// speaking this protocol at all), and the app restarts it rather than buffering without limit.
-    public static let maxIncomingFrame = 1 << 20
+    /// The host sends small JSON, except a clipboard image from the viewer (at most 20 MB, as base64). Anything bigger
+    /// means the stream is out of step (or the host is not speaking this protocol at all), and the app restarts it
+    /// rather than buffering without limit.
+    public static let maxIncomingFrame = 40 << 20
 
     public static func frame(_ type: FrameType, _ payload: Data) -> Data {
         frame(rawType: type.rawValue, payload)

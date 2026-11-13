@@ -774,6 +774,18 @@ async function clipboardChecks() {
   since = got.events.length;
   command('clipboard-set', { text: 'x'.repeat(30001) });
   check('clipboard-set: too long is refused', (await event('clipboard-set', { since })).ok === false);
+  // A picture (a 1×1 PNG), and something that isn't one.
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  since = got.events.length;
+  command('clipboard-set', { image: png });
+  check('clipboard-set: a picture', (await event('clipboard-set', { since })).ok === true);
+  since = got.events.length;
+  command('clipboard-get', { images: true });
+  const got2 = await event('clipboard', { since });
+  check('clipboard-get: the same picture back', got2.image === png && got2.mime === 'image/png', JSON.stringify(got2).slice(0, 200));
+  since = got.events.length;
+  command('clipboard-set', { image: 'bm90IGEgcGljdHVyZQ==' });
+  check('clipboard-set: not a picture is refused', (await event('clipboard-set', { since })).ok === false);
 }
 
 async function windowChecks(h) {

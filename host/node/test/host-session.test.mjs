@@ -16,6 +16,7 @@ import { startBroker } from '../../../tests/e2e/broker.mjs';
 import { fromB64url, randomBytes } from '../../../site/js/shared/bytes.js';
 import { startHost, TEST_ORIGIN, TEST_RP_ID, TEST_SITE } from './fake-app.mjs';
 import { SoftViewer, Refused, parsePairLink } from './soft-viewer.mjs';
+import { CLIP_PART_CHARS } from '../src/session.mjs';
 import { SoftAuthenticator } from './soft-authenticator.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -657,6 +658,42 @@ test('clipboard text both ways, for the signed-in owner only', async (t) => {
   v.send({ t: 'clip-set', text: 'x'.repeat(30001) });
   assert.equal((await v.next(['clip-set'])).ok, false);
   assert.equal(app.clipboard, 'from the phone \u{1F426}', 'too long: nothing changed');
+});
+
+test('clipboard images both ways in pieces, and what is copied on the Mac comes over by itself', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  const { v, end } = await passkey(t, ctx);
+  assert.equal(end.t, 'ready');
+  assert.ok(v.firstReply.caps.includes('clipimg'));
+  // A picture bigger than one piece, from the viewer.
+  const png = Buffer.alloc(120 * 1024, 7).toString('base64');
+  const parts = [];
+  for (let i = 0; i < png.length; i += CLIP_PART_CHARS) parts.push(png.slice(i, i + CLIP_PART_CHARS));
+  parts.forEach((data, i) => v.send({ t: 'clip-part', id: 'a1', i, n: parts.length, data }));
+  v.send({ t: 'clip-set', img: { id: 'a1', mime: 'image/png' }, paste: true });
+  assert.deepEqual(await v.next(['clip-set']), { t: 'clip-set', ok: true });
+  assert.equal(app.clipboardImage, png);
+  assert.equal(app.pasted, 1);
+  // A missing piece: refused, nothing changed.
+  v.send({ t: 'clip-part', id: 'b2', i: 0, n: 2, data: parts[0] });
+  v.send({ t: 'clip-set', img: { id: 'b2', mime: 'image/png' } });
+  assert.equal((await v.next(['clip-set'])).ok, false);
+  assert.equal(app.clipboardImage, png);
+  // Copied on the Mac: nothing comes until the viewer asks for it, then it comes by itself, pieces first.
+  app.clipboard = 'copied on the Mac';
+  app.event({ e: 'clipboard-changed' });
+  v.send({ t: 'clip-sync', on: true });
+  await new Promise(r => setTimeout(r, 50));
+  app.event({ e: 'clipboard-changed' });
+  const got = [];
+  let m;
+  while ((m = await v.next(['clip-part', 'clip'])).t === 'clip-part') got.push(m);
+  assert.equal(m.auto, true);
+  assert.equal(m.text, 'copied on the Mac');
+  assert.equal(m.img.id, got[0].id);
+  assert.equal(got.map(p => p.data).join(''), png);
+  assert.equal(got.length, parts.length);
 });
 
 test('after a click, the viewer hears whether the Mac now waits for typing', async (t) => {

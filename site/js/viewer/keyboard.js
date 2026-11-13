@@ -4,7 +4,7 @@
 //     Backspace, Enter, Tab and arrows);
 //   - the keys bar: sticky ⌘ ⌥ ⌃ ⇧, Esc, Tab, arrows and a few Mac shortcuts.
 // Our own controls (the toolbar, its menus) keep their keys.
-import { keyMessage, HeldKeys, pressMessages, SHORTCUTS, charToKey, textMessages, SHIFT } from './keys.js';
+import { keyMessage, HeldKeys, pressMessages, SHORTCUTS, charToKey, textMessages, SHIFT, META } from './keys.js';
 
 const OWN_KEYS = new Set(['Backspace', 'Enter', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Delete', 'Home', 'End', 'PageUp', 'PageDown']);
 
@@ -13,8 +13,12 @@ const SENTINEL = ' ';
 
 export class KeyboardInput {
   // shortcut(id): what a keys bar button with data-key="id" presses ({code, key, m}), or null.
-  constructor({ surface, softkbd, keysBar, session, swapCtrlCmd, enabled = () => true, onActivity = () => {}, shortcut = id => SHORTCUTS[id] }) {
-    Object.assign(this, { surface, softkbd, keysBar, session, swapCtrlCmd, enabled, onActivity, shortcut });
+  // onPasteKey(): ⌘V (Ctrl+V with the keys swapped) was pressed; true means the viewer pastes this device's clipboard
+  // on the Mac itself, so the key is held back and the browser's own paste event is let through.
+  constructor({ surface, softkbd, keysBar, session, swapCtrlCmd, enabled = () => true, onActivity = () => {}, shortcut = id => SHORTCUTS[id],
+    onPasteKey = () => false }) {
+    Object.assign(this, { surface, softkbd, keysBar, session, swapCtrlCmd, enabled, onActivity, shortcut, onPasteKey });
+    this.heldBackV = false;
     this.held = new HeldKeys();
     this.sticky = 0;       // modifier bits latched on the keys bar
     this.composing = false;
@@ -86,6 +90,19 @@ export class KeyboardInput {
     if (inSoft && !e.code && !OWN_KEYS.has(e.key)) return;
     const msg = keyMessage(e, { swapCtrlCmd: this.swapCtrlCmd() });
     if (!msg) return;
+    // Paste: the browser's paste event (with this device's clipboard, pictures too) follows, if not prevented.
+    if (msg.c === 'KeyV' && msg.d && msg.m === META && !inSoft && !this.sticky && (e.ctrlKey || e.metaKey) && !e.altKey &&
+        this.onPasteKey()) {
+      this.onActivity(e);
+      this.heldBackV = true;
+      return;
+    }
+    if (msg.c === 'KeyV' && msg.d) this.heldBackV = false; // (a Mac viewer never sends V's keyup while ⌘ is down)
+    if (msg.c === 'KeyV' && !msg.d && this.heldBackV) {
+      this.heldBackV = false;
+      e.preventDefault();
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
     this.onActivity(e);
@@ -155,6 +172,15 @@ export class KeyboardInput {
     }
     const s = b.dataset.key && this.shortcut(b.dataset.key);
     if (s) this._press(s);
+  }
+
+  // ⌘V on the Mac: just V if ⌘ is still held down there (the person hasn't let go of it), otherwise the whole press.
+  pasteKey() {
+    const metaHeld = ['MetaLeft', 'MetaRight'].some(c => this.held.held.has(c));
+    const msgs = metaHeld
+      ? [{ t: 'k', c: 'KeyV', k: 'v', d: true, m: META }, { t: 'k', c: 'KeyV', k: 'v', d: false, m: META }]
+      : pressMessages('KeyV', 'v', META);
+    for (const m of msgs) this.session.sendInput(m);
   }
 
   _press(s) {

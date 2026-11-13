@@ -249,10 +249,20 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
             case nil: warn("capture without on")
             }
         case "clipboard-get":
-            sendEvent(["e": "clipboard", "ok": true, "text": clipboardText()])
+            var e: [String: Any] = ["e": "clipboard", "ok": true, "text": clipboardText()]
+            if JSONValue.bool(cmd["images"]) == true, let png = clipboardImage() {
+                e["image"] = png.base64EncodedString()
+                e["mime"] = "image/png"
+            }
+            if JSONValue.bool(cmd["auto"]) == true { e["auto"] = true }
+            sendEvent(e)
         case "clipboard-set":
-            if let text = JSONValue.string(cmd["text"]), text.utf16.count <= Self.clipboardMax {
-                setClipboard(text)
+            // Text, an image (base64), or both. An image that isn't one macOS can read is refused.
+            let text = JSONValue.string(cmd["text"])
+            var image: Data?
+            if let b64 = JSONValue.string(cmd["image"]) { image = Data(base64Encoded: b64) ?? Data() }
+            let fits = (text?.utf16.count ?? 0) <= Self.clipboardMax && (image?.count ?? 0) <= Self.clipboardImageMax
+            if fits, text != nil || image != nil, setClipboard(text, image: image) {
                 if JSONValue.bool(cmd["paste"]) == true { input.pressPaste() }
                 sendEvent(["e": "clipboard-set", "ok": true])
             } else {
@@ -313,12 +323,49 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
     }
 
     /// A warning in the log, also sent to the host so it shows up in its log next to whatever caused it.
-    // MARK: clipboard (text only)
+    // MARK: clipboard (text and images)
 
     /// The most text that goes either way at once (it has to fit in one message on the connection).
     static let clipboardMax = 30_000
+    /// The biggest image either way (the host sends it in pieces).
+    static let clipboardImageMax = 20 << 20
     /// Test runs never touch the real clipboard of whoever is at this Mac.
     private var testClipboard = ""
+    private var testClipboardImage: Data?
+    /// While a viewer is connected, the clipboard is checked twice a second; a change (other than our own) is
+    /// reported, so the viewer's device gets what was just copied here.
+    private var clipboardTimer: Timer?
+    private var clipboardSeen = 0
+
+    private func watchClipboard(_ on: Bool) {
+        clipboardTimer?.invalidate()
+        clipboardTimer = nil
+        guard on, systemChangesAllowed else { return }
+        clipboardSeen = NSPasteboard.general.changeCount
+        let t = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let n = NSPasteboard.general.changeCount
+            guard n != self.clipboardSeen else { return }
+            self.clipboardSeen = n
+            self.sendEvent(["e": "clipboard-changed"])
+        }
+        t.tolerance = 0.2
+        RunLoop.main.add(t, forMode: .common)
+        clipboardTimer = t
+    }
+
+    /// The clipboard's picture as PNG, if it holds one (not for copied files, whose icon would come along).
+    private func clipboardImage() -> Data? {
+        guard systemChangesAllowed else { return testClipboardImage }
+        let pb = NSPasteboard.general
+        if pb.types?.contains(.fileURL) == true { return nil }
+        var png = pb.data(forType: .png)
+        if png == nil, let tiff = pb.data(forType: .tiff), let rep = NSBitmapImageRep(data: tiff) {
+            png = rep.representation(using: .png, properties: [:])
+        }
+        guard let png, png.count <= Self.clipboardImageMax else { return nil }
+        return png
+    }
 
     private func clipboardText() -> String {
         guard systemChangesAllowed else { return testClipboard }
@@ -333,10 +380,26 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         return out
     }
 
-    private func setClipboard(_ text: String) {
-        guard systemChangesAllowed else { testClipboard = text; return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+    private func setClipboard(_ text: String?, image: Data?) -> Bool {
+        var png: Data?, tiff: Data?
+        if let image {
+            guard let rep = NSBitmapImageRep(data: image) else { return false }
+            png = image.starts(with: [0x89, 0x50, 0x4E, 0x47]) ? image : rep.representation(using: .png, properties: [:])
+            tiff = rep.tiffRepresentation
+            guard png != nil else { return false }
+        }
+        guard systemChangesAllowed else {
+            testClipboard = text ?? ""
+            testClipboardImage = png
+            return true
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        if let png { pb.setData(png, forType: .png) }
+        if let tiff { pb.setData(tiff, forType: .tiff) }
+        if let text { pb.setString(text, forType: .string) }
+        clipboardSeen = pb.changeCount // our own change: not sent back to the viewer
+        return true
     }
 
     /// Starts or stops playing the viewer's microphone on this Mac. Only while a session is on.
@@ -422,6 +485,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         sessionActive = true
         sessionViewer = viewer
         power.setSessionActive(true)
+        if clipboardTimer == nil { watchClipboard(true) }
         if sessionActivity == nil {
             sessionActivity = ProcessInfo.processInfo.beginActivity(
                 options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical], reason: "A viewer is connected")
@@ -473,6 +537,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         guard sessionActive else { return }
         sessionActive = false
         sessionViewer = nil
+        watchClipboard(false)
         power.setSessionActive(false)
         if let a = sessionActivity { ProcessInfo.processInfo.endActivity(a); sessionActivity = nil }
         menu?.setSession(viewer: nil)

@@ -13,6 +13,7 @@ export function defaultPrefs({ apple = false } = {}) {
     // (otherwise it stays put and the Mac's picture makes room for it).
     tbEdge: 'top', tbPos: 0.5, tbAutoHide: null, // null: hide on touch screens only
     keysBar: null, customKeys: [], swipe: 'apps',
+    clipSync: true, // what's copied on the Mac lands on this device's clipboard by itself
   };
 }
 
@@ -33,7 +34,7 @@ export class Prefs {
         if (Number.isFinite(saved.volume)) this.values.volume = Math.min(1, Math.max(0, saved.volume));
         if (typeof saved.muted === 'boolean') this.values.muted = saved.muted;
         if (typeof saved.stats === 'boolean') this.values.stats = saved.stats;
-        for (const k of ['captureOnClick', 'hideCursor', 'tbAutoHide']) if (typeof saved[k] === 'boolean') this.values[k] = saved[k];
+        for (const k of ['captureOnClick', 'hideCursor', 'tbAutoHide', 'clipSync']) if (typeof saved[k] === 'boolean') this.values[k] = saved[k];
         if (['top', 'bottom', 'left', 'right'].includes(saved.tbEdge)) this.values.tbEdge = saved.tbEdge;
         if (Number.isFinite(saved.tbPos)) this.values.tbPos = Math.min(1, Math.max(0, saved.tbPos));
         if (Array.isArray(saved.keysBar)) this.values.keysBar = saved.keysBar.slice(0, 80);

@@ -23,6 +23,10 @@ const EDGES = ['top', 'bottom', 'left', 'right'];
 const DOUBLE_ESC_MS = 600;   // Esc twice within this brings back a hidden pointer
 const PING_MS = 2000;
 const MAX_CLIP = 30000; // clipboard text, either way (the Mac has the same limit)
+const MAX_CLIP_IMAGE = 20 * 1024 * 1024; // clipboard pictures, either way (the Mac has the same limit)
+const CLIP_PART = 48 * 1024;             // base64 characters per piece of a picture
+const CLIP_BACKLOG = 2 * 1024 * 1024;    // pieces wait while this much is still queued on the connection
+const PASTE_WAIT_MS = 400;               // after ⌘V, how long the browser's paste event gets before the Mac pastes its own
 
 export class Viewer {
   constructor({ root, session, hi, ready, prefs, env, apple, touchFirst, log = () => {}, onLeave, onReconnect, onHome }) {
@@ -88,7 +92,13 @@ export class Viewer {
       surface: this.surface, softkbd: this.$('softkbd'), keysBar: this.$('keysBar'), session,
       swapCtrlCmd: () => !this.apple && this.prefs.get('swapCtrlCmd'), enabled, onActivity: activity,
       shortcut: id => findShortcut(id, this.customKeys),
+      onPasteKey: () => this._pasteKey(),
     });
+    // ⌘V / Ctrl+V on the picture: this device's clipboard, text or picture, is pasted on the Mac.
+    this._on(window, 'paste', e => this._onPaste(e), true);
+    // A copy from the Mac that couldn't be written here (this page didn't have focus) is written once it does.
+    this._on(window, 'focus', () => this._retryMirror());
+    this._on(window, 'pointerdown', () => this._retryMirror(), true);
     // Our own shortcut first, before the keys go to the Mac: Ctrl+Alt+Shift+T reaches the toolbar from the keyboard.
     this._on(window, 'keydown', e => this._ownShortcut(e), true);
     this.pointer.attach();
@@ -130,6 +140,7 @@ export class Viewer {
 
   // The session ended (the Mac said bye, the network went): freeze the picture and say what happened.
   ended(m, { canReconnect = true } = {}) {
+    this.gone = true;
     if (this.over) return;
     this._releaseCmd();
     this.over = true;
@@ -152,6 +163,7 @@ export class Viewer {
   }
 
   destroy() {
+    this.gone = true;
     this._letSleep();
     this._releaseCmd();
     this.resizeObserver?.disconnect();
@@ -202,9 +214,14 @@ export class Viewer {
       if (typeof m.ts === 'number') this.pingMs = Math.max(0, performance.now() - m.ts);
     } else if (m.t === 'status') {
       this._applyStatus(m);
+    } else if (m.t === 'clip-part') {
+      this._clipPartIn(m);
     } else if (m.t === 'clip') {
-      this.clipWaiter?.(m);
-      this.clipWaiter = null;
+      if (m.auto) this._mirrorClip(m);
+      else {
+        this.clipWaiter?.(m);
+        this.clipWaiter = null;
+      }
     } else if (m.t === 'clip-set') {
       this._clipSetDone(m.ok === true);
     } else if (m.t === 'textfocus') {
@@ -287,6 +304,18 @@ export class Viewer {
   // through a box to paste into (iPhones without a prompt, Firefox, a refusal).
   async _pasteToMac() {
     this._toggleMenu(false);
+    // Pictures too, where the browser lets the page read them.
+    if (this.clipImg && navigator.clipboard?.read) {
+      try {
+        let file = null, t = '';
+        for (const item of await navigator.clipboard.read()) {
+          const type = item.types.find(x => x.startsWith('image/'));
+          if (type && !file) file = await item.getType(type);
+          if (!t && item.types.includes('text/plain')) t = await (await item.getType('text/plain')).text();
+        }
+        if (file || t) return this._pasteHere(t, file);
+      } catch { /* refused or not offered: text only, below */ }
+    }
     let text = null;
     try { text = await navigator.clipboard.readText(); } catch { text = null; }
     if (typeof text === 'string' && text.length > 0 && text.length <= MAX_CLIP) return this._sendClip(text, true);
@@ -301,6 +330,17 @@ export class Viewer {
   }
 
   _clipSetDone(ok) {
+    if (this.clipPasting === 'key') {
+      // From ⌘V or Paste on the Mac: now the Mac pastes it.
+      this.clipPasting = null;
+      if (ok) {
+        this.keys.pasteKey();
+        if (this.clipSentImage) this._clipNote('Pasted on your Mac.', 'paste');
+      } else {
+        this._clipNote('Your Mac didn\u2019t take that.', 'paste');
+      }
+      return;
+    }
     if (!ok) {
       if (this.$('clipSheet').hidden) this._openClip('send', '');
       this._clipStatus('Your Mac didn\u2019t take that text.');
@@ -311,6 +351,118 @@ export class Viewer {
       title: this.clipPasting ? 'Pasted on your Mac.' : 'On your Mac\u2019s clipboard.', dismissible: true });
     clearTimeout(this.clipNoteTimer);
     this.clipNoteTimer = setTimeout(() => this.banners.hide('clip'), 3000);
+  }
+
+  // --- the clipboard without the box: ⌘V pastes this device's clipboard, and copies on the Mac come here ---
+
+  // ⌘V on the picture. True: wait for the browser's paste event (and if none comes, the Mac pastes its own).
+  _pasteKey() {
+    if (!this.clipImg || this.guest) return false;
+    clearTimeout(this.pasteTimer);
+    this.pasteWaiting = true;
+    this.pasteTimer = setTimeout(() => {
+      if (!this.pasteWaiting) return;
+      this.pasteWaiting = false;
+      this.keys.pasteKey();
+    }, PASTE_WAIT_MS);
+    return true;
+  }
+
+  _onPaste(e) {
+    if (!this.pasteWaiting) return; // a paste into one of our own text boxes stays there
+    this.pasteWaiting = false;
+    clearTimeout(this.pasteTimer);
+    e.preventDefault();
+    e.stopPropagation();
+    const dt = e.clipboardData;
+    let file = null;
+    for (const item of dt?.items ?? []) {
+      if (item.kind === 'file' && item.type.startsWith('image/')) { file = item.getAsFile(); break; }
+    }
+    this._pasteHere(dt?.getData('text/plain') ?? '', file);
+  }
+
+  // Puts text and/or a picture on the Mac's clipboard, then presses ⌘V there. Nothing here: the Mac pastes its own.
+  async _pasteHere(text, file) {
+    if (text && text.length > MAX_CLIP) text = '';
+    if (file && file.size > MAX_CLIP_IMAGE) {
+      this._clipNote('That picture is too big to send (20 MB at most).', 'paste');
+      file = null;
+      if (!text) return;
+    }
+    if (!text && !file) { this.keys.pasteKey(); return; }
+    const msg = { t: 'clip-set', paste: false };
+    if (text) msg.text = text;
+    if (file) {
+      if (file.size > 1024 * 1024) this._clipNote('Sending the picture\u2026', 'paste', 0);
+      let b64;
+      try { b64 = await blobToBase64(file); } catch { this._clipNote('Couldn\u2019t read that picture.', 'paste'); return; }
+      const id = Math.random().toString(36).slice(2, 12);
+      const n = Math.ceil(b64.length / CLIP_PART);
+      for (let i = 0; i < n; i++) {
+        while ((this.session.controlBacklog?.() ?? 0) > CLIP_BACKLOG) await new Promise(r => setTimeout(r, 30));
+        if (this.gone) return;
+        this.session.send({ t: 'clip-part', id, i, n, data: b64.slice(i * CLIP_PART, (i + 1) * CLIP_PART) });
+      }
+      msg.img = { id, mime: file.type || 'image/png' };
+    }
+    this.clipPasting = 'key';
+    this.clipSentImage = !!file;
+    this.session.send(msg);
+  }
+
+  _clipPartIn(m) {
+    if (typeof m.id !== 'string' || !Number.isInteger(m.i) || !Number.isInteger(m.n) || typeof m.data !== 'string') return;
+    if (m.i === 0) this.clipIn = { id: m.id, n: m.n, parts: [] };
+    const c = this.clipIn;
+    if (!c || c.id !== m.id || c.parts.length !== m.i) { this.clipIn = null; return; }
+    c.parts.push(m.data);
+  }
+
+  // The picture a {t:'clip'} names, put back together, or null.
+  _clipImageOf(m) {
+    const c = this.clipIn;
+    this.clipIn = null;
+    if (!m.img || !c || c.id !== m.img.id || c.parts.length !== c.n) return null;
+    try {
+      const bin = atob(c.parts.join(''));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new Blob([bytes], { type: 'image/png' });
+    } catch { return null; }
+  }
+
+  // Just copied on the Mac: onto this device's clipboard too.
+  _mirrorClip(m) {
+    const img = this._clipImageOf(m);
+    const text = m.ok && typeof m.text === 'string' ? m.text : '';
+    if (!img && !text) return;
+    const write = async () => {
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard?.write) {
+        const items = {};
+        if (img) items['image/png'] = img;
+        if (text) items['text/plain'] = new Blob([text], { type: 'text/plain' });
+        try { return await navigator.clipboard.write([new ClipboardItem(items)]); } catch (err) { if (!text || !img) throw err; }
+      }
+      if (!text) throw new Error('no picture clipboard here');
+      await navigator.clipboard.writeText(text);
+    };
+    const note = img ? 'Picture copied from your Mac.' : 'Copied from your Mac.';
+    this.pendingMirror = null;
+    write().then(() => this._clipNote(note, 'copy', 1500), () => { this.pendingMirror = { write, note }; });
+  }
+
+  _retryMirror() {
+    const p = this.pendingMirror;
+    if (!p) return;
+    this.pendingMirror = null;
+    p.write().then(() => this._clipNote(p.note, 'copy', 1500), () => {});
+  }
+
+  _clipNote(title, icon, ms = 3000) {
+    this.banners.show('clip', { kind: 'info', icon, title, dismissible: true });
+    clearTimeout(this.clipNoteTimer);
+    if (ms) this.clipNoteTimer = setTimeout(() => this.banners.hide('clip'), ms);
   }
 
   // Copy the Mac's clipboard to this device. Browsers only let a page write the clipboard during a click, and the
@@ -675,6 +827,15 @@ export class Viewer {
     // Clipboard text both ways, on Macs that offer it.
     const canClip = !this.guest && !!this.session.caps?.includes('clipboard');
     $('optPaste').hidden = $('optCopy').hidden = !canClip;
+    // Pictures, ⌘V without the box, and copies on the Mac coming here by themselves, on Macs that offer them.
+    this.clipImg = canClip && !!this.session.caps?.includes('clipimg');
+    $('clipSyncWrap').hidden = !this.clipImg;
+    $('optClipSync').checked = !!this.prefs.get('clipSync');
+    if (this.clipImg && this.prefs.get('clipSync')) this.session.send({ t: 'clip-sync', on: true });
+    on('optClipSync', 'change', e => {
+      this.prefs.set('clipSync', e.target.checked);
+      this.session.send({ t: 'clip-sync', on: e.target.checked });
+    });
     on('optPaste', 'click', () => this._pasteToMac());
     on('optCopy', 'click', () => this._copyFromMac());
     on('clipGo', 'click', () => this._sendClip($('clipText').value, true));
@@ -1284,4 +1445,14 @@ export class Viewer {
 function canOpenKeyboardNow() {
   const apple = /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
   return !apple && navigator.userActivation?.isActive === true;
+}
+
+// A Blob as base64 (no data: prefix).
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result).slice(String(r.result).indexOf(',') + 1));
+    r.onerror = () => reject(r.error);
+    r.readAsDataURL(blob);
+  });
 }

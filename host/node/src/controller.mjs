@@ -247,8 +247,18 @@ export class Controller {
         this.active?.sendFit(ev.ok === true);
         break;
       case 'clipboard':
-        if (this.clipAsker && this.clipAsker === this.active) this.clipAsker.sendClip(ev.text, ev.ok === true && typeof ev.text === 'string');
+        if (this.clipAsker && this.clipAsker === this.active) {
+          this.clipAsker.sendClip(ev.text, ev.ok === true && typeof ev.text === 'string',
+            { image: typeof ev.image === 'string' ? ev.image : null, auto: ev.auto === true });
+        }
         this.clipAsker = null;
+        break;
+      case 'clipboard-changed':
+        // Something was copied on the Mac: a viewer that asked for it gets it straight away.
+        if (this.active && !this.active.guest && this.active.clipSync) {
+          this.clipAsker = this.active;
+          this.app.command('clipboard-get', { images: true, auto: true });
+        }
         break;
       case 'clipboard-set':
         this.active?.sendClipSet(ev.ok === true);
@@ -415,14 +425,19 @@ export class Controller {
     this.app.command('windows', {});
   }
 
-  clipGet(session) {
+  clipGet(session, images = false) {
     if (session !== this.active) return;
     this.clipAsker = session;
-    this.app.command('clipboard-get', {});
+    this.app.command('clipboard-get', images ? { images: true } : {});
   }
 
-  clipSet(session, text, paste) {
-    if (session === this.active) this.app.command('clipboard-set', { text, paste: !!paste });
+  // text and/or image (a base64 string of a picture file); either may be undefined.
+  clipSet(session, text, paste, image) {
+    if (session !== this.active) return;
+    const cmd = { paste: !!paste };
+    if (text !== undefined) cmd.text = text;
+    if (image !== undefined) cmd.image = image;
+    this.app.command('clipboard-set', cmd);
   }
 
   // The owner's viewer turned its microphone on or off. The app plays it on the output chosen in Setup.
@@ -707,7 +722,7 @@ export class Controller {
   relayIceServers() { return this.relay.iceServers(); }
 
   // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
-  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus', 'clipboard']; }
+  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus', 'clipboard', 'clipimg']; }
 
   async relaySet(keyId, apiToken) {
     const replacing = this.relay.configured;

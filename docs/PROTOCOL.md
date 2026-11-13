@@ -328,6 +328,15 @@ For Macs with `clipboard` in `caps` (never for guests): `{t:"clip-set", text, pa
 UTF-16 units) on the Mac's clipboard and, with `paste: true`, presses ⌘V there; answered `{t:"clip-set", ok}`.
 `{t:"clip-get"}` asks for the Mac's clipboard text (cut to 30,000 units); answered `{t:"clip", ok, text}`.
 
+With `clipimg` in `caps` as well, pictures go both ways, at most 20 MB. A picture travels as base64 in pieces of at most
+49,152 characters, `{t:"clip-part", id, i, n, data}` for `i` = 0…n−1 in order, followed by the message that names it:
+`{t:"clip-set", text?, img: {id, mime}, paste?}` from the viewer (text is optional when there is a picture), or
+`{t:"clip", ok, text, img: {id, mime: "image/png"}}` from the Mac (`clip-get` with `images: true`). Pieces have their own
+rate allowance. `{t:"clip-sync", on}` asks the Mac to send whatever is copied there from now on, unasked, as
+`{t:"clip", ..., auto: true}` (with the picture, if any). The viewer uses these for ⌘V (Ctrl+V with the keys swapped):
+it holds the key back, takes the browser's paste event, sends this device's clipboard with `paste: false`, and presses ⌘V
+once the Mac answers `ok`.
+
 For Macs with `textfocus` in `caps`: after a left click the Mac sends `{t:"textfocus", editable, secure}` (whether its
 focused element now takes typing, and whether it is a password box), so a phone can bring up its keyboard by itself.
 
@@ -379,7 +388,7 @@ stdout (host → app). stderr is the host's log. Every frame is `[u32 big-endian
 | `0x11` INPUT | host → app | JSON input message from the table above, already validated |
 | `0x12` MIC | host → app | `u16 BE sequence number` · one Opus packet of the viewer's microphone |
 
-Events (`e`): `text-focus {editable, secure}` (a moment after each left click: whether the focused element now takes
+Events (`e`): `clipboard-changed {}` (while a viewer is connected, something other than Perch changed the clipboard), `text-focus {editable, secure}` (a moment after each left click: whether the focused element now takes
 typing, from Accessibility; test runs pretend the top half of the screen is a text box), `permissions {screen, accessibility}`, `displays {displays}`, `capture-started {display, width, height, fps, window?}`,
 `audio-outputs {list: [{uid, name, main}]}` (after HELLO and whenever the Mac's sound outputs change),
 `mic {on, ok, error?}`, `mic-level {packets, frames, late, rms}` (test runs only, which decode but never play),
@@ -392,7 +401,7 @@ login-item-on | login-item-off | check-updates | update | quit`), `input-echo {e
 
 Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?}` (`window`: show only the part of the
 display that window covers, following it), `windows {}` (asks for a `windows` event), `window-fit {window, w, h}`
-(reshape it to `w:h` through Accessibility; never done in test runs), `clipboard-get {}` (answered with a `clipboard {ok, text}` event), `clipboard-set {text, paste?}` (answered with
+(reshape it to `w:h` through Accessibility; never done in test runs), `clipboard-get {images?, auto?}` (answered with a `clipboard {ok, text, image?, mime?, auto?}` event; `image` is base64 PNG), `clipboard-set {text?, image?, paste?}` (answered with
 `clipboard-set {ok}`; test runs use a pretend clipboard), `mic {on, device?}` (start or stop playing
 MIC frames; only during a session), `keyframe {}`, `bitrate {kbps}`,
 `session {active, viewer?, route?, curtain?}` (menu light, notification, keeps the display awake while active;

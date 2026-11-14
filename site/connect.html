@@ -183,6 +183,7 @@
   <button type="button" id="handle" class="handle" aria-label="Show the toolbar"><span></span></button>
 
   <div id="toolbar" class="toolbar" role="toolbar" aria-label="Perch controls">
+    <button type="button" id="tbGrip" class="tb-btn tb-grip" title="Drag to move the bar to any edge" aria-label="Move the toolbar (arrow keys)"><span aria-hidden="true">⠿</span></button>
     <span class="tb-mac">
       <span id="dot" class="dot good" role="img" aria-label="Good connection"></span>
       <span id="tbName" class="tb-name">your Mac</span>
@@ -218,6 +219,22 @@
     <label class="check" id="touchpadWrap" hidden><input type="checkbox" id="optTouchpad"> Touchpad mode</label>
     <p class="fine" id="touchpadHelp" hidden>Your finger moves the Mac's pointer like a laptop's touchpad; tap to click
       where the pointer is.</p>
+    <label class="tb-select" id="edgeWrap">
+      <span>Bar</span>
+      <select id="optEdge" title="Which edge the toolbar sits on">
+        <option value="top">At the top</option>
+        <option value="bottom">At the bottom</option>
+        <option value="left">On the left</option>
+        <option value="right">On the right</option>
+      </select>
+    </label>
+    <label class="check"><input type="checkbox" id="optAutoHide"> Hide the bar when I'm not using it</label>
+    <label class="check" id="hideCursorWrap" hidden><input type="checkbox" id="optHideCursor"> Hide this computer's pointer (Esc twice brings it back)</label>
+    <label class="tb-select" id="swipeWrap">
+      <span>Swipe sideways</span>
+      <select id="optSwipe" title="What a two-finger swipe sideways on a touchpad (three fingers on a touch screen) does"></select>
+    </label>
+    <button type="button" id="optEditKeys" class="btn small" data-icon="keyboard">Choose the keys bar's keys</button>
     <label class="check" id="captureClickWrap" hidden><input type="checkbox" id="optCaptureClick"> Capture the mouse when I click the screen</label>
     <label class="check" id="swapWrap"><input type="checkbox" id="optSwap"> Ctrl acts as ⌘ (Command)</label>
     <p class="fine" id="swapHelp">Ctrl+C copies, Ctrl+V pastes, as on this keyboard. Turn off to send Ctrl itself.</p>
@@ -244,18 +261,32 @@
     <button type="button" class="key mod" data-mod="4" aria-pressed="false" title="Option">⌥</button>
     <button type="button" class="key mod" data-mod="2" aria-pressed="false" title="Control">⌃</button>
     <button type="button" class="key mod" data-mod="1" aria-pressed="false" title="Shift">⇧</button>
-    <button type="button" class="key" data-key="esc">esc</button>
-    <button type="button" class="key" data-key="tab">tab</button>
-    <button type="button" class="key" data-key="left" aria-label="Left arrow">←</button>
-    <button type="button" class="key" data-key="up" aria-label="Up arrow">↑</button>
-    <button type="button" class="key" data-key="down" aria-label="Down arrow">↓</button>
-    <button type="button" class="key" data-key="right" aria-label="Right arrow">→</button>
-    <button type="button" class="key" data-key="delete" aria-label="Delete">⌫</button>
-    <button type="button" class="key wide" data-key="cmdTab" title="Switch apps">⌘ Tab</button>
-    <button type="button" class="key wide" data-key="missionControl" title="Mission Control (Control + Up)">Mission Control</button>
-    <button type="button" class="key wide" data-key="spotlight" title="Spotlight (⌘ Space)">Spotlight</button>
-    <button type="button" class="key wide" data-key="cmdW" title="Close window">⌘W</button>
-    <button type="button" class="key wide" data-key="cmdQ" title="Quit app">⌘Q</button>
+    <span id="keysList" class="keys-list"></span>
+    <button type="button" id="keysEdit" class="key edit" title="Choose keys" aria-label="Choose the keys on this bar">＋</button>
+  </div>
+
+  <div id="keysEditor" class="menu keys-editor" role="dialog" aria-modal="false" aria-labelledby="keysEditorTitle" hidden>
+    <div class="ke-head">
+      <h2 id="keysEditorTitle">Keys bar</h2>
+      <button type="button" id="keysEditorDone" class="btn small primary">Done</button>
+    </div>
+    <p class="fine">Tick the keys and shortcuts you want on the bar. ⌘ ⌥ ⌃ ⇧ are always there: tap one, then a key, for any shortcut.</p>
+    <div id="keysGroups" class="ke-groups"></div>
+    <fieldset class="ke-own">
+      <legend>Make your own</legend>
+      <div class="ke-mods">
+        <label><input type="checkbox" value="2"> ⌃</label>
+        <label><input type="checkbox" value="4"> ⌥</label>
+        <label><input type="checkbox" value="1"> ⇧</label>
+        <label><input type="checkbox" value="8" checked> ⌘</label>
+        <select id="keOwnKey" aria-label="Key"></select>
+      </div>
+      <div class="ke-mods">
+        <input type="text" id="keOwnName" maxlength="16" placeholder="Name (optional)" aria-label="Name for the button">
+        <button type="button" id="keOwnAdd" class="btn small">Add</button>
+      </div>
+    </fieldset>
+    <button type="button" id="keysReset" class="btn small quiet">Back to the usual keys</button>
   </div>
 
   <!-- Phones and tablets: a keyboard button that is always on screen. The invisible text box lies right on top of it,

@@ -142,15 +142,37 @@ test('cancel (a system gesture took the touches) during a drag lets go of the bu
     'and the next tap works normally');
 });
 
-test('a third finger is ignored until every finger is lifted', () => {
+test('three fingers moved together are one swipe, then nothing until every finger is lifted', () => {
   const g = new TouchGestures();
   const out = play(g, [
     ['down', 1, 100, 300, 0], ['down', 2, 200, 300, 5], ['down', 3, 300, 300, 10],
     ['move', 1, 100, 200, 40], ['move', 2, 200, 200, 41], ['move', 3, 300, 200, 42],
+    ['move', 1, 100, 100, 60], ['move', 2, 200, 100, 61], ['move', 3, 300, 100, 62],
     ['up', 1, 0, 0, 100], ['up', 2, 0, 0, 110], ['up', 3, 0, 0, 120],
   ]);
-  assert.deepEqual(out, []);
+  assert.deepEqual(out, [{ a: 'swipe', dir: 'up' }]);
   assert.deepEqual(play(g, [['down', 1, 10, 10, 1000], ['up', 1, 10, 10, 1050]]).length, 1);
+});
+
+test('three fingers sideways: moving left is "next", like a Mac trackpad; right is "previous"', () => {
+  const swipe = dx => play(new TouchGestures(), [
+    ['down', 1, 300, 300, 0], ['down', 2, 300, 360, 5], ['down', 3, 300, 420, 10],
+    ['move', 1, 300 + dx, 300, 40], ['move', 2, 300 + dx, 360, 41], ['move', 3, 300 + dx, 420, 42],
+    ['up', 1, 0, 0, 100], ['up', 2, 0, 0, 110], ['up', 3, 0, 0, 120],
+  ]);
+  assert.deepEqual(swipe(-120), [{ a: 'swipe', dir: 1 }]);
+  assert.deepEqual(swipe(120), [{ a: 'swipe', dir: -1 }]);
+  assert.deepEqual(swipe(-20), [], 'too short');
+});
+
+test('a fourth finger is ignored until every finger is lifted', () => {
+  const g = new TouchGestures();
+  const out = play(g, [
+    ['down', 1, 100, 300, 0], ['down', 2, 200, 300, 5], ['down', 3, 300, 300, 10], ['down', 4, 400, 300, 12],
+    ['move', 1, 0, 300, 40], ['move', 2, 100, 300, 41], ['move', 3, 200, 300, 42], ['move', 4, 300, 300, 43],
+    ['up', 1, 0, 0, 100], ['up', 2, 0, 0, 110], ['up', 3, 0, 0, 120], ['up', 4, 0, 0, 130],
+  ]);
+  assert.deepEqual(out, []);
 });
 
 test('a fast two-finger scroll with the fingers one above the other is still a scroll (one event per finger)', () => {

@@ -11,9 +11,16 @@ import { IDENTITY, isZoomed, viewTransform, clampView } from './coords.js';
 import { errorMessage } from '../ui/messages.js';
 import { fillIcons, setIcon } from '../ui/icons.js';
 import { QUALITY } from '../shared/proto.js';
+import { pressMessages, SHIFT, META } from './keys.js';
+import {
+  GROUPS, CATALOG, DEFAULT_BAR, FUNCTION_KEYS, CUSTOM_KEYS, SWIPE_ACTIONS, makeCustom, cleanCustom, cleanBar, findShortcut, toggleOnBar,
+} from './shortcuts.js';
 
 const HIDE_AFTER_MS = 3500;  // the toolbar tucks itself away after this long without being used
 const SHOW_ZONE_PX = 56;     // moving the mouse this close to the top brings it back
+const SIDE_ZONE_PX = 16;     // ...or this close to the bottom or a side, when the bar lives there
+const EDGES = ['top', 'bottom', 'left', 'right'];
+const DOUBLE_ESC_MS = 600;   // Esc twice within this brings back a hidden pointer
 const PING_MS = 2000;
 const MAX_CLIP = 30000; // clipboard text, either way (the Mac has the same limit)
 
@@ -74,16 +81,21 @@ export class Viewer {
       view: { get: () => this.view, set: v => this.setView(v) },
       size: () => [this.display.width || 0, this.display.height || 0],
       enabled, onActivity: activity, touchpad: () => this.touchFirst && !!this.prefs.get('touchpad'),
+      onSwipe: dir => this._swipe(dir),
+      swipesOn: () => this.inputAllowed && this.prefs.get('swipe') in SWIPE_ACTIONS && this.prefs.get('swipe') !== 'off',
     });
     this.keys = new KeyboardInput({
       surface: this.surface, softkbd: this.$('softkbd'), keysBar: this.$('keysBar'), session,
       swapCtrlCmd: () => !this.apple && this.prefs.get('swapCtrlCmd'), enabled, onActivity: activity,
+      shortcut: id => findShortcut(id, this.customKeys),
     });
     // Our own shortcut first, before the keys go to the Mac: Ctrl+Alt+Shift+T reaches the toolbar from the keyboard.
     this._on(window, 'keydown', e => this._ownShortcut(e), true);
     this.pointer.attach();
     this.keys.attach();
     this._wireKeyboardButton();
+    this._wireKeysBar();
+    this._wirePlacement();
 
     this._applyStatus({ locked: this.ready.locked, input: this.ready.input });
     const q = this.prefs.get('quality');
@@ -119,6 +131,7 @@ export class Viewer {
   // The session ended (the Mac said bye, the network went): freeze the picture and say what happened.
   ended(m, { canReconnect = true } = {}) {
     if (this.over) return;
+    this._releaseCmd();
     this.over = true;
     this._micOff();
     this._letSleep();
@@ -140,6 +153,9 @@ export class Viewer {
 
   destroy() {
     this._letSleep();
+    this._releaseCmd();
+    this.resizeObserver?.disconnect();
+    cancelAnimationFrame(this.placeFrame);
     if (document.pointerLockElement === this.surface) document.exitPointerLock();
     clearTimeout(this.captureNoteTimer);
     clearTimeout(this.inviteTimer);
@@ -155,13 +171,13 @@ export class Viewer {
     if (this.video) { this.video.pause(); this.video.srcObject = null; }
     this.setView(IDENTITY);
     this.banners?.clear();
-    for (const id of ['ended', 'moreMenu', 'keysBar', 'soundPrompt', 'clipSheet']) this.$(id).hidden = true;
+    for (const id of ['ended', 'moreMenu', 'keysBar', 'keysEditor', 'soundPrompt', 'clipSheet']) this.$(id).hidden = true;
     clearTimeout(this.clipNoteTimer);
     this.clipWaiter = null;
     this.$('tbKeys').setAttribute('aria-pressed', 'false');
     this._inviteKeyboard(null);
     // The browser says the mouse is let go only after these listeners are gone: don't leave the pointer hidden.
-    this.root.classList.remove('tb-on', 'zoomed', 'captured', 'touchpad');
+    this.root.classList.remove('tb-on', 'zoomed', 'captured', 'touchpad', 'tb-pinned', 'tb-vertical', 'nocursor', ...EDGES.map(e => `tb-${e}`));
     this.root.hidden = true;
     document.body.classList.remove('viewing');
     navigator.keyboard?.unlock?.();
@@ -564,14 +580,16 @@ export class Viewer {
     });
 
     // On a phone the toolbar can't hold everything, so the two pickers live in the More menu there.
+    // So do they when the bar stands up on the left or right.
     const narrow = window.matchMedia('(max-width: 640px)');
-    const placePickers = () => {
+    this._placePickers = () => {
       const pickers = [$('tbQuality').closest('label'), $('tbDisplayWrap')];
-      if (narrow.matches && !this.guest) $('moreMenu').prepend(...pickers);
-      else $('tbKeyboard').before(...pickers);
+      const menu = (narrow.matches || this.root.classList.contains('tb-vertical')) && !this.guest;
+      if (menu && pickers[0].parentElement !== $('moreMenu')) $('moreMenu').prepend(...pickers);
+      else if (!menu && pickers[0].parentElement !== $('toolbar')) $('tbKeyboard').before(...pickers);
     };
-    placePickers();
-    this._on(narrow, 'change', placePickers);
+    this._placePickers();
+    this._on(narrow, 'change', () => this._placeToolbar());
 
     $('tbKeyboard').hidden = !this.touchFirst;
     // pointerdown keeps the phone keyboard's focus while the button is pressed, so the button can toggle it.
@@ -583,6 +601,7 @@ export class Viewer {
       const bar = $('keysBar');
       bar.hidden = !bar.hidden;
       $('tbKeys').setAttribute('aria-pressed', String(!bar.hidden));
+      if (bar.hidden) this._closeKeysEditor();
     });
 
     on('tbSound', 'click', () => this._setMuted(!this.video.muted));
@@ -692,9 +711,13 @@ export class Viewer {
     this._on($('moreMenu'), 'keydown', e => this._toolbarKey(e));
     // On the whole viewer, not just the picture: at the top in the middle the mouse is over the handle instead.
     this._on(this.root, 'pointermove', e => {
-      if (e.pointerType !== 'touch' && !this.pointer?.locked && e.clientY < SHOW_ZONE_PX) this._showToolbar();
+      if (e.pointerType === 'touch' || this.pointer?.locked || !this._autoHide()) return;
+      const box = this.root.getBoundingClientRect();
+      const near = { top: e.clientY - box.top < SHOW_ZONE_PX, bottom: box.bottom - e.clientY < SIDE_ZONE_PX,
+        left: e.clientX - box.left < SIDE_ZONE_PX, right: box.right - e.clientX < SIDE_ZONE_PX };
+      if (near[this.prefs.get('tbEdge')]) this._showToolbar();
     });
-    this._on(this.surface, 'pointerdown', () => this._toggleMenu(false));
+    this._on(this.surface, 'pointerdown', () => { this._toggleMenu(false); this._closeKeysEditor(); });
   }
 
   // The display picker. Called again when the Mac says its displays changed (one was unplugged or plugged in).
@@ -782,6 +805,315 @@ export class Viewer {
     }
   }
 
+  // --- where the toolbar sits: any edge, anywhere along it ---
+
+  _wirePlacement() {
+    const $ = this.$, prefs = this.prefs;
+    const edge = $('optEdge'), auto = $('optAutoHide');
+    edge.value = prefs.get('tbEdge');
+    auto.checked = this._autoHide();
+    this._on(edge, 'change', () => { prefs.set('tbEdge', edge.value); prefs.set('tbPos', 0.5); this._placeToolbar(); this._showToolbar(); });
+    this._on(auto, 'change', () => { prefs.set('tbAutoHide', auto.checked); this._placeToolbar(); this._showToolbar(); });
+
+    // Drag the grip: the bar jumps to whichever edge the pointer is nearest, at the pointer's place along it.
+    const grip = $('tbGrip');
+    let dragging = null;
+    this._on(grip, 'pointerdown', e => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      dragging = e.pointerId;
+      try { grip.setPointerCapture(e.pointerId); } catch {}
+      this.root.classList.add('tb-dragging');
+    });
+    this._on(window, 'pointermove', e => {
+      if (e.pointerId !== dragging) return;
+      const box = this.root.getBoundingClientRect();
+      const x = e.clientX - box.left, y = e.clientY - box.top;
+      const dist = { top: y, bottom: box.height - y, left: x, right: box.width - x };
+      const near = EDGES.reduce((a, b) => (dist[b] < dist[a] ? b : a));
+      prefs.values.tbEdge = near;
+      prefs.values.tbPos = Math.min(1, Math.max(0, near === 'top' || near === 'bottom' ? x / box.width : y / box.height));
+      this._placeToolbar();
+    });
+    const drop = e => {
+      if (e.pointerId !== dragging) return;
+      dragging = null;
+      this.root.classList.remove('tb-dragging');
+      prefs.set('tbEdge', prefs.get('tbEdge'));
+      prefs.set('tbPos', Math.round(prefs.get('tbPos') * 1000) / 1000);
+      $('optEdge').value = prefs.get('tbEdge');
+      this._showToolbar();
+    };
+    this._on(window, 'pointerup', drop, true);
+    this._on(window, 'pointercancel', drop, true);
+    // From the keyboard: the arrow keys slide it along its edge.
+    this._on(grip, 'keydown', e => {
+      const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      prefs.set('tbPos', Math.min(1, Math.max(0, prefs.get('tbPos') + step * 0.05)));
+      this._placeToolbar();
+    });
+
+    // The bar, the keys bar and the window changing size all move things about.
+    if ('ResizeObserver' in window) {
+      this.resizeObserver = new ResizeObserver(() => {
+        cancelAnimationFrame(this.placeFrame);
+        this.placeFrame = requestAnimationFrame(() => this._placeToolbar());
+      });
+      for (const id of ['toolbar', 'keysBar', 'viewer']) this.resizeObserver.observe($(id));
+    }
+    this._placeToolbar();
+  }
+
+  // Unless chosen otherwise, the bar stays put with a mouse and hides itself on touch screens (small, and a tap on
+  // the handle is easy there).
+  _autoHide() {
+    const v = this.prefs.get('tbAutoHide');
+    return typeof v === 'boolean' ? v : !!this.touchFirst;
+  }
+
+  _placeToolbar() {
+    if (!this.root || this.root.hidden) return;
+    const root = this.root, tb = this.$('toolbar'), handle = this.$('handle');
+    const edge = this.prefs.get('tbEdge'), pos = this.prefs.get('tbPos');
+    const pinned = !this._autoHide();
+    const vertical = edge === 'left' || edge === 'right';
+    for (const e of EDGES) root.classList.toggle(`tb-${e}`, e === edge);
+    root.classList.toggle('tb-pinned', pinned);
+    root.classList.toggle('tb-vertical', vertical);
+    this._placePickers?.();
+    tb.style.left = tb.style.top = '';  // measured where the edge's own rules put it
+    const W = root.clientWidth, H = root.clientHeight, w = tb.offsetWidth, h = tb.offsetHeight;
+    const clampPx = (v, max) => Math.round(Math.min(Math.max(0, max), Math.max(0, v)));
+    if (vertical) {
+      tb.style.left = '';
+      tb.style.top = `${clampPx(pos * H - h / 2, H - h)}px`;
+      handle.style.left = '';
+      handle.style.top = `${Math.round(pos * 100)}%`;
+    } else {
+      tb.style.top = '';
+      tb.style.left = `${clampPx(pos * W - w / 2, W - w)}px`;
+      handle.style.top = '';
+      handle.style.left = `${Math.round(pos * 100)}%`;
+    }
+    // A bar that stays put gets its own strip: the Mac's picture shrinks to fit beside it rather than under it.
+    const size = vertical ? w : h;
+    for (const e of EDGES) root.style.setProperty(`--tb-${e}`, `${pinned && e === edge ? size : 0}px`);
+    // So does the keys bar, with a mouse (on a touch screen it comes and goes with the phone keyboard).
+    const bar = this.$('keysBar');
+    root.style.setProperty('--keys-h', `${!this.touchFirst && !bar.hidden ? bar.offsetHeight : 0}px`);
+    const box = this.surface.getBoundingClientRect();
+    const key = `${Math.round(box.width)}x${Math.round(box.height)}`;
+    if (key !== this.surfaceKey) {
+      this.surfaceKey = key;
+      this.setView(this.view);
+      this._reportView();
+    }
+  }
+
+  // --- this computer's pointer, hidden so only the Mac's shows ---
+
+  _setHideCursor(on, { note = true } = {}) {
+    on = on && !this.touchFirst;
+    this.prefs.set('hideCursor', on);
+    this.$('optHideCursor').checked = on;
+    this.root.classList.toggle('nocursor', on);
+    if (!note) return;
+    this.banners.show('cursor', { kind: 'info', icon: 'pointer',
+      title: on ? "This computer's pointer is hidden." : "This computer's pointer is back.",
+      body: on ? 'Only your Mac\u2019s pointer shows now. Press Esc twice quickly to bring this one back.' : '', dismissible: true });
+    clearTimeout(this.cursorNoteTimer);
+    this.cursorNoteTimer = setTimeout(() => this.banners.hide('cursor'), 4000);
+  }
+
+  // --- swipes ---
+
+  _swipe(dir) {
+    if (!this.inputAllowed || this.over) return;
+    if (dir === 'up' || dir === 'down') return this._pressId(dir === 'up' ? 'missionControl' : 'appWindows');
+    const mode = this.prefs.get('swipe');
+    if (mode === 'apps') return this._appSwitch(dir);
+    const a = SWIPE_ACTIONS[mode];
+    if (a?.next) this._pressId(dir > 0 ? a.next : a.prev);
+  }
+
+  _pressId(id) {
+    const s = findShortcut(id, this.customKeys);
+    if (s) for (const m of pressMessages(s.code, s.key, s.m)) this.session.sendInput(m);
+  }
+
+  // ⌘ stays held between swipes, so the app switcher stays up and each swipe moves along it; let go a moment later.
+  _appSwitch(dir) {
+    const send = m => this.session.sendInput(m);
+    if (!this.cmdHeld) {
+      send({ t: 'k', c: 'MetaLeft', k: 'Meta', d: true, m: META });
+      this.cmdHeld = true;
+    }
+    const m = META | (dir < 0 ? SHIFT : 0);
+    if (dir < 0) send({ t: 'k', c: 'ShiftLeft', k: 'Shift', d: true, m });
+    send({ t: 'k', c: 'Tab', k: 'Tab', d: true, m });
+    send({ t: 'k', c: 'Tab', k: 'Tab', d: false, m });
+    if (dir < 0) send({ t: 'k', c: 'ShiftLeft', k: 'Shift', d: false, m: META });
+    clearTimeout(this.cmdTimer);
+    this.cmdTimer = setTimeout(() => this._releaseCmd(), 1000);
+  }
+
+  _releaseCmd() {
+    clearTimeout(this.cmdTimer);
+    if (!this.cmdHeld) return;
+    this.cmdHeld = false;
+    this.session.sendInput({ t: 'k', c: 'MetaLeft', k: 'Meta', d: false, m: 0 });
+  }
+
+  // --- the keys bar: which keys it has, and the editor for choosing them ---
+
+  _wireKeysBar() {
+    const $ = this.$;
+    this._renderKeys();
+    this._on($('keysEdit'), 'click', () => this._openKeysEditor());
+    this._on($('optEditKeys'), 'click', () => this._openKeysEditor());
+    this._on($('keysEditorDone'), 'click', () => this._closeKeysEditor());
+    this._on($('keysEditor'), 'keydown', e => { if (e.key === 'Escape') { e.preventDefault(); this._closeKeysEditor(); } });
+    this._on($('keysReset'), 'click', () => {
+      this.prefs.set('keysBar', [...DEFAULT_BAR]);
+      this._renderKeys();
+      this._renderKeysEditor();
+    });
+    $('keOwnKey').replaceChildren(...CUSTOM_KEYS.map(([code, , label]) => {
+      const o = document.createElement('option');
+      o.value = code;
+      o.textContent = label;
+      return o;
+    }));
+    this._on($('keOwnAdd'), 'click', () => {
+      const m = [...$('keysEditor').querySelectorAll('.ke-own input[type=checkbox]:checked')].reduce((a, i) => a | Number(i.value), 0);
+      const c = makeCustom($('keOwnKey').value, m, $('keOwnName').value);
+      if (!c) return;
+      const own = [...this.customKeys.filter(x => x.id !== c.id), c];
+      this.prefs.set('customKeys', own.map(({ code, m, name }) => ({ code, m, name })));
+      this.prefs.set('keysBar', toggleOnBar(this.bar, c.id, true));
+      $('keOwnName').value = '';
+      this._renderKeys();
+      this._renderKeysEditor();
+    });
+
+    // Swipes.
+    const sw = $('optSwipe');
+    sw.replaceChildren(...Object.entries(SWIPE_ACTIONS).map(([v, a]) => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = a.label;
+      return o;
+    }));
+    sw.value = this.prefs.get('swipe') in SWIPE_ACTIONS ? this.prefs.get('swipe') : 'apps';
+    this._on(sw, 'change', () => this.prefs.set('swipe', sw.value));
+
+    // This computer's pointer (only with a mouse or touchpad).
+    $('hideCursorWrap').hidden = !!this.touchFirst || this.guest;
+    this._on($('optHideCursor'), 'change', e => this._setHideCursor(e.target.checked));
+    if (this.prefs.get('hideCursor')) this._setHideCursor(true, { note: false });
+  }
+
+  _renderKeys() {
+    this.customKeys = cleanCustom(this.prefs.get('customKeys'));
+    this.bar = cleanBar(this.prefs.get('keysBar'), this.customKeys);
+    this.$('keysList').replaceChildren(...this.bar.map(id => {
+      const s = findShortcut(id, this.customKeys);
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'key' + (s.label.length > 2 ? ' wide' : '');
+      b.dataset.key = id;
+      b.textContent = s.label;
+      b.title = s.title;
+      if (s.title !== s.label) b.setAttribute('aria-label', s.title);
+      return b;
+    }));
+  }
+
+  _openKeysEditor() {
+    this._toggleMenu(false);
+    const bar = this.$('keysBar');
+    bar.hidden = false;
+    this.$('tbKeys').setAttribute('aria-pressed', 'true');
+    this._renderKeysEditor();
+    this.$('keysEditor').hidden = false;
+    this.$('keysEditorDone').focus({ preventScroll: true });
+  }
+
+  _closeKeysEditor() {
+    const ed = this.$('keysEditor');
+    if (ed.hidden) return;
+    ed.hidden = true;
+    this.surface.focus({ preventScroll: true });
+  }
+
+  _renderKeysEditor() {
+    const on = new Set(this.bar);
+    const choice = (s, extra) => {
+      const label = document.createElement('label');
+      label.className = 'ke-item';
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = on.has(s.id);
+      box.addEventListener('change', () => {
+        this.prefs.set('keysBar', toggleOnBar(this.bar, s.id, box.checked));
+        this._renderKeys();
+      });
+      const b = document.createElement('b');
+      b.textContent = s.label;
+      const t = document.createElement('span');
+      t.textContent = s.title === s.label ? '' : s.title;
+      label.append(box, b, t);
+      if (extra) label.append(extra);
+      return label;
+    };
+    const groups = [];
+    for (const g of [...GROUPS, 'Yours']) {
+      const items = g === 'Yours' ? this.customKeys : CATALOG.filter(s => s.group === g);
+      if (!items.length) continue;
+      const fs = document.createElement('fieldset');
+      const lg = document.createElement('legend');
+      lg.textContent = g === 'Yours' ? 'Your own' : g;
+      fs.append(lg);
+      if (g === 'Function keys') {
+        const all = document.createElement('button');
+        all.type = 'button';
+        all.className = 'btn small quiet ke-all';
+        const every = FUNCTION_KEYS.every(id => on.has(id));
+        all.textContent = every ? 'Take F1–F12 off' : 'Put all of F1–F12 on';
+        all.addEventListener('click', () => {
+          let bar = this.bar;
+          for (const id of FUNCTION_KEYS) bar = toggleOnBar(bar, id, !every);
+          this.prefs.set('keysBar', bar);
+          this._renderKeys();
+          this._renderKeysEditor();
+        });
+        fs.append(all);
+      }
+      for (const s of items) {
+        let extra;
+        if (g === 'Yours') {
+          extra = document.createElement('button');
+          extra.type = 'button';
+          extra.className = 'ke-x';
+          extra.textContent = '×';
+          extra.setAttribute('aria-label', `Remove ${s.label}`);
+          extra.addEventListener('click', e => {
+            e.preventDefault();
+            this.prefs.set('customKeys', this.customKeys.filter(x => x.id !== s.id).map(({ code, m, name }) => ({ code, m, name })));
+            this.prefs.set('keysBar', toggleOnBar(this.bar, s.id, false));
+            this._renderKeys();
+            this._renderKeysEditor();
+          });
+        }
+        fs.append(choice(s, extra));
+      }
+      groups.push(fs);
+    }
+    this.$('keysGroups').replaceChildren(...groups);
+  }
+
   _showToolbar() {
     this.root.classList.add('tb-on');
     clearTimeout(this.hideTimer);
@@ -806,7 +1138,19 @@ export class Viewer {
   }
 
   _ownShortcut(e) {
-    if (!(e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyT') || this.over) return;
+    if (this.over) return;
+    // A hidden pointer comes back with Esc twice (the first Esc still goes to the Mac).
+    if (e.key === 'Escape' && !e.repeat && this.root.classList.contains('nocursor') && !this.pointer?.locked) {
+      if (e.timeStamp - (this.lastEsc ?? -Infinity) < DOUBLE_ESC_MS) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        this.lastEsc = null;
+        this._setHideCursor(false);
+        return;
+      }
+      this.lastEsc = e.timeStamp;
+    }
+    if (!(e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyT')) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     this._showToolbar();

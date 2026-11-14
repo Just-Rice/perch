@@ -6,7 +6,14 @@ import { QUALITY, DEFAULT_QUALITY } from '../shared/proto.js';
 export const PREFS_KEY = 'perch.prefs.v1';
 
 export function defaultPrefs({ apple = false } = {}) {
-  return { quality: DEFAULT_QUALITY, swapCtrlCmd: !apple, backupName: '', volume: 1, muted: false, stats: false };
+  return {
+    quality: DEFAULT_QUALITY, swapCtrlCmd: !apple, backupName: '', volume: 1, muted: false, stats: false,
+    captureOnClick: false, hideCursor: false,
+    // The toolbar: which edge it sits on, where along that edge (0..1), and whether it hides itself when not in use
+    // (otherwise it stays put and the Mac's picture makes room for it).
+    tbEdge: 'top', tbPos: 0.5, tbAutoHide: null, // null: hide on touch screens only
+    keysBar: null, customKeys: [], swipe: 'apps',
+  };
 }
 
 export class Prefs {
@@ -26,6 +33,12 @@ export class Prefs {
         if (Number.isFinite(saved.volume)) this.values.volume = Math.min(1, Math.max(0, saved.volume));
         if (typeof saved.muted === 'boolean') this.values.muted = saved.muted;
         if (typeof saved.stats === 'boolean') this.values.stats = saved.stats;
+        for (const k of ['captureOnClick', 'hideCursor', 'tbAutoHide']) if (typeof saved[k] === 'boolean') this.values[k] = saved[k];
+        if (['top', 'bottom', 'left', 'right'].includes(saved.tbEdge)) this.values.tbEdge = saved.tbEdge;
+        if (Number.isFinite(saved.tbPos)) this.values.tbPos = Math.min(1, Math.max(0, saved.tbPos));
+        if (Array.isArray(saved.keysBar)) this.values.keysBar = saved.keysBar.slice(0, 80);
+        if (Array.isArray(saved.customKeys)) this.values.customKeys = saved.customKeys.slice(0, 40);
+        if (typeof saved.swipe === 'string') this.values.swipe = saved.swipe;
       }
     } catch { /* keep the defaults */ }
   }

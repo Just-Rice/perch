@@ -23,13 +23,21 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 // Page pixels → display coordinates. `box` is the untransformed box ({left, top, width, height}, what
 // getBoundingClientRect() gives for the element that holds the zoomed wrapper), `view` the local zoom and pan.
 // Returns {x, y, inside}: x and y are clamped to 0..1 so a drag that leaves the picture still ends on the edge.
-export function toDisplay(clientX, clientY, box, videoWidth, videoHeight, view = IDENTITY) {
+// `edgePx`: within this many page pixels of the picture's edge counts as the edge itself. The page's pointer can't go
+// past the last row of pixels, which (with the Mac's screen shrunk to fit) is a little short of the Mac's last row, so
+// the Dock or a full-screen app's menu bar, which wait for the pointer at the very edge, would never come.
+export function toDisplay(clientX, clientY, box, videoWidth, videoHeight, view = IDENTITY, edgePx = 0) {
   const localX = (clientX - box.left - view.x) / view.scale;
   const localY = (clientY - box.top - view.y) / view.scale;
   const pic = containRect(box.width, box.height, videoWidth, videoHeight);
-  const nx = pic.width > 0 ? (localX - pic.x) / pic.width : 0;
-  const ny = pic.height > 0 ? (localY - pic.y) / pic.height : 0;
+  let nx = pic.width > 0 ? (localX - pic.x) / pic.width : 0;
+  let ny = pic.height > 0 ? (localY - pic.y) / pic.height : 0;
   const inside = nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1;
+  if (edgePx > 0 && pic.width > 0 && pic.height > 0) {
+    const ex = edgePx / (pic.width * view.scale), ey = edgePx / (pic.height * view.scale);
+    if (nx < ex) nx = 0; else if (nx > 1 - ex) nx = 1;
+    if (ny < ey) ny = 0; else if (ny > 1 - ey) ny = 1;
+  }
   return { x: round(clamp(nx, 0, 1)), y: round(clamp(ny, 0, 1)), inside };
 }
 

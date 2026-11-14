@@ -30,7 +30,8 @@ export function sites(ctx) {
       $('sitesList').replaceChildren(...list.map(site => {
         const row = h('li', { class: 'site-row' },
           h('span', { class: 'site-name' }, h('b', {}, host(site.origin)),
-            h('span', { class: 'muted small' }, site.builtIn ? ' · the official Perch site' : ` · ${site.url}`)));
+            h('span', { class: 'muted small' }, (site.official ? ' · the official Perch site' : site.builtIn ? ' · built in' : ` · ${site.url}`)
+              + (site.primary && list.length > 1 ? ' · new pairing links use it' : ''))));
         if (!site.builtIn) {
           const remove = h('button', { type: 'button', class: 'btn danger-quiet small' }, 'Remove');
           remove.addEventListener('click', () => confirmInline(remove, {
@@ -50,7 +51,10 @@ export function sites(ctx) {
       const before = pick.value;
       pick.dataset.sites = want;
       pick.replaceChildren(...list.map(x => h('option', { value: x.origin }, host(x.origin))));
-      if (list.some(x => x.origin === before)) pick.value = before;
+      // New devices are paired for the default site unless another was just chosen.
+      const primary = list.find(x => x.primary)?.origin;
+      if (before && list.some(x => x.origin === before)) pick.value = before;
+      else if (primary) pick.value = primary;
     }
     show($('pairSiteLabel'), list.length > 1);
   }

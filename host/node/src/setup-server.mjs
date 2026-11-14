@@ -85,6 +85,8 @@ const ACTIONS = {
   updateSettings: [['patch', 'object']],
   disconnect: [],
   requestPermission: [['which', 'string']],
+  resetPermission: [['which', 'string']],
+  relaunch: [],
   newMacName: [],
   customMacName: [['name', 'string']],
   reset: [],

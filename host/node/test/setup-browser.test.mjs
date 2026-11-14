@@ -849,6 +849,13 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     assert.equal(await text(page, '#permAccessibility [data-status]'), 'Not allowed yet');
     await click(page, '#permAccessibility [data-open]');
     await command('request-permission', { which: 'accessibility' });
+    // On in System Settings but not here: reset the old entry and ask again, or restart Perch.
+    assert.equal(await visible(page, '#permAccessibility [data-stuck]'), true);
+    assert.equal(await visible(page, '#permScreen [data-stuck]'), false, 'nothing to fix for an allowed permission');
+    await click(page, '#permAccessibility [data-reset]');
+    await command('reset-permission', { which: 'accessibility' });
+    await click(page, '#permAccessibility [data-relaunch]');
+    await command('relaunch');
   });
 
   await t.test('authenticator app, with a code from the secret the page shows', async () => {

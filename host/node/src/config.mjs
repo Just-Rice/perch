@@ -4,7 +4,7 @@
 // for the real RP ID and uses the public brokers. Test overrides are honoured ONLY when PERCH_TEST=1, so a stray
 // environment variable can never point a real Mac at some other website or broker. See docs/PROTOCOL.md, "Test mode".
 import { randomBytes } from 'node:crypto';
-import { APP_ORIGIN, RP_ID, CONNECT_URL, BROKERS, ICE_SERVERS, RELAY_SERVICE_URL } from '../../../site/js/shared/proto.js';
+import { APP_ORIGIN, RP_ID, CONNECT_URL, BROKERS, ICE_SERVERS, RELAY_SERVICE_URL, WORKER_ORIGIN, WORKER_CONNECT_URL } from '../../../site/js/shared/proto.js';
 import { toB64url } from '../../../site/js/shared/bytes.js';
 import { defaultHome } from './store.mjs';
 import pkg from '../package.json' with { type: 'json' };
@@ -51,6 +51,10 @@ export function loadConfig(env = process.env) {
     rpId: t('PERCH_RP_ID') ?? RP_ID,
     // Pairing links are `${site}#pair=...`.
     site: t('PERCH_SITE') ?? CONNECT_URL,
+    // The other built-in site (the workers.dev copy), which pairing links point at by default. Tests have their own
+    // page on this computer instead, unless they ask for it with PERCH_WORKER_SITE=1.
+    workerSite: test && t('PERCH_WORKER_SITE') !== '1' ? null
+      : { origin: WORKER_ORIGIN, rpId: new URL(WORKER_ORIGIN).hostname, url: WORKER_CONNECT_URL },
     setupPort,
     setupKey: t('PERCH_SETUP_KEY') ?? toB64url(randomBytes(24)),
     // PERCH_ICE=none: host candidates only, plus loopback so tests work on a Mac with no network.

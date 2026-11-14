@@ -23,6 +23,12 @@ export const BROKERS = [
   'wss://public:public@public.cloud.shiftr.io/',
 ];
 
+// A second built-in website: the same Perch site, served by the owner's Cloudflare Worker (relay/), which also
+// relays connections where the direct route is blocked. Macs accept sign-ins from it as from APP_ORIGIN, and pairing
+// links point at it by default. Passkeys belong to a site's domain, so a device is paired once per site.
+export const WORKER_ORIGIN = 'https://perch-relay.rishirao2712.workers.dev';
+export const WORKER_CONNECT_URL = `${WORKER_ORIGIN}/connect`;
+
 // Perch's shared relay service (relay-service/): relay logins for Macs on strict networks, within monthly limits.
 // Empty until the service is running; a Mac then uses only a relay key of its owner's own, if any.
 export const RELAY_SERVICE_URL = '';

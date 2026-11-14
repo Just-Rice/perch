@@ -4,7 +4,7 @@
 // It owns the sessions: it creates them for signaling, picks the one signed-in viewer that gets the picture, feeds
 // that viewer the app's video and sound, and passes that viewer's (already checked) input to the app. All methods
 // may be async; errors are thrown as Error with a plain-language message safe to show the user.
-import { QUALITY, DEFAULT_QUALITY, PAIR_TTL_MS, AUTH_TIMEOUT_MS } from '../../../site/js/shared/proto.js';
+import { QUALITY, DEFAULT_QUALITY, PAIR_TTL_MS, AUTH_TIMEOUT_MS, APP_ORIGIN } from '../../../site/js/shared/proto.js';
 import { newMacName as makeMacName, suggestPassword } from './names.mjs';
 import { normalizeMacName, CUSTOM_MAC_NAME_RE } from '../../../site/js/shared/rendezvous.js';
 import { HostPeer, ensureDtlsIdentity } from './rtc.mjs';
@@ -166,7 +166,8 @@ export class Controller {
       workerRelay: this.workerRelay.state(),
       audioOutputs: this.audioOutputs.map(d => ({ ...d })),
       devices: s.devices.map(d => ({ ...publicDevice(d), site: this.auth.deviceRpId(d) })),
-      sites: this.auth.sites().map(x => ({ origin: x.origin, url: x.url, builtIn: !!x.builtIn, addedAt: x.addedAt ?? null })),
+      sites: this.auth.sites().map(x => ({ origin: x.origin, url: x.url, builtIn: !!x.builtIn, addedAt: x.addedAt ?? null,
+        primary: x.origin === this.auth.primarySite.origin, official: x.origin === APP_ORIGIN })),
       pairing: this.auth.pairingInfo(),
       guest: (g => g ? { ...g, watching: this.guests.size } : null)(this.auth.guestInfo()),
       session: a ? { viewer: a.label, route: a.route, since: new Date(a.signedInAt).toISOString(), deviceId: a.deviceId,
@@ -860,6 +861,22 @@ export class Controller {
   disconnect() {
     this.active?.end('disconnected');
     this._changed();
+  }
+
+  // A permission switched on in System Settings that Perch still sees as off: forget the old entry and ask again
+  // (permission-reset event), or restart Perch so macOS gives it a fresh answer.
+  resetPermission(which) {
+    if (which !== 'screen' && which !== 'accessibility') throw new Error('Unknown permission.');
+    this.store.activity('settings', `${which === 'screen' ? 'Screen Recording' : 'Accessibility'} permission reset and asked for again`);
+    this.app.command('reset-permission', { which });
+    this._changed();
+    return { ok: true };
+  }
+
+  relaunch() {
+    this.store.activity('settings', 'Perch restarted from Setup');
+    this.app.command('relaunch', {});
+    return { ok: true };
   }
 
   requestPermission(which) {

@@ -8,7 +8,9 @@ export class ApiError extends Error {
   constructor(message, status) { super(message); this.status = status; }
 }
 
-const NOT_RUNNING = 'Can\'t reach Perch on this Mac. Check that Perch is running (its icon is in the menu bar).';
+// Also what an old Setup tab sees after Perch quit or restarted (each run has its own address and key).
+const NOT_RUNNING = 'Can\'t reach Perch on this Mac. Check that Perch is running (its icon is in the menu bar), then open ' +
+  'Setup again from that icon: a Setup page left open from before Perch last restarted can\'t reach it any more.';
 
 async function request(path, options = {}) {
   let res;

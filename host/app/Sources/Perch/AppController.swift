@@ -299,6 +299,32 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
             notify(title: title, body: JSONValue.string(cmd["body"]) ?? "")
         case "permissions":
             watch.checkPermissions(force: true)
+        case "reset-permission":
+            // Only the real app, never a test run: this changes what macOS remembers.
+            let which = JSONValue.string(cmd["which"]) ?? ""
+            guard systemChangesAllowed else {
+                sendEvent(["e": "permission-reset", "which": which, "ok": false, "error": "Not done in test runs."])
+                return
+            }
+            let ok = Permissions.reset(which)
+            sendEvent(["e": "permission-reset", "which": which, "ok": ok])
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.watch.checkPermissions() }
+        case "relaunch":
+            // Quit and open again: macOS only gives a running app a fresh answer about Screen Recording after a restart.
+            guard systemChangesAllowed, bundled else {
+                sendEvent(["e": "relaunch", "ok": false, "error": "Not done in test runs."])
+                return
+            }
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", "sleep 1.5; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+            do {
+                try p.run()
+                Log.shared.info("relaunching")
+                shutDown()
+            } catch {
+                sendEvent(["e": "relaunch", "ok": false, "error": "\(error)"])
+            }
         case "request-permission":
             Permissions.request(JSONValue.string(cmd["which"]) ?? "")
             // The answer can take a while; look again soon rather than at the next 3 s poll.

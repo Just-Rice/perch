@@ -17,8 +17,49 @@ struct Permissions: Equatable {
     /// The permissions as they matter to Perch. The synthetic source needs no Screen Recording permission, and
     /// echoed input needs no Accessibility permission, so in those test modes they count as granted.
     static func current(synthetic: Bool, echoInput: Bool) -> Permissions {
-        Permissions(screen: synthetic || CGPreflightScreenCaptureAccess(),
+        Permissions(screen: synthetic || CGPreflightScreenCaptureAccess() || windowTitlesVisible(),
                     accessibility: echoInput || AXIsProcessTrusted())
+    }
+
+    /// A second look at Screen Recording. CGPreflightScreenCaptureAccess can keep saying no after the permission was
+    /// switched on (until the app restarts), so Setup said "not allowed" while System Settings showed it on. The
+    /// titles of other apps' windows are only readable with the permission, so one readable title is a yes. Never
+    /// shows a prompt. Nothing on screen to look at proves nothing either way, and the answer stays no.
+    static func windowTitlesVisible() -> Bool {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+                as? [[String: Any]] else { return false }
+        let me = getpid()
+        // The window server and the Dock name some of their own windows for everyone.
+        let system: Set<String> = ["Window Server", "Dock", "WindowManager", "Control Center", "Control Centre",
+                                   "SystemUIServer", "Notification Center", "Notification Centre", "loginwindow"]
+        for w in list {
+            guard (w[kCGWindowLayer as String] as? Int) == 0,
+                  let pid = w[kCGWindowOwnerPID as String] as? Int, pid_t(pid) != me,
+                  let owner = w[kCGWindowOwnerName as String] as? String, !system.contains(owner),
+                  let title = w[kCGWindowName as String] as? String, !title.isEmpty else { continue }
+            return true
+        }
+        return false
+    }
+
+    /// Forgets what macOS remembers about this permission for Perch, then asks again. Fixes a switch that shows on in
+    /// System Settings but belongs to an older copy of Perch (it is then switched on for a different app signature).
+    static func reset(_ which: String) -> Bool {
+        let service: String
+        switch which {
+        case "screen": service = "ScreenCapture"
+        case "accessibility": service = "Accessibility"
+        default: return false
+        }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        p.arguments = ["reset", service, Bundle.main.bundleIdentifier ?? "io.github.just-rice.perch"]
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        do { try p.run(); p.waitUntilExit() } catch { return false }
+        Log.shared.info("permission \(which) reset (tccutil exit \(p.terminationStatus)); asking again")
+        request(which)
+        return p.terminationStatus == 0
     }
 
     static func request(_ which: String) {

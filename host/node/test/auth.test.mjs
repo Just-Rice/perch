@@ -356,3 +356,27 @@ test('extra sites: accepted only once added, each with passkeys of its own', asy
   store.removeSite(MINE);
   await assert.rejects(auth.verifyAssertion(mine.get({ challenge: toB64url(b2) }), b2), e => e.reason === 'origin');
 });
+
+test('the workers.dev copy of the site is built in, gets new pairing links, and older devices keep their site', async () => {
+  const { Auth } = await import('../src/auth.mjs');
+  const { Store } = await import('../src/store.mjs');
+  const { mkdtempSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const store = await Store.open({ home: mkdtempSync(join(tmpdir(), 'perch-worker-site-')), secrets: 'file' });
+  const config = { origins: ['https://just-rice.github.io'], rpId: 'just-rice.github.io', site: 'https://just-rice.github.io/perch/connect.html',
+    workerSite: { origin: 'https://perch-relay.rishirao2712.workers.dev', rpId: 'perch-relay.rishirao2712.workers.dev',
+      url: 'https://perch-relay.rishirao2712.workers.dev/connect' } };
+  const auth = new Auth({ store, config });
+  await auth.init();
+  await store.setTotpSecret(new Uint8Array(20).fill(7));
+  assert.deepEqual(auth.sites().map(x => [x.origin, x.rpId, x.builtIn]), [
+    ['https://just-rice.github.io', 'just-rice.github.io', true],
+    ['https://perch-relay.rishirao2712.workers.dev', 'perch-relay.rishirao2712.workers.dev', true]]);
+  assert.equal(auth.primarySite.origin, 'https://perch-relay.rishirao2712.workers.dev', 'pairing links point at workers.dev');
+  const link = auth.createPairing().link;
+  assert.match(link, /^https:\/\/perch-relay\.rishirao2712\.workers\.dev\/connect#pair=/);
+  assert.match(auth.createPairing('https://just-rice.github.io').link, /^https:\/\/just-rice\.github\.io\/perch\/connect\.html#pair=/);
+  assert.equal(auth.deviceRpId({ id: 'old' }), 'just-rice.github.io', 'a device paired before sites had domains stays on GitHub');
+  assert.equal(auth.creationOptions(new Uint8Array(32)).rp.id, 'perch-relay.rishirao2712.workers.dev');
+});

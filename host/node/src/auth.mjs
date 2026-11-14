@@ -75,6 +75,12 @@ export class Auth {
     // The sites built in: the official one (and, in test mode, the test page). Passkeys belong to a site's domain
     // (its "RP ID"), so each site has its own, and a device is paired once per site it signs in from.
     this.builtinSites = config.origins.map(origin => ({ origin, rpId: config.rpId, url: config.site, builtIn: true }));
+    // The workers.dev copy of the site is built in too, and new pairing links point there (it is listed last).
+    if (config.workerSite && !this.builtinSites.some(x => x.origin === config.workerSite.origin)) {
+      this.builtinSites.push({ ...config.workerSite, builtIn: true });
+    }
+    // Devices paired before sites had their own domains belong to the official site's.
+    this.legacyRpId = config.rpId;
     this.log = log;
     this.now = now;
     this.pendingTotp = null;  // {secret} while the Setup page shows a new QR code; never written to disk
@@ -99,7 +105,7 @@ export class Auth {
   // Where pairing links point unless another site is asked for, and the site older devices were paired on.
   get primarySite() { return this.builtinSites.at(-1); }
   get origins() { return this.sites().map(x => x.origin); }
-  deviceRpId(device) { return device.rpId ?? this.primarySite.rpId; }
+  deviceRpId(device) { return device.rpId ?? this.legacyRpId; }
 
   // --- passkeys ---
 

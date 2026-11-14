@@ -105,8 +105,8 @@ function onConnection(status, failures = 0) {
   else if (status === 'stale') {
     showBanner('This Setup page is out of date. Open Setup again from the Perch icon in the menu bar.');
   } else if (status === 'lost' && failures >= 2) {
-    showBanner('Can\'t reach Perch on this Mac. Check that Perch is running (its icon is in the menu bar). ' +
-      'Trying again…', 'warn');
+    showBanner('Can\'t reach Perch on this Mac. Check that Perch is running (its icon is in the menu bar). If it is, ' +
+      'open Setup again from that icon: this page may be from before Perch last restarted. Trying again…', 'warn');
   }
 }
 

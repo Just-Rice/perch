@@ -13,6 +13,14 @@ export function permissions(ctx) {
       await ctx.post('requestPermission', { which });
       row.dataset.asked = 'true';
     }));
+    // On in System Settings but not here: a fresh entry for this copy of Perch, or a restart.
+    const reset = row.querySelector('[data-reset]');
+    reset.addEventListener('click', () => busy(reset, error, () => ctx.post('resetPermission', { which })));
+    const relaunch = row.querySelector('[data-relaunch]');
+    relaunch.addEventListener('click', () => busy(relaunch, error, async () => {
+      await ctx.post('relaunch');
+      setText(error, '');
+    }));
   }
 
   return {
@@ -25,6 +33,7 @@ export function permissions(ctx) {
         setText(status, ok ? '✓ Allowed' : 'Not allowed yet');
         status.dataset.ok = String(ok);
         show(row.querySelector('[data-hint]'), !ok);
+        show(row.querySelector('[data-stuck]'), !ok);
         show(row.querySelector('[data-open]'), !ok);
       }
       const done = p.screen === true && p.accessibility === true;

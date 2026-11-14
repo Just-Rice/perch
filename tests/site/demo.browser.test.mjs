@@ -456,6 +456,36 @@ test('desktop: show one window, fit it to this screen, and go back to the whole 
   await page.close();
 });
 
+test('the bar: hide it with one click, move it to the side from the menu; Force Quit from the menu', async () => {
+  const page = await openPage(stack, demoUrl({ log: '0' }));
+  await ready(page);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  assert.equal(await page.eval(`document.querySelector('#moreMenu .menu-head').textContent`), 'This bar', 'the bar\u2019s settings come first');
+  // Hide: gone at once, and from then on it tucks itself away; a note says how to get it back (once).
+  await page.click('#tbHide');
+  await page.waitFor(`!document.getElementById('viewer').classList.contains('tb-on')`, { what: 'the bar hidden' });
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).tbAutoHide`), true);
+  assert.match(await page.text('#banners'), /The bar is hidden/);
+  // Move it to the left side from the menu.
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.eval(`(() => { const s = document.getElementById('optEdge'); s.value = 'left'; s.dispatchEvent(new Event('change')); })()`);
+  await page.waitFor(`document.getElementById('viewer').classList.contains('tb-left') && document.getElementById('viewer').classList.contains('tb-vertical')`, { what: 'the bar on the left' });
+  const r = await page.eval(`(() => { const b = document.getElementById('toolbar').getBoundingClientRect(); return { left: b.left, h: b.height, w: b.width }; })()`);
+  assert.ok(r.left <= 1 && r.h > r.w, `a tall bar at the left edge: ${JSON.stringify(r)}`);
+  await page.shot('viewer-bar-left');
+  // Force Quit: the Mac's Force Quit window, ⌘⌥Esc.
+  const n = await count(page);
+  await page.eval(`window.__perch.viewer._toggleMenu(true)`);
+  await page.click('#optForceQuit');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 6`, { what: 'the keys' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '\u2193' : '\u2191'}${m.m}`),
+    ['MetaLeft\u21938', 'AltLeft\u219312', 'Escape\u219312', 'Escape\u219112', 'AltLeft\u21918', 'MetaLeft\u21910']);
+  assert.ok(await page.eval(`!!document.querySelector('#keysBar [data-key="forceQuit"]')`), 'Force Quit on the keys bar too');
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
 test('status notes: locked, view only, slow link, no screen permission', async () => {
   const page = await openPage(stack, demoUrl({ locked: '1', viewonly: '1' }));
   await ready(page);
@@ -743,13 +773,13 @@ test('desktop: the toolbar on any edge, chosen keys, swipes, a hidden pointer an
   await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'm')`);
   assert.equal((await messages(page, n)).filter(m => m.t === 'm').at(-1).y, 1);
 
-  // Choose keys: Force Quit and F5 onto the bar, and a homemade one.
+  // Choose keys: F5 onto the bar (Force Quit is there already), and a homemade one.
   await page.click('#tbKeys');
   await page.click('#keysEdit');
   assert.equal(await page.eval(`document.getElementById('keysEditor').hidden`), false);
   await page.shot('viewer-keys-editor');
   await page.eval(`(() => { for (const l of document.querySelectorAll('#keysGroups .ke-item')) {
-    const b = l.querySelector('b').textContent; if (b === 'Force Quit' || b === 'F5') l.querySelector('input').click(); } })()`);
+    const b = l.querySelector('b').textContent; if (b === 'F5') l.querySelector('input').click(); } })()`);
   await page.eval(`(() => { document.getElementById('keOwnKey').value = 'KeyK'; })()`);
   await page.click('#keOwnAdd');
   await page.click('#keysEditorDone');

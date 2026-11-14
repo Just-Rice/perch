@@ -374,3 +374,7 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .viewer.tb-bottom .sound-prompt { bottom: calc(var(--tb-bottom, 0px) + 28px); }
 .viewer.tb-bottom .kbd-fab { bottom: calc(var(--tb-bottom, 0px) + var(--kb-inset, 0px) + 18px); }
 .menu .btn.primary { background: #2dd4bf; border-color: #2dd4bf; color: #04201d; }
+
+/* Headings that split the More menu into groups */
+.menu .menu-head { margin: 6px 0 0; font-size: .74rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #9aa3b2; }
+.menu .menu-head:first-child { margin-top: 0; }

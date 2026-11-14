@@ -84,7 +84,8 @@ export const CATALOG = [
 const BY_ID = new Map(CATALOG.map(s => [s.id, s]));
 
 // What the bar shows until the person changes it (what it always showed).
-export const DEFAULT_BAR = ['esc', 'tab', 'left', 'up', 'down', 'right', 'delete', 'cmdTab', 'missionControl', 'spotlight', 'cmdW', 'cmdQ'];
+export const DEFAULT_BAR = ['esc', 'tab', 'left', 'up', 'down', 'right', 'delete', 'cmdTab', 'missionControl', 'spotlight', 'cmdW', 'cmdQ',
+  'forceQuit'];
 export const FUNCTION_KEYS = CATALOG.filter(s => s.group === 'Function keys').map(s => s.id);
 
 // Keys a homemade shortcut can press, as [code, key, label].

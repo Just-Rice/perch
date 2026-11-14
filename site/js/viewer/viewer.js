@@ -170,6 +170,7 @@ export class Viewer {
     cancelAnimationFrame(this.placeFrame);
     if (document.pointerLockElement === this.surface) document.exitPointerLock();
     clearTimeout(this.captureNoteTimer);
+    clearTimeout(this.hideNoteTimer);
     clearTimeout(this.inviteTimer);
     this.pointer?.detach();
     this.keys?.detach();
@@ -737,7 +738,8 @@ export class Viewer {
     this._placePickers = () => {
       const pickers = [$('tbQuality').closest('label'), $('tbDisplayWrap')];
       const menu = (narrow.matches || this.root.classList.contains('tb-vertical')) && !this.guest;
-      if (menu && pickers[0].parentElement !== $('moreMenu')) $('moreMenu').prepend(...pickers);
+      // In the menu they go under "This bar"'s settings, before "The Mac".
+      if (menu && pickers[0].parentElement !== $('moreMenu')) $('macHead').before(...pickers);
       else if (!menu && pickers[0].parentElement !== $('toolbar')) $('tbKeyboard').before(...pickers);
     };
     this._placePickers();
@@ -815,6 +817,14 @@ export class Viewer {
       this.prefs.set('swapCtrlCmd', e.target.checked);
     });
     on('optZoom', 'click', () => { this.setView(IDENTITY); this._toggleMenu(false); });
+    // Force Quit: the Mac's own Force Quit window (⌘⌥Esc), to pick the app that has stopped responding.
+    $('optForceQuit').hidden = this.guest;
+    on('optForceQuit', 'click', () => {
+      this._toggleMenu(false);
+      if (!this.inputAllowed) return;
+      this.keys._press(findShortcut('forceQuit', this.customKeys));
+      this.surface.focus({ preventScroll: true });
+    });
     // Touchpad mode, on phones and tablets.
     $('touchpadWrap').hidden = $('touchpadHelp').hidden = !this.touchFirst || this.guest;
     $('optTouchpad').checked = !!this.prefs.get('touchpad');
@@ -975,6 +985,24 @@ export class Viewer {
     auto.checked = this._autoHide();
     this._on(edge, 'change', () => { prefs.set('tbEdge', edge.value); prefs.set('tbPos', 0.5); this._placeToolbar(); this._showToolbar(); });
     this._on(auto, 'change', () => { prefs.set('tbAutoHide', auto.checked); this._placeToolbar(); this._showToolbar(); });
+    // Hide it now: the bar then tucks itself away when not in use, and the small tab (or the edge) brings it back.
+    this._on($('tbHide'), 'click', () => {
+      prefs.set('tbAutoHide', true);
+      auto.checked = true;
+      this._toggleMenu(false);
+      this._placeToolbar();
+      this._hideToolbar(true);
+      this.surface.focus({ preventScroll: true });
+      if (!prefs.get('tbHideNoted')) {
+        prefs.set('tbHideNoted', true);
+        this.banners.show('tbhide', { kind: 'info', icon: 'hideBar', title: 'The bar is hidden.',
+          body: this.touchFirst ? 'Tap the small tab at the edge to bring it back.'
+            : 'Move the pointer to that edge, or click the small tab, to bring it back. To keep it showing, turn off "Hide the bar" in More.',
+          dismissible: true });
+        clearTimeout(this.hideNoteTimer);
+        this.hideNoteTimer = setTimeout(() => this.banners.hide('tbhide'), 6000);
+      }
+    });
 
     // Drag the grip: the bar jumps to whichever edge the pointer is nearest, at the pointer's place along it.
     const grip = $('tbGrip');

@@ -211,14 +211,13 @@
     <button type="button" id="tbFull" class="tb-btn" data-icon="fullscreen" title="Full screen" aria-label="Full screen"></button>
     <button type="button" id="tbCapture" class="tb-btn" data-icon="pointer" title="Capture the mouse (Esc lets go)" aria-label="Capture the mouse" aria-pressed="false" hidden></button>
     <button type="button" id="tbStats" class="tb-btn" data-icon="stats" title="Connection details" aria-label="Connection details" aria-pressed="false"></button>
+    <button type="button" id="tbHide" class="tb-btn" data-icon="hideBar" title="Hide this bar (it comes back at the edge, or with the small tab)" aria-label="Hide this bar"></button>
     <button type="button" id="tbMore" class="tb-btn" data-icon="more" title="More" aria-label="More options" aria-expanded="false" aria-controls="moreMenu"></button>
     <button type="button" id="tbBye" class="tb-btn tb-bye" data-icon="power" title="Disconnect" aria-label="Disconnect"></button>
   </div>
 
   <div id="moreMenu" class="menu" role="group" aria-label="More options" hidden>
-    <label class="check" id="touchpadWrap" hidden><input type="checkbox" id="optTouchpad"> Touchpad mode</label>
-    <p class="fine" id="touchpadHelp" hidden>Your finger moves the Mac's pointer like a laptop's touchpad; tap to click
-      where the pointer is.</p>
+    <p class="menu-head">This bar</p>
     <label class="tb-select" id="edgeWrap">
       <span>Bar</span>
       <select id="optEdge" title="Which edge the toolbar sits on">
@@ -229,6 +228,11 @@
       </select>
     </label>
     <label class="check"><input type="checkbox" id="optAutoHide"> Hide the bar when I'm not using it</label>
+    <p class="menu-head" id="macHead">The Mac</p>
+    <button type="button" id="optForceQuit" class="btn small" data-icon="warn" hidden>Force Quit an app…</button>
+    <label class="check" id="touchpadWrap" hidden><input type="checkbox" id="optTouchpad"> Touchpad mode</label>
+    <p class="fine" id="touchpadHelp" hidden>Your finger moves the Mac's pointer like a laptop's touchpad; tap to click
+      where the pointer is.</p>
     <label class="check" id="hideCursorWrap" hidden><input type="checkbox" id="optHideCursor"> Hide this computer's pointer (Esc twice brings it back)</label>
     <label class="tb-select" id="swipeWrap">
       <span>Swipe sideways</span>

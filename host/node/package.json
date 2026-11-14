@@ -1,6 +1,6 @@
 {
   "name": "perch-host",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Perch's Mac host process: rendezvous, WebRTC, sign-in and the local Setup page.",
   "type": "module",

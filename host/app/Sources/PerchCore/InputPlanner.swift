@@ -6,6 +6,7 @@
 // have everything released ("rel", a session ending, the host restarting).
 import Foundation
 import CoreGraphics
+import AppKit // NSEvent: the Mac's special keys (volume, brightness, media) are "system defined" events
 
 public enum MouseButton: Int {
     case left = 0, middle = 1, right = 2
@@ -48,6 +49,8 @@ public struct PlannedEvent: Equatable {
         case flagsChanged(UInt16, down: Bool)
         /// Text typed as Unicode, at most 20 UTF-16 units (the most one keyboard event can carry).
         case text(String)
+        /// One of the Mac's special keys (volume, brightness, media), pressed or let go: an NX key type.
+        case system(Int32, down: Bool)
     }
 
     public var kind: Kind
@@ -64,6 +67,13 @@ public struct PlannedEvent: Equatable {
     public init(_ kind: Kind, point: CGPoint = .zero, clickState: Int = 0, flags: UInt64 = 0) {
         self.kind = kind; self.point = point; self.clickState = clickState; self.flags = flags
     }
+
+    /// The Mac's special keys by name (IOKit's NX_KEYTYPE_* numbers).
+    public static let systemKeys: [String: Int32] = [
+        "volumeUp": 0, "volumeDown": 1, "brightnessUp": 2, "brightnessDown": 3, "mute": 7,
+        "playPause": 16, "next": 17, "previous": 18, "keyboardLightUp": 21, "keyboardLightDown": 22,
+    ]
+    static func systemKeyName(_ k: Int32) -> String? { systemKeys.first(where: { $0.value == k })?.key }
 
     /// How --echo-input reports the event, so tests can check exactly what would have been posted.
     public var json: [String: Any] {
@@ -87,6 +97,8 @@ public struct PlannedEvent: Equatable {
             return ["type": "flagsChanged", "keyCode": Int(k), "down": down, "flags": flags]
         case .text(let s):
             return ["type": "text", "s": s]
+        case .system(let k, let down):
+            return ["type": "systemKey", "key": PlannedEvent.systemKeyName(k) ?? String(k), "down": down]
         }
     }
 
@@ -123,6 +135,7 @@ public final class InputPlanner {
         case "k": return planKey(msg)
         case "txt": return planText(msg)
         case "rel": return releaseAll()
+        case "sys": return planSystemKey(msg)
         default: return []
         }
     }
@@ -259,6 +272,12 @@ public final class InputPlanner {
         return [PlannedEvent(.keyUp(k), flags: flags)]
     }
 
+    /// A special key pressed and let go at once.
+    private func planSystemKey(_ msg: [String: Any]) -> [PlannedEvent] {
+        guard let name = JSONValue.string(msg["k"]), let k = PlannedEvent.systemKeys[name] else { return [] }
+        return [PlannedEvent(.system(k, down: true)), PlannedEvent(.system(k, down: false))]
+    }
+
     private func planText(_ msg: [String: Any]) -> [PlannedEvent] {
         guard let s = JSONValue.string(msg["s"]), !s.isEmpty else { return [] }
         return Self.textChunks(String(s.prefix(Self.maxText))).map { PlannedEvent(.text($0)) }
@@ -389,6 +408,14 @@ public final class InputPoster {
             guard let ev = CGEvent(keyboardEventSource: source, virtualKey: k, keyDown: down) else { return [] }
             ev.type = .flagsChanged
             return [apply(ev, e.flags)]
+        case .system(let k, let down):
+            // What a Mac keyboard's special keys send: a system-defined event, subtype 8 (aux control button), with
+            // the key type in the high 16 bits of data1 and key down (0xA) or up (0xB) in the next byte.
+            let state = down ? 0xA : 0xB
+            let ns = NSEvent.otherEvent(with: .systemDefined, location: .zero, modifierFlags: NSEvent.ModifierFlags(rawValue: UInt(state << 8)),
+                                        timestamp: 0, windowNumber: 0, context: nil, subtype: 8,
+                                        data1: (Int(k) << 16) | (state << 8), data2: -1)
+            return ns?.cgEvent.map { [$0] } ?? []
         case .text(let s):
             // Typed text carries no modifiers: a held Command must not turn pasted words into shortcuts.
             let units = Array(s.utf16)

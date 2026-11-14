@@ -373,3 +373,10 @@ main > section { scroll-margin-top: 136px; }
 /* Commands to copy (the Worker relay's set-up steps). */
 pre.code { font-family: var(--mono); font-size: .85rem; line-height: 1.5; background: var(--surface-2); border: 1px solid var(--line);
   border-radius: 8px; padding: .6rem .8rem; margin: .4rem 0; overflow-x: auto; white-space: pre; user-select: all; }
+
+/* Changing the Mac's name, under it at the top */
+.name-box { margin: 4px 0 10px; }
+.name-box summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: .92rem; width: max-content; }
+.name-box form { margin-top: 6px; max-width: 34em; }
+.name-box label { margin-top: 4px; }
+.name-box input:invalid { border-color: var(--bad); }

@@ -48,6 +48,22 @@
     <p class="eyebrow">This Mac</p>
     <h1 class="mac-name" id="macName">…</h1>
     <p class="muted">This is your Mac's name. You'll see it on the devices that connect to it.</p>
+    <details id="nameBox" class="name-box">
+      <summary>Change name</summary>
+      <form id="nameForm" novalidate>
+        <label for="nameNew">New name</label>
+        <div class="inline">
+          <input id="nameNew" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="40"
+            placeholder="like jordan-macbook" aria-describedby="nameHelp">
+          <button type="submit" class="btn primary" id="nameSaveBtn">Use this name</button>
+        </div>
+        <p class="small muted" id="nameHelp">4 to 40 letters or numbers, with hyphens between words. A name you choose is
+          easier to guess than one Perch makes up; that only matters for the backup sign-in, which uses the name (passkeys
+          don't). Your devices keep working, and a backup password is removed with the old name.
+          <button type="button" class="btn quiet small" id="nameRandomBtn">Make one up for me</button></p>
+      </form>
+      <p class="msg bad" id="nameError" role="alert" hidden></p>
+    </details>
     <p class="state-text" id="stateText"></p>
     <p class="small muted">Perch <span id="headVersion"></span></p>
   </section>

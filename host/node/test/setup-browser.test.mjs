@@ -858,6 +858,23 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     await command('relaunch');
   });
 
+  await t.test('the Mac\u2019s name can be changed right at the top: one of your own, or a new made-up one', async () => {
+    const before = (await state()).macName;
+    await evaluate(page, `document.getElementById('nameBox').open = true`);
+    await type(page, '#nameNew', 'x!');
+    await click(page, '#nameSaveBtn');
+    await waitFor(page, `/4 to 40 letters/.test(document.getElementById('nameError').textContent)`, 'a bad name refused');
+    await type(page, '#nameNew', 'Jordan MacBook');
+    await click(page, '#nameSaveBtn');
+    await waitFor(page, `document.getElementById('macName').textContent === 'jordan-macbook'`, 'the chosen name');
+    assert.equal((await state()).macName, 'jordan-macbook');
+    assert.equal(await evaluate(page, `document.getElementById('nameBox').open`), false);
+    await evaluate(page, `document.getElementById('nameBox').open = true`);
+    await click(page, '#nameRandomBtn');
+    await until(async () => /^[a-z]+-[a-z]+-\d{4}$/.test((await state()).macName), 'a made-up name again');
+    assert.notEqual((await state()).macName, before);
+  });
+
   await t.test('authenticator app, with a code from the secret the page shows', async () => {
     await click(page, '#totpStartBtn');
     await waitFor(page, `!!document.querySelector('#totpQr svg') && document.getElementById('totpSecret').textContent.length > 20`);

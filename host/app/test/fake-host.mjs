@@ -738,6 +738,14 @@ async function capturedMouseChecks(h) {
       && Math.abs(out[0].dx - 0.05 * main.width) < 0.02 && Math.abs(out[0].dy + 0.01 * main.height) < 0.02, JSON.stringify(out));
 }
 
+// The Mac's special keys: pressed and let go as system-defined events; anything not on the list is ignored.
+async function systemKeyChecks() {
+  const out = await echo({ t: 'sys', k: 'volumeUp' });
+  check('special keys: volume up is pressed and let go', deepEqual(out, [{ type: 'systemKey', key: 'volumeUp', down: true },
+    { type: 'systemKey', key: 'volumeUp', down: false }]), JSON.stringify(out));
+  check('special keys: an unknown one does nothing', (await echo({ t: 'sys', k: 'power' })).length === 0);
+}
+
 // After a left click is let go the app says whether a text box now has focus (test runs pretend the top half of the
 // screen is one), so a phone can bring up its keyboard.
 async function textFocusChecks() {
@@ -1029,6 +1037,7 @@ async function main() {
   await section('input', () => inputChecks(h));
   await section('captured mouse', () => capturedMouseChecks(h));
   await section('text focus', () => textFocusChecks());
+  await section('special keys', () => systemKeyChecks());
   await section('clipboard', () => clipboardChecks());
   await section('windows', () => windowChecks(h));
   await section('microphone', () => micChecks(h));

@@ -184,7 +184,9 @@ export class KeyboardInput {
   }
 
   _press(s) {
-    for (const m of pressMessages(s.code, s.key, s.m | this.sticky)) this.session.sendInput(m);
+    // One of the Mac's special keys (volume, brightness, media): the Mac app presses it itself.
+    if (s.sys) this.session.sendInput({ t: 'sys', k: s.sys });
+    else for (const m of pressMessages(s.code, s.key, s.m | this.sticky)) this.session.sendInput(m);
     this._setSticky(0);
   }
 

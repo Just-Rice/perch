@@ -10,6 +10,9 @@ test('pointer moves: only on the pointer channel, coordinates clamped to the scr
     'a captured mouse\u2019s movement, kept within one picture width');
   assert.equal(validateInput({ t: 'm', x: 1, y: 0.5, dx: '1', dy: 0 }, 'pointer'), null);
   assert.equal(validateInput({ t: 'm', x: 1, y: 0.5, dx: 0.1 }, 'pointer'), null);
+  assert.deepEqual(validateInput({ t: 'sys', k: 'volumeUp', extra: 1 }, 'input'), { t: 'sys', k: 'volumeUp' }, 'a Mac special key');
+  assert.equal(validateInput({ t: 'sys', k: 'power' }, 'input'), null, 'only the listed special keys');
+  assert.equal(validateInput({ t: 'sys', k: 'mute' }, 'pointer'), null);
   assert.equal(validateInput({ t: 'm', x: 0.5, y: 0.5 }, 'input'), null, 'moves belong on the pointer channel');
   assert.equal(validateInput({ t: 'k', c: 'KeyA', d: true }, 'pointer'), null, 'keys never on the pointer channel');
   for (const bad of [{ t: 'm', x: '0.5', y: 0.5 }, { t: 'm', x: NaN, y: 0 }, { t: 'm', x: Infinity, y: 0 }, { t: 'm', x: 0.5 }]) {

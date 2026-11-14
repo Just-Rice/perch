@@ -1,5 +1,6 @@
 // The top of the page: this Mac's name, the overall state pill and the version.
-import { $, setText, show } from '../lib/dom.js';
+import { $, setText, show, say, busy } from '../lib/dom.js';
+import { normalizeMacName, CUSTOM_MAC_NAME_RE } from '../lib/names.js';
 
 const PILL = {
   starting: ['Starting…', 'neutral'],
@@ -15,8 +16,29 @@ export function pillFor(st) {
   return PILL[st.state] ?? [st.state || 'Unknown', 'neutral'];
 }
 
-export function header() {
+export function header(ctx) {
   const pill = $('statePill');
+  // Naming the Mac, right at the top: a name of the owner's own, or a new made-up one.
+  const input = $('nameNew'), error = $('nameError');
+  input.addEventListener('input', () => {
+    say(error, '');
+    const name = normalizeMacName(input.value);
+    input.setCustomValidity(name && !CUSTOM_MAC_NAME_RE.test(name) ? 'not a name' : '');
+  });
+  const done = () => { input.value = ''; $('nameBox').open = false; $('macName').focus?.(); };
+  $('nameForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = normalizeMacName(input.value);
+    if (!CUSTOM_MAC_NAME_RE.test(name)) {
+      say(error, 'Use 4 to 40 letters or numbers, with single hyphens between words, like jordan-macbook.');
+      input.focus();
+      return;
+    }
+    if (await busy($('nameSaveBtn'), error, async () => { await ctx.post('customMacName', { name }); return true; })) done();
+  });
+  $('nameRandomBtn').addEventListener('click', async () => {
+    if (await busy($('nameRandomBtn'), error, async () => { await ctx.post('newMacName'); return true; })) done();
+  });
   return {
     render(st) {
       const [text, tone] = pillFor(st);

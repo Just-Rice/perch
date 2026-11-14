@@ -4,7 +4,9 @@ import { SHIFT, CTRL, ALT, META } from './keys.js';
 
 const k = (id, label, title, code, key, m = 0, group = 'Keys') => ({ id, label, title, code, key, m, group });
 
-export const GROUPS = ['Keys', 'Switching', 'Editing', 'Browser', 'System', 'Function keys'];
+export const GROUPS = ['Keys', 'Switching', 'Editing', 'Browser', 'System', 'Mac controls', 'Function keys'];
+// The Mac's special keys (sound, brightness, media): not shortcuts but keys of their own, pressed by the Mac app.
+const mk = (id, label, title, sys) => ({ id, label, title, sys, code: '', key: '', m: 0, group: 'Mac controls' });
 
 export const CATALOG = [
   k('esc', 'esc', 'Escape', 'Escape', 'Escape'),
@@ -64,6 +66,17 @@ export const CATALOG = [
   k('screenshotTool', '⌘⇧5', 'Screenshot and recording tools', 'Digit5', '%', META | SHIFT, 'System'),
   k('lock', 'Lock', 'Lock the screen (⌃⌘Q)', 'KeyQ', 'q', META | CTRL, 'System'),
   k('settings', '⌘,', "This app's settings", 'Comma', ',', META, 'System'),
+
+  mk('volumeUp', 'Vol +', 'Volume up', 'volumeUp'),
+  mk('volumeDown', 'Vol −', 'Volume down', 'volumeDown'),
+  mk('mute', 'Mute', 'Mute or unmute the Mac', 'mute'),
+  mk('brightnessUp', 'Bright +', 'Screen brighter', 'brightnessUp'),
+  mk('brightnessDown', 'Bright −', 'Screen dimmer', 'brightnessDown'),
+  mk('playPause', '⏯', 'Play or pause', 'playPause'),
+  mk('nextTrack', '⏭', 'Next track', 'next'),
+  mk('previousTrack', '⏮', 'Previous track', 'previous'),
+  mk('keyboardLightUp', 'Keys light +', 'Keyboard backlight brighter', 'keyboardLightUp'),
+  mk('keyboardLightDown', 'Keys light −', 'Keyboard backlight dimmer', 'keyboardLightDown'),
 
   ...Array.from({ length: 12 }, (_, i) => k(`f${i + 1}`, `F${i + 1}`, `F${i + 1}`, `F${i + 1}`, `F${i + 1}`, 0, 'Function keys')),
 ];

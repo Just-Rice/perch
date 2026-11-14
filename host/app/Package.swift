@@ -18,7 +18,7 @@ let package = Package(
         // Pure logic with no capture or UI: IPC framing, JSON helpers, the key map and input planning.
         .target(
             name: "PerchCore",
-            linkerSettings: [.linkedFramework("CoreGraphics")]
+            linkerSettings: [.linkedFramework("CoreGraphics"), .linkedFramework("AppKit")]
         ),
         // Screen/sound capture and encoding (ScreenCaptureKit, VideoToolbox, AudioToolbox) and the synthetic source.
         .target(

@@ -288,13 +288,15 @@ input: false` (no passkey, no code: the link is the pass). Up to 3 guests at onc
 as the owner's viewer (or the main display when the owner isn't connected); their input and every control message
 except `ping` and `keyframe` are ignored. Stopping the link or its running out ends them with `bye removed`.
 
-**Sites.** A Mac accepts passkey sign-ins and pairings only from its list of sites: `https://just-rice.github.io`
-always, plus any the owner added in Setup (`config.sites`: `{origin, url}`, https and a domain name only). A passkey
+**Sites.** A Mac accepts passkey sign-ins and pairings only from its list of sites: `https://just-rice.github.io` and
+`WORKER_ORIGIN` (`https://perch-relay.rishirao2712.workers.dev`, the same site served by the relay Worker) always,
+plus any the owner added in Setup (`config.sites`: `{origin, url}`, https and a domain name only). A passkey
 belongs to one site's domain (its RP ID, the origin's hostname), so each device is paired once per site: `pair1`
 carries the viewer's `origin`, the Mac answers with creation options for that site's RP ID (or `denied origin`), and
 every registration and assertion is verified against the origin in its signed client data and that site's RP ID.
 Devices remember their RP ID; removing a site removes the devices paired there. Pairing links are made for a chosen
-site (`pairStart(site)`). The backup route has no origin check (the Mac can't see where a password was typed).
+site (`pairStart(site)`), by default `WORKER_ORIGIN`; devices paired before sites had their own RP IDs stay on
+`just-rice.github.io`. The backup route has no origin check (the Mac can't see where a password was typed).
 
 **Limits.** Five wrong 6-digit codes on a route lock that route for 1 minute, doubling per further failure up to 1
 hour; a success resets it. A failed passkey step never counts (a signature can't be guessed, and counting it would
@@ -364,6 +366,7 @@ having arrived:
 
 | Message | Meaning |
 |---|---|
+| `{t:"sys", k}` (input) | one of the Mac's special keys, pressed and let go: `volumeUp`, `volumeDown`, `mute`, `brightnessUp`, `brightnessDown`, `playPause`, `next`, `previous`, `keyboardLightUp`, `keyboardLightDown`. The app posts them as system-defined events (NX key types), as a Mac keyboard does |
 | `{t:"m", x, y, dx?, dy?}` | pointer moved; with the viewer's mouse captured (pointer lock), `dx`/`dy` say how far it moved in fractions of the picture (−1..1), passed on as the event's movement even where the position is pinned at the screen's edge. Every move carries its movement in the Quartz event (`mouseEventDeltaX/Y`), which games and 3D apps read |
 | `{t:"b", b, d, x, y, n}` | button `b` (0 left, 1 middle, 2 right) down (`d:true`) or up, `n` = click count |
 | `{t:"w", dx, dy, x, y}` | scroll, DOM `WheelEvent` deltas in CSS pixels (positive `dy` = page moves up) |
@@ -408,7 +411,9 @@ MIC frames; only during a session), `keyframe {}`, `bitrate {kbps}`,
 `curtain: true` blacks out the Mac's own displays with windows left out of the capture, lifted by three Esc presses
 at the Mac), `lock {}` (lock the screen; sent when a session ends and the owner chose "lock when a session ends"),
 `status {state, text, macName, setupUrl, settings, update?}` (menu bar contents), `notify {title, body}`,
-`permissions {}` (asks for a `permissions` event), `request-permission {which}` (`screen | accessibility`),
+`permissions {}` (asks for a `permissions` event), `request-permission {which}` (`screen | accessibility`), `reset-permission {which}` (forgets what macOS remembers
+about that permission for Perch, with `tccutil reset`, then asks again; answered with `permission-reset {which, ok}`),
+`relaunch {}` (Perch quits and opens again; neither of these two runs in test runs),
 `open-url {url}`, `login-item {on}`, `keep-awake {on}`, `uninstall {}`, `quit {}`.
 
 `state` is one of `starting | ready | needs-setup | offline | paused | connected | error`.

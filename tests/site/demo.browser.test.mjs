@@ -764,6 +764,19 @@ test('desktop: the toolbar on any edge, chosen keys, swipes, a hidden pointer an
     'F5↓0', 'F5↑0', 'MetaLeft↓8', 'KeyK↓8', 'KeyK↑8', 'MetaLeft↑0']);
   await page.shot('viewer-keysbar-chosen');
 
+  // The Mac's own controls: volume and play/pause go as special keys, not shortcuts.
+  await page.click('#keysEdit');
+  assert.ok(await page.eval(`[...document.querySelectorAll('#keysGroups h3, #keysGroups legend, #keysGroups .ke-group')].some(e => /Mac controls/.test(e.textContent))`),
+    'a "Mac controls" group in the chooser');
+  await page.eval(`(() => { for (const l of document.querySelectorAll('#keysGroups .ke-item')) {
+    const b = l.querySelector('b').textContent; if (b === 'Vol +' || b === '⏯') l.querySelector('input').click(); } })()`);
+  await page.click('#keysEditorDone');
+  n = await count(page);
+  await page.click('#keysBar [data-key="volumeUp"]');
+  await page.click('#keysBar [data-key="playPause"]');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'sys').length >= 2`, { what: 'special keys' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'sys' || m.t === 'k').map(m => m.t === 'sys' ? m.k : m.c), ['volumeUp', 'playPause']);
+
   // A two-finger swipe sideways on a touchpad: ⌘ held, Tab pressed (the app switcher), ⌘ let go a moment later.
   n = await count(page);
   const mid = { x: surf.left + surf.width / 2, y: surf.top + surf.height / 2 };

@@ -151,7 +151,8 @@ function upgradeStatus(url) {
 }
 
 test('pairing over the relay: the Mac on screen with sound, and input reaching the Mac', { skip }, async () => {
-  const { link } = await app.call('pairStart');
+  // For the test page (a Mac with its own relay would otherwise make the link for the relay's own site).
+  const { link } = await app.call('pairStart', new URL(stack.base).origin);
   const page = await openPage(stack, link.replace('connect.html#', `connect.html?${testParams()}#`), { name: 'pair-relay' });
   await page.waitScreen('pair', { timeoutMs: 20000 });
   await page.click('#btnCreate');
@@ -247,4 +248,13 @@ test('where only the relay gets through: a page it serves pairs and signs in, fi
   assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.macs.v1'))[0].relay`), DEPLOYED ? relayUrl : relayUrl);
   await page.click('#tbBye');
   await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
+});
+
+test('saving the relay made its address one of this Mac\u2019s sign-in sites, and the default for new pairing links', { skip }, async () => {
+  const st = await app.call('state');
+  const own = st.sites.find(x => x.origin === relayUrl);
+  assert.ok(own && !own.builtIn && own.primary, JSON.stringify(st.sites));
+  const { link } = await app.call('pairStart');
+  assert.ok(link.startsWith(`${relayUrl}/connect#pair=`), link);
+  await app.call('pairCancel');
 });

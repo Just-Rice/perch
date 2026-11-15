@@ -8,7 +8,7 @@ import net from 'node:net';
 
 const METHODS = new Set([
   'state', 'totpStart', 'totpConfirm', 'pairStart', 'pairCancel', 'deviceRename', 'deviceRemove', 'devicesRemoveAll',
-  'siteAdd', 'siteRemove', 'relaySet', 'relayRemove', 'relayOwnerSet', 'relayOwnerRemove', 'workerRelaySet', 'workerRelayRemove', 'guestStart', 'guestStop',
+  'siteAdd', 'siteRemove', 'relaySet', 'relayRemove', 'workerRelaySet', 'workerRelayRemove', 'guestStart', 'guestStop',
   'suggestPassword', 'backupRegisterStart', 'backupRegisterFinish', 'backupRemove', 'updateSettings', 'disconnect',
   'requestPermission', 'resetPermission', 'newMacName', 'customMacName', 'reset', 'checkForUpdates', 'testInputEcho', 'testState', 'debug',
 ]);

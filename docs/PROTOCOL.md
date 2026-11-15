@@ -73,9 +73,9 @@ that only allow ordinary web traffic can still reach the Mac.
 
 ## Relay
 
-Logins come from the owner's own Cloudflare TURN key when one is set in Setup, and otherwise from Perch's shared relay
-service (below) when `RELAY_SERVICE_URL` in `shared/proto.js` is set and the `sharedRelay` setting is on (the default).
-Logins are handed out while at least half their life remains, and refreshed in the background after a quarter.
+TURN logins come only from the owner's own Cloudflare TURN key, set in Setup (there is no shared relay: everyone
+brings their own, or uses their own Worker relay, below). Logins are handed out while at least half their life
+remains, and refreshed in the background after a quarter.
 
 With the owner's own key (Turn Token ID and API token, kept with the secrets), the Mac obtains short-lived (24 h) TURN
 logins from
@@ -87,26 +87,6 @@ through `turns:turn.cloudflare.com:443`. The Mac itself does not use the relay. 
 offer simply has no relay. The logins travel inside the sealed envelope; anyone able to open it (a holder of the
 rendezvous key, or of the Mac's name on the backup route) could use them until they expire, which would only cost the
 owner relay traffic.
-
-### Relay service
-
-`relay-service/` is a Cloudflare Worker run by whoever publishes Perch; it hands relay logins to Perch Macs within
-limits, from one TURN key on its own Cloudflare account. `relay-service/src/request.js` is the request format:
-`POST <service>/v1/ice {v: 1, mac, ts, sig, owner?}`, where `mac` is the Mac's relay key (Ed25519 public key, made once
-and kept with the secrets), `sig` its signature over `perch relay v1|<mac>|<ts>|<owner>`, and `owner`, on the service
-owner's own Macs only, HMAC-SHA256 of `perch relay owner v1|<mac>` under the owner key (typed into Setup; never sent).
-Answers: `{ok: true, iceServers, ttl, usage}` or `{ok: false, reason, message, usage?}` with `reason` one of
-`mac | others | total | unknown | busy | bad | turn`. `usage` is `{macBytes, macLimitBytes, windowDays}`, plus the
-totals for the owner's Macs.
-
-Each login is tagged in Cloudflare with `customIdentifier = "m-" + base64url(SHA-256(mac))[0..22]`. Every five minutes
-the service reads Cloudflare's TURN analytics (`egressBytes`, which is what Cloudflare bills) for yesterday and today,
-keeps per-day numbers, and revokes live logins that a limit no longer allows. The limits are counted over the last 31
-days, so no billing month can pass them whatever day it starts on: 20 GB per Mac that isn't the owner's, 900 GB for all
-of those together, and 990 GB for everything on the account (never configurable above 990). New logins last 3 hours
-for other people's Macs, 24 for the owner's, and 1 hour for everyone within 40 GB of the total. While the numbers
-can't be read for 30 minutes, other people's Macs get no new logins. `GET /v1/status` with `Authorization: Bearer
-<owner key>` shows everything.
 
 ## Worker relay
 
@@ -288,14 +268,15 @@ input: false` (no passkey, no code: the link is the pass). Up to 3 guests at onc
 as the owner's viewer (or the main display when the owner isn't connected); their input and every control message
 except `ping` and `keyframe` are ignored. Stopping the link or its running out ends them with `bye removed`.
 
-**Sites.** A Mac accepts passkey sign-ins and pairings only from its list of sites: `https://just-rice.github.io` and
-`WORKER_ORIGIN` (`https://perch-relay.rishirao2712.workers.dev`, the same site served by the relay Worker) always,
-plus any the owner added in Setup (`config.sites`: `{origin, url}`, https and a domain name only). A passkey
+**Sites.** A Mac accepts passkey sign-ins and pairings only from its list of sites: `https://just-rice.github.io`
+always, its own Worker relay's address once that relay is saved (the relay serves the site too), plus any the owner
+added in Setup (`config.sites`: `{origin, url}`, https and a domain name only). A passkey
 belongs to one site's domain (its RP ID, the origin's hostname), so each device is paired once per site: `pair1`
 carries the viewer's `origin`, the Mac answers with creation options for that site's RP ID (or `denied origin`), and
 every registration and assertion is verified against the origin in its signed client data and that site's RP ID.
 Devices remember their RP ID; removing a site removes the devices paired there. Pairing links are made for a chosen
-site (`pairStart(site)`), by default `WORKER_ORIGIN`; devices paired before sites had their own RP IDs stay on
+site (`pairStart(site)`), by default the Mac's own relay's site when it has one, otherwise the official site; devices
+paired before sites had their own RP IDs stay on
 `just-rice.github.io`. The backup route has no origin check (the Mac can't see where a password was typed).
 
 **Limits.** Five wrong 6-digit codes on a route lock that route for 1 minute, doubling per further failure up to 1

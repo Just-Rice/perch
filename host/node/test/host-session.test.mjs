@@ -82,8 +82,8 @@ async function pairedHost(t, opts = {}) {
 }
 
 // Opens a passkey session and signs in. Returns {v, end}.
-async function passkey(t, ctx, { label = 'Passkey viewer', code, overrides, beforeCode, authn = ctx.authn } = {}) {
-  const v = viewer(t, { authenticator: authn, label });
+async function passkey(t, ctx, { label = 'Passkey viewer', code, overrides, beforeCode, authn = ctx.authn, high = false } = {}) {
+  const v = viewer(t, { authenticator: authn, label, high });
   await v.open({ route: 'passkey', hostId: ctx.hostId, sigKey: ctx.sigKey });
   const end = await v.signInPasskey({ credentialId: ctx.credentialId, code: code ?? (() => ctx.app.freshCode()), overrides, beforeCode });
   return { v, end };
@@ -1152,4 +1152,29 @@ test('sign-in security switches: a passkey, the backup password or a pairing lin
   // Codes back on need the authenticator app; switching them all off makes the app optional.
   await app.call('updateSettings', { codeWithPasskey: true, codeWithBackup: true, codeWithPairing: true });
   assert.equal((await app.call('state')).settings.codeWithPasskey, true);
+});
+
+test('H.264 profile: Constrained High when the viewer agrees to it, Baseline otherwise (and for everyone once a guest needs it)', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  // This test viewer only decodes Constrained Baseline (soft-viewer.mjs), so it gets Baseline.
+  let s = await passkey(t, ctx);
+  assert.equal(s.end.t, 'ready');
+  assert.equal(app.commands.filter(c => c.c === 'capture' && c.on).at(-1).profile, 'baseline');
+  s.v.send({ t: 'bye' });
+  await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
+  // One that offers High too gets High.
+  s = await passkey(t, ctx, { label: 'High viewer', high: true });
+  assert.equal(s.end.t, 'ready');
+  assert.equal(app.commands.filter(c => c.c === 'capture' && c.on).at(-1).profile, 'high');
+  await app.waitFor(() => s.v.media.video > 10, { what: 'video for the High viewer' });
+  // A guest whose browser only has Baseline joins: the one shared picture goes back to Baseline.
+  const g = (await app.call('guestStart', 30)).link;
+  const b = Buffer.from(new URL(g).hash.replace('#guest=', ''), 'base64url');
+  const guest = viewer(t, { label: 'Baseline guest' });
+  await guest.open({ route: 'guest', guestId: new Uint8Array(b.subarray(0, 16)), guestSecret: new Uint8Array(b.subarray(16, 48)) });
+  const since = app.commands.length;
+  assert.equal((await guest.signInGuest({ guestSecret: new Uint8Array(b.subarray(16, 48)) })).t, 'ready');
+  const back = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.equal(back.profile, 'baseline');
 });

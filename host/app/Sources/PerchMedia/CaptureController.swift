@@ -122,6 +122,12 @@ final class CaptureSession: @unchecked Sendable {
     static let sharpenForMicros: UInt64 = 1_500_000
     static let sharpenEveryMicros: UInt64 = 120_000
 
+    /// "high" or "baseline": what the encoder actually makes (it may not have accepted High). Kept apart from the
+    /// encoder, so reporting it never waits for the video queue.
+    var profileName: String { whereLock.withLock { shownProfile } }
+    private var shownProfile = "baseline"
+    private static func name(_ e: H264Encoder) -> String { e.profile?.contains("High") == true ? "high" : "baseline" }
+
     /// The encoded size for the whole display, or for the part of it in `region`.
     static func outputSize(display: DisplayInfo, region: CGRect?, maxEdge: Int) -> (width: Int, height: Int) {
         var pw = display.pixelWidth, ph = display.pixelHeight
@@ -145,7 +151,8 @@ final class CaptureSession: @unchecked Sendable {
         let size = Self.outputSize(display: display, region: region, maxEdge: request.maxEdge)
         width = size.width
         height = size.height
-        encoder = try H264Encoder(width: width, height: height, fps: request.fps, bitsPerSecond: request.kbps * 1000)
+        encoder = try H264Encoder(width: width, height: height, fps: request.fps, bitsPerSecond: request.kbps * 1000, high: request.high)
+        shownProfile = Self.name(encoder)
         encoder.warmUp(ptsMicros: hostMicros())
         wire(encoder)
     }
@@ -165,8 +172,9 @@ final class CaptureSession: @unchecked Sendable {
 
     /// Changes the picture size while capture keeps running: a new encoder, the stream told its new size, and a
     /// keyframe to start from. Much lighter than stopping and starting (no gap in the sound, no display lookup).
-    func resize(width w: Int, height h: Int, kbps: Int, region r: CGRect? = nil, windowID wid: UInt32? = nil) async throws {
-        let fresh = try H264Encoder(width: w, height: h, fps: request.fps, bitsPerSecond: kbps * 1000)
+    func resize(width w: Int, height h: Int, kbps: Int, region r: CGRect? = nil, windowID wid: UInt32? = nil, fps: Int? = nil) async throws {
+        let rate = fps ?? request.fps
+        let fresh = try H264Encoder(width: w, height: h, fps: rate, bitsPerSecond: kbps * 1000, high: request.high)
         fresh.warmUp(ptsMicros: hostMicros())
         wire(fresh)
         videoQueue.sync {
@@ -177,7 +185,8 @@ final class CaptureSession: @unchecked Sendable {
             width = w
             height = h
             request.kbps = kbps
-            whereLock.withLock { shownRegion = r; shownWindow = r == nil ? nil : wid }
+            request.fps = rate
+            whereLock.withLock { shownRegion = r; shownWindow = r == nil ? nil : wid; shownProfile = Self.name(fresh) }
             lastPixelBuffer = nil // the old size; a picture of the new size arrives in a moment
             gate.request()
             old.invalidate()
@@ -188,7 +197,7 @@ final class CaptureSession: @unchecked Sendable {
                 startRepeats()
             }
         }
-        if !synthetic { try await capturer?.update(width: w, height: h, sourceRect: r) }
+        if !synthetic { try await capturer?.update(width: w, height: h, sourceRect: r, fps: rate) }
     }
 
     /// The window being followed moved without changing size: show the same-sized part of the display, elsewhere.
@@ -494,7 +503,7 @@ public final class CaptureController: @unchecked Sendable {
         }
         let size = CaptureSession.outputSize(display: display, region: region, maxEdge: request.maxEdge)
         if let cur = lock.withLock({ current }), cur.display.id == display.id, cur.width == size.width, cur.height == size.height,
-           cur.region == region, cur.request.fps == request.fps, cur.request.audio == request.audio {
+           cur.region == region, cur.request.fps == request.fps, cur.request.audio == request.audio, cur.request.high == request.high {
             // Same picture: keep the stream running, take the new bitrate, and send a keyframe so whoever asked
             // can start at once.
             cur.setBitrate(kbps: request.kbps)
@@ -503,11 +512,13 @@ public final class CaptureController: @unchecked Sendable {
             return
         }
         if let cur = lock.withLock({ current }), cur.display.id == display.id,
-           cur.request.fps == request.fps, cur.request.audio == request.audio {
-            // Same display, new size (the viewer's window changed, or the link got faster or slower).
+           cur.request.audio == request.audio, cur.request.high == request.high {
+            // Same display, new size or frame rate (the viewer's window changed, or the link got faster or slower):
+            // a new encoder on the running stream, so the sound carries on.
             do {
-                try await cur.resize(width: size.width, height: size.height, kbps: request.kbps, region: region, windowID: request.window)
-                log("capture resized to \(size.width)x\(size.height), \(request.kbps) kbit/s\(region == nil ? "" : ", one window")")
+                try await cur.resize(width: size.width, height: size.height, kbps: request.kbps, region: region, windowID: request.window,
+                                     fps: request.fps)
+                log("capture changed to \(size.width)x\(size.height) at \(request.fps) fps, \(request.kbps) kbit/s\(region == nil ? "" : ", one window")")
                 emitStarted(cur)
                 return
             } catch {
@@ -582,6 +593,7 @@ public final class CaptureController: @unchecked Sendable {
         var e: [String: Any] = ["e": "capture-started", "display": Int(s.display.id), "width": s.width, "height": s.height,
                                 "fps": s.request.fps]
         if let w = s.windowID { e["window"] = Int(w) }
+        e["profile"] = s.profileName
         onEvent?(e)
     }
 

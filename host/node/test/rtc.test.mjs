@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RTCSctpTransport } from 'werift';
-import { HostPeer, peerConfig, applyWeriftPatches, VIDEO_FMTP } from '../src/rtc.mjs';
+import { HostPeer, peerConfig, applyWeriftPatches, VIDEO_FMTP, VIDEO_FMTP_HIGH, VIDEO_FMTP_HIGH_PLAIN, profileOf } from '../src/rtc.mjs';
 import { connect, waitConnected } from './rtc-helpers.mjs';
 import { ICE_SERVERS } from '../../../site/js/shared/proto.js';
 
@@ -11,18 +11,22 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const lines = (sdp, re) => sdp.split(/\r?\n/).filter(l => re.test(l));
 const section = (sdp, kind) => sdp.split(/\r?\nm=/).find(s => s.startsWith(kind)) ?? '';
 
-test('the offer: H.264 only with nack, pli and REMB, sendonly; Opus both ways (for the microphone); one data section; host candidates only', async () => {
+test('the offer: H.264 only (Constrained High, as itself and as High, then Constrained Baseline) with nack, pli and REMB, sendonly; Opus both ways (for the microphone); one data section; host candidates only', async () => {
   const peer = new HostPeer({ iceServers: [], iceLoopback: true });
   try {
     const sdp = await peer.createOffer();
     assert.equal(peer.offerSdp, sdp);
     const video = section(sdp, 'video');
     const pts = video.split('\n')[0].trim().split(' ').slice(3);
-    assert.equal(pts.length, 1, 'exactly one video codec');
-    const pt = pts[0];
-    assert.match(video, new RegExp(`a=rtpmap:${pt} [hH]264/90000`));
-    assert.match(video, new RegExp(`a=fmtp:${pt} ${VIDEO_FMTP.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
-    for (const fb of ['nack', 'nack pli', 'goog-remb']) assert.match(video, new RegExp(`a=rtcp-fb:${pt} ${fb}\\r?\\n`));
+    assert.equal(pts.length, 3, 'three video codecs: H.264 Constrained High under both its labels, then Constrained Baseline');
+    const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const [pt, fmtp] of [[pts[0], VIDEO_FMTP_HIGH], [pts[1], VIDEO_FMTP_HIGH_PLAIN], [pts[2], VIDEO_FMTP]]) {
+      assert.match(video, new RegExp(`a=rtpmap:${pt} [hH]264/90000`));
+      assert.match(video, new RegExp(`a=fmtp:${pt} ${esc(fmtp)}`));
+      for (const fb of ['nack', 'nack pli', 'goog-remb']) assert.match(video, new RegExp(`a=rtcp-fb:${pt} ${fb}\\r?\\n`));
+    }
+    assert.deepEqual([VIDEO_FMTP_HIGH, VIDEO_FMTP_HIGH_PLAIN, VIDEO_FMTP, null].map(p => profileOf(p && { parameters: p })),
+      ['high', 'high', 'baseline', 'baseline']);
     assert.match(video, /a=sendonly/);
     assert.doesNotMatch(video, /VP8|VP9|AV1|rtx/i);
     const audio = section(sdp, 'audio');

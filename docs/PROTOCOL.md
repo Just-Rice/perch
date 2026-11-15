@@ -154,8 +154,11 @@ AudioContext, and hands the viewer an ordinary MediaStream from `canvas.captureS
 
 The Mac is the offerer. Its offer has:
 
-- a video transceiver, `sendonly`, **H.264 only**: `profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1`,
-  RTCP feedback `nack`, `nack pli`, `goog-remb`;
+- a video transceiver, `sendonly`, **H.264 only**, three codecs in this order: Constrained High
+  (`profile-level-id=640c1f`), the same as High (`64001f`, which Chrome lists), and Constrained Baseline (`42e01f`),
+  each `packetization-mode=1;level-asymmetry-allowed=1` with nack, nack pli and goog-remb. The Mac encodes whichever
+  the viewer agreed to; one picture goes to every viewer, so High only while all of them agreed to it (a guest
+  without it switches everyone to Baseline). The Worker relay always gets Baseline.
 - an audio transceiver, `sendrecv`, Opus 48 kHz stereo (`minptime=10;useinbandfec=1`): the Mac's sound out, and
   the viewer's microphone back when they turn it on (see `mic` below);
 - three data channels it creates, all JSON text: `control` (ordered, reliable), `input` (ordered, reliable: buttons,
@@ -177,8 +180,10 @@ Picture size and bitrate (`host/node/src/media.mjs`). The bitrate target follows
 (loss) and its bandwidth estimate (REMB); a low estimate is ignored while little is being sent (a still screen),
 because the estimate can't exceed about 1.5 times what the browser receives. The picture's longest edge is the
 smallest of: the preset's `maxEdge`, the viewer's screen (`view`), and what the link carries at full frame rate
-(`EDGE_LADDER` / `EDGE_NEEDS_KBPS`: step down after two low readings, up one step after five good ones). A size
-change on the same display resizes the running stream and swaps the encoder (no restart); `capture` commands carry
+(`EDGE_LADDER` / `EDGE_NEEDS_KBPS`: step down after two low readings, up one step after five good ones). The frame
+rate is the preset's `fps` (30), raised to its `maxFps` (60) after four readings with room for the picture at 60
+(1.5 times its 30-frame needs, at least 1.5 Mbit/s, plus 30%), and back after two short ones. A size or frame-rate
+change on the same display updates the running stream and swaps the encoder (no restart, no gap in the sound); `capture` commands carry
 the current bitrate target. After the last new picture the Mac repeats it several times a second for 1.5 s so the
 encoder can sharpen it, and a picture dropped by rate control is tried again within 40 ms.
 

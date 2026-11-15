@@ -414,10 +414,17 @@ export class Controller {
       on: true, display: this._display(session.display).id,
       // The size the link and the viewer's screen call for, and the bitrate the link is carrying right now (not the
       // preset's starting value, which would undo what bitrate control has learned).
-      maxEdge: session.captureEdge?.() ?? preset.maxEdge, fps: preset.fps,
+      maxEdge: session.captureEdge?.() ?? preset.maxEdge, fps: session.captureFps?.() ?? preset.fps,
       kbps: session.media?.bitrate.target ?? preset.kbps, audio: true,
       ...(session.window ? { window: session.window } : {}),
+      // One picture goes to every viewer: High only when all of them agreed to it.
+      profile: (this.lastProfile = this._captureProfile()),
     });
+  }
+
+  _captureProfile() {
+    const viewers = [this.active, ...this.guests].filter(s => s?.signedIn);
+    return viewers.length && viewers.every(s => s.videoProfile === 'high') ? 'high' : 'baseline';
   }
 
   listWindows(session) {
@@ -505,6 +512,9 @@ export class Controller {
     if (!leader && this.guests.size === 1) {
       this.app.command('session', { active: true, viewer: 'A guest (view only)', route: 'guest', curtain: false });
       this._sendCapture(session);
+    } else if (this._captureProfile() !== this.lastProfile) {
+      // This guest's browser can't decode the High profile the others were getting: everyone gets Baseline now.
+      this._sendCapture(this.leader);
     } else {
       this.app.command('keyframe', {});
     }

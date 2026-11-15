@@ -145,6 +145,10 @@ enum SelfTest {
             return
         }
         check("h264 encoder uses Constrained Baseline", enc.profile == (kVTProfileLevel_H264_ConstrainedBaseline_AutoLevel as String), enc.profile ?? "none")
+        let high = try? H264Encoder(width: w, height: h, fps: 30, bitsPerSecond: 2_000_000, high: true)
+        check("h264 encoder makes Constrained High when asked", high?.profile == (kVTProfileLevel_H264_ConstrainedHigh_AutoLevel as String),
+              high?.profile ?? "none")
+        high?.invalidate()
         let lock = NSLock()
         var frames: [EncodedFrame] = []
         enc.onFrame = { f in lock.withLock { frames.append(f) } }

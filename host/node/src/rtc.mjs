@@ -12,6 +12,18 @@ import { fingerprintBytes } from '../../../site/js/shared/bind.js';
 import { X509Certificate } from 'node:crypto';
 
 export const VIDEO_FMTP = 'profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1';
+// Constrained High: the same picture in about a fifth fewer bits (measured on a scrolling screen at 60 frames a second:
+// 1.1 dB sharper while scrolling with 20% fewer bits). Offered first, under both of its labels: Constrained High
+// (640c1f, which Safari lists) and High (64001f, which Chrome lists; a Constrained High stream is a valid High one). A
+// browser with neither answers with Constrained Baseline, and the Mac encodes whichever was agreed.
+export const VIDEO_FMTP_HIGH = 'profile-level-id=640c1f;packetization-mode=1;level-asymmetry-allowed=1';
+export const VIDEO_FMTP_HIGH_PLAIN = 'profile-level-id=64001f;packetization-mode=1;level-asymmetry-allowed=1';
+
+// Which H.264 profile an agreed codec is: 'high' (profile_idc 0x64) or 'baseline'.
+export function profileOf(codec) {
+  const m = /profile-level-id=([0-9a-f]{6})/i.exec(codec?.parameters ?? '');
+  return m && m[1].slice(0, 2).toLowerCase() === '64' ? 'high' : 'baseline';
+}
 // stereo/sprop-stereo make browsers decode both channels instead of folding the Mac's sound down to mono.
 export const OPUS_FMTP = 'minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1';
 export const GATHER_TIMEOUT_MS = 5000;
@@ -92,7 +104,8 @@ export function peerConfig({ iceServers = [], iceLoopback = false, dtlsKeys = nu
     ...(dtlsKeys ? { dtls: { keys: { certPem: dtlsKeys.certPem, keyPem: dtlsKeys.keyPem, signatureHash: dtlsKeys.signatureHash } } } : {}),
     iceServers: iceServers.map(s => ({ ...s })),
     codecs: {
-      video: [useH264({ rtcpFeedback: [useNACK(), usePLI(), useREMB()], parameters: VIDEO_FMTP })],
+      video: [VIDEO_FMTP_HIGH, VIDEO_FMTP_HIGH_PLAIN, VIDEO_FMTP]
+        .map(parameters => useH264({ rtcpFeedback: [useNACK(), usePLI(), useREMB()], parameters })),
       audio: [useOPUS({ parameters: OPUS_FMTP })],
     },
     // abs-send-time lets the browser's bandwidth estimator (the source of REMB) measure delay changes.
@@ -139,6 +152,8 @@ export class HostPeer {
   }
 
   get videoSender() { return this.videoTransceiver.sender; }
+  // The H.264 profile agreed with this viewer (known once its answer is in).
+  get videoProfile() { return profileOf(this.videoTransceiver.sender.codec); }
   get audioSender() { return this.audioTransceiver.sender; }
   get connectionState() { return this.pc.connectionState; }
 

@@ -327,3 +327,28 @@ test('picture size: steps down when the link can\'t carry it, back up slowly, ne
   f.update(3000, 1920);
   assert.equal(f.update(3000, 1920), 1600);
 });
+
+test('frame rate: up to 60 only after a few readings with room to spare, back to 30 at once when the link tightens', async () => {
+  const { FpsGovernor } = await import('../src/media.mjs');
+  const g = new FpsGovernor();
+  g.set(30, 60);
+  assert.equal(g.fps, 30);
+  // 1920 wide needs 2200 kbit/s at 30, so 3300 at 60; with the 30% margin, 4290.
+  for (let i = 0; i < 3; i++) assert.equal(g.update(5000, 2200), undefined, 'not after one or two good readings');
+  assert.equal(g.update(5000, 2200), 60, 'the fourth in a row');
+  assert.equal(g.update(3000, 2200), undefined, 'one short reading is not enough to drop');
+  assert.equal(g.update(3000, 2200), 30, 'two are');
+  // Never above 30 for a preset that doesn't allow it, never below 60 for one fixed at 60.
+  g.set(30, 30);
+  for (let i = 0; i < 6; i++) assert.equal(g.update(50000, 500), undefined);
+  assert.equal(g.fps, 30);
+  g.set(60, 60);
+  assert.equal(g.update(100, 5000), undefined);
+  assert.equal(g.fps, 60);
+  // A tiny picture still wants a sensible link before going to 60 (at least 1.5 Mbit/s plus the margin).
+  g.set(30, 60);
+  for (let i = 0; i < 4; i++) g.update(1800, 0);
+  assert.equal(g.fps, 30);
+  for (let i = 0; i < 4; i++) g.update(2000, 0);
+  assert.equal(g.fps, 60);
+});

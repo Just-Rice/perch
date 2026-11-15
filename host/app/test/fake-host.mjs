@@ -172,7 +172,12 @@ function parseSps(nal) {
   const se = () => { const k = ue(); return k & 1 ? (k + 1) / 2 : -k / 2; };
   const profile = u(8), constraints = u(8), level = u(8);
   ue(); // seq_parameter_set_id
-  if (![66, 77, 88].includes(profile)) throw new Error(`profile ${profile} is not Baseline/Main/Extended`);
+  if (profile === 100) {
+    // High: chroma format and bit depths, then (Perch never sends them) scaling matrices.
+    if (ue() === 3) u(1);
+    ue(); ue(); u(1);
+    if (u(1)) throw new Error('High profile SPS with scaling matrices');
+  } else if (![66, 77, 88].includes(profile)) throw new Error(`profile ${profile} is not Baseline/Main/Extended/High`);
   ue(); // log2_max_frame_num_minus4
   const pocType = ue();
   if (pocType === 0) ue();
@@ -738,6 +743,52 @@ async function capturedMouseChecks(h) {
       && Math.abs(out[0].dx - 0.05 * main.width) < 0.02 && Math.abs(out[0].dy + 0.01 * main.height) < 0.02, JSON.stringify(out));
 }
 
+// H.264 Constrained High when the host asks for it (every viewer agreed to it): the SPS says profile 100 with the
+// constraint flags of Constrained High, and capture-started says which profile is being made.
+async function profileChecks() {
+  command('session', { active: true, viewer: 'Chrome on Pixel', route: 'passkey' });
+  for (const [ask, idc] of [['high', 100], ['baseline', 66]]) {
+    const since = got.events.length, mark = got.video.length;
+    command('capture', { on: true, maxEdge: 1280, fps: 30, kbps: 2500, audio: false, profile: ask });
+    const st = await event('capture-started', { since, where: e => e.profile === ask, ms: 5000 });
+    const key = await until(() => got.video.slice(mark).find(f => f.key), 3000, `a ${ask} keyframe`);
+    const sps = parseSps(nalUnits(key.data).find(n => (n[0] & 0x1f) === 7));
+    check(`profile ${ask}: the encoder makes it (profile_idc ${idc})`, st.profile === ask && sps.profile === idc
+      && (idc !== 100 || (sps.constraints & 0x0c) === 0x0c), JSON.stringify({ st, profile: sps.profile, constraints: sps.constraints }));
+  }
+  const since = got.events.length;
+  command('capture', { on: false });
+  await event('capture-stopped', { since });
+  command('session', { active: false });
+  await settled();
+}
+
+// 30 to 60 frames a second and back, on the running capture: no stop, sound keeps coming, frames at the new rate.
+async function fpsChangeChecks() {
+  command('session', { active: true, viewer: 'Chrome on Pixel', route: 'passkey' });
+  let since = got.events.length;
+  command('capture', { on: true, maxEdge: 1280, fps: 30, kbps: 4000, audio: true });
+  await event('capture-started', { since, where: e => e.fps === 30, ms: 5000 });
+  await sleep(1500);
+  since = got.events.length;
+  const a0 = got.audio.length;
+  command('capture', { on: true, maxEdge: 1280, fps: 60, kbps: 4000, audio: true });
+  const st = await event('capture-started', { since, where: e => e.fps === 60, ms: 5000 });
+  const t0 = performance.now();
+  await sleep(2000);
+  const frames = got.video.filter(f => f.at > t0 + 300).length;
+  const rate = frames / 1.7;
+  check('60 fps: changed on the running capture (not stopped and started again)',
+    st.fps === 60 && !got.events.slice(since).some(x => x.ev.e === 'capture-stopped'), JSON.stringify(st));
+  check('60 fps: frames come at about 60 a second', rate > 45 && rate < 75, `${rate.toFixed(1)} frames a second`);
+  check('60 fps: the sound carries on through the change', got.audio.length - a0 > 80, `${got.audio.length - a0} packets`);
+  since = got.events.length;
+  command('capture', { on: false });
+  await event('capture-stopped', { since });
+  command('session', { active: false });
+  await settled();
+}
+
 // The Mac's special keys: pressed and let go as system-defined events; anything not on the list is ignored.
 async function systemKeyChecks() {
   const out = await echo({ t: 'sys', k: 'volumeUp' });
@@ -1038,6 +1089,8 @@ async function main() {
   await section('captured mouse', () => capturedMouseChecks(h));
   await section('text focus', () => textFocusChecks());
   await section('special keys', () => systemKeyChecks());
+  await section('H.264 profile', () => profileChecks());
+  if (h.synthetic === true) await section('frame rate', () => fpsChangeChecks());
   await section('clipboard', () => clipboardChecks());
   await section('windows', () => windowChecks(h));
   await section('microphone', () => micChecks(h));

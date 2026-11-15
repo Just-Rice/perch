@@ -113,6 +113,11 @@ test('the real app and host: set up, pair from the website, picture and sound fr
   const t0 = await page.eval(`document.getElementById('video').currentTime`);
   await sleep(1000);
   assert.ok(await page.eval(`document.getElementById('video').currentTime`) > t0, 'the test picture is moving');
+  // The real app encodes H.264 Constrained High for a browser that agreed to it, and Chrome decodes it.
+  const codec = await page.eval(`(async () => { let id = null, out = null; const st = await window.__perch.conn.pc.getStats();
+    st.forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'video') id = r.codecId; });
+    st.forEach(r => { if (r.id === id) out = r.sdpFmtpLine; }); return out; })()`);
+  assert.match(codec ?? '', /profile-level-id=640c1f|profile-level-id=64001f/, `the video codec agreed: ${codec}`);
   // Sound arrives: the test tone's packets reach the browser's audio receiver.
   const audio = await page.waitFor(`(async () => { const pc = window.__perch?.conn?.pc; if (!pc) return 0;
     let n = 0; (await pc.getStats()).forEach(r => { if (r.type === 'inbound-rtp' && r.kind === 'audio') n = r.packetsReceived; }); return n > 20 && n; })()`,

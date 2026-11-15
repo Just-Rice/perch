@@ -161,6 +161,45 @@ export class ResolutionGovernor {
   }
 }
 
+// Frame rate from the link, between a preset's fps (30) and maxFps (60). Up to 60 only after the link has carried
+// the current picture's 60-frame needs with room to spare for a few readings in a row; back to 30 after two readings
+// short of them, so a busy link never trades readable text for motion.
+export class FpsGovernor {
+  constructor({ min = 30, max = 30 } = {}) { this.set(min, max); }
+
+  set(min, max) {
+    this.min = min;
+    this.max = Math.max(min, max);
+    this.fps = this.min;
+    this.up = this.down = 0;
+  }
+
+  // `need30`: kbit/s the picture being sent needs at 30 frames a second. Returns the new rate when it changed.
+  update(targetKbps, need30) {
+    if (this.max <= this.min) return undefined;
+    const need = Math.max(1500, need30 * 1.5);
+    if (this.fps === this.max) {
+      if (targetKbps < need) {
+        this.up = 0;
+        if (++this.down < 2) return undefined;
+        this.down = 0;
+        this.fps = this.min;
+        return this.fps;
+      }
+      this.down = 0;
+      return undefined;
+    }
+    if (targetKbps >= need * 1.3) {
+      if (++this.up < 4) return undefined;
+      this.up = 0;
+      this.fps = this.max;
+      return this.fps;
+    }
+    this.up = 0;
+    return undefined;
+  }
+}
+
 // --- pacing ---
 
 // Sends queued video packets at up to `burst` times the target bitrate, in 5 ms ticks. If the queue falls more than

@@ -9,7 +9,7 @@ import { bindingHash, bindProof, quickChallenge, sdpFingerprint } from '../../..
 import { toB64url, fromB64url, equalBytes } from '../../../site/js/shared/bytes.js';
 import { PROTO, AUTH_TIMEOUT_MS, QUALITY } from '../../../site/js/shared/proto.js';
 import { AuthError } from './auth.mjs';
-import { MediaSender, ResolutionGovernor, ladderAtLeast } from './media.mjs';
+import { MediaSender, ResolutionGovernor, FpsGovernor, ladderAtLeast } from './media.mjs';
 import { readAnswer, sessionKeys } from '../../../site/js/shared/wsrelay.js';
 import { validateInput, RateLimiter, POINTER_RATE, INPUT_RATE, CONTROL_RATE } from './input.mjs';
 
@@ -53,6 +53,7 @@ export class Session {
     this.lastInputAt = 0;
     this.viewEdge = null;       // the longest edge of the picture on the viewer's screen, in its pixels (if it said)
     this.governor = new ResolutionGovernor();
+    this.fpsGovernor = new FpsGovernor();
     this.lastSample = null;     // the last status period's measured send rate and frame rate
     this.endReason = null;
     this.chain = Promise.resolve();
@@ -391,9 +392,12 @@ export class Session {
     const who = this.deviceLabel && this.deviceLabel !== this.label ? `${this.label} (${this.deviceLabel})` : this.label;
     this.store.activity(this.guest ? 'guest' : 'sign-in', this.guest ? `A guest started watching: ${this.label}` : `Signed in with ${how}: ${who}`);
     this.log?.info(`signed in (${this.route})`);
+    // Which H.264 profile this viewer agreed to, known before the Mac is asked for a picture (the Worker relay has no
+    // such agreement: Baseline there).
+    this.videoProfile = this.peer.videoProfile === 'high' ? 'high' : 'baseline';
     const info = this.guest ? this.hub.guestSignedIn(this) : this.hub.sessionSignedIn(this);
     this.quality = info.quality;
-    this.governor.setFps((QUALITY[this.quality] ?? QUALITY.balanced).fps);
+    this._presetRates();
     this.display = info.display.id;
     const mediaOptions = {
       quality: this.quality,
@@ -412,7 +416,12 @@ export class Session {
       this.lastSample = this.media.sample();
       // A link that can't carry this picture size at full frame rate gets a smaller picture (and the size comes back
       // when the link does).
-      if (!this.guest && this.governor.update(this.media.bitrate.target, this.wantedEdge()) !== undefined) this.hub.captureChanged(this);
+      if (!this.guest) {
+        const target = this.media.bitrate.target;
+        const sized = this.governor.update(target, this.wantedEdge()) !== undefined;
+        const timed = this.fpsGovernor.update(target, this.governor.need(this.captureEdge())) !== undefined;
+        if (sized || timed) this.hub.captureChanged(this);
+      }
       this.sendStatus();
     }, STATUS_EVERY_MS, true);
     if (!this.guest) this._watchIdle(); // a guest never sends input; the link's own time limit ends their watching
@@ -425,9 +434,20 @@ export class Session {
     return this.viewEdge ? Math.min(preset.maxEdge, ladderAtLeast(this.viewEdge)) : preset.maxEdge;
   }
 
+  // Frames a second to capture at right now: 60 on a link with room for it (presets that allow it), else 30.
+  captureFps() {
+    return this.fpsGovernor.fps;
+  }
+
   // What to capture at right now: wantedEdge, less if the link can't carry it.
   captureEdge() {
     return Math.min(this.wantedEdge(), this.governor.cap ?? Infinity);
+  }
+
+  _presetRates() {
+    const p = QUALITY[this.quality] ?? QUALITY.balanced;
+    this.governor.setFps(p.fps);
+    this.fpsGovernor.set(p.fps, p.maxFps ?? p.fps);
   }
 
   _watchIdle() {
@@ -457,7 +477,7 @@ export class Session {
         this.quality = msg.preset;
         this.media.setQuality(msg.preset);
         this.governor.reset();
-        this.governor.setFps(QUALITY[msg.preset].fps);
+        this._presetRates();
         this.hub.captureChanged(this);
         return;
       case 'view': {

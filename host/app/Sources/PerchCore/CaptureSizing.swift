@@ -9,6 +9,8 @@ public struct CaptureRequest: Equatable {
     public var audio: Bool
     /// Show only this window (the picture follows it) instead of the whole display.
     public var window: UInt32?
+    /// H.264 Constrained High (every viewer's browser agreed to it) rather than Constrained Baseline.
+    public var high: Bool = false
 
     public init(displayID: UInt32? = nil, maxEdge: Int = 1920, fps: Int = 30, kbps: Int = 5000, audio: Bool = true,
                 window: UInt32? = nil) {
@@ -24,6 +26,7 @@ public struct CaptureRequest: Equatable {
         kbps = CaptureSizing.clampKbps(JSONValue.int(c["kbps"]) ?? 5000)
         audio = JSONValue.bool(c["audio"]) ?? true
         window = JSONValue.number(c["window"]).flatMap { $0 >= 1 && $0 <= Double(UInt32.max) ? UInt32($0) : nil }
+        high = JSONValue.string(c["profile"]) == "high"
     }
 }
 

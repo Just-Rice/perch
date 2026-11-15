@@ -16,7 +16,7 @@ import { bindingHash, bindProof, quickChallenge, sdpFingerprint } from '../../..
 import { toB64url, fromB64url, randomBytes } from '../../../site/js/shared/bytes.js';
 import { PROTO, HOST_ID_BYTES, SIG_KEY_BYTES, PAIR_ID_BYTES } from '../../../site/js/shared/proto.js';
 import * as opaque from '@serenity-kit/opaque';
-import { applyWeriftPatches, VIDEO_FMTP, OPUS_FMTP } from '../src/rtc.mjs';
+import { applyWeriftPatches, VIDEO_FMTP, VIDEO_FMTP_HIGH, OPUS_FMTP } from '../src/rtc.mjs';
 import { depacketize, nalType } from '../src/h264.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -40,7 +40,9 @@ export function addressFromUserHandle(userHandle) {
 }
 
 export class SoftViewer {
-  constructor({ brokers, authenticator = null, label = 'Soft viewer', log = () => {} }) {
+  // high: also decode H.264 Constrained High (listed first, as browsers do); otherwise Constrained Baseline only.
+  constructor({ brokers, authenticator = null, label = 'Soft viewer', log = () => {}, high = false }) {
+    this.high = high;
     applyWeriftPatches();
     Object.assign(this, { brokers, authenticator, label, log });
     this.sid = toB64url(randomBytes(16));
@@ -86,7 +88,10 @@ export class SoftViewer {
     }
     this.offerSdp = tamper.offer ? tamper.offer(first.sdp) : first.sdp;
     this.pc = this._peer();
-    await this.pc.setRemoteDescription({ type: 'offer', sdp: this.offerSdp });
+    // A viewer without High (the default here) answers as a Baseline-only browser would. werift's own answer would
+    // accept the High codec whatever this side has, so it is shown the offer without it; the binding still uses the
+    // offer exactly as the Mac sent it.
+    await this.pc.setRemoteDescription({ type: 'offer', sdp: this.high ? this.offerSdp : withoutHigh(this.offerSdp) });
     // As the website does: be ready to send a microphone back on the sound line.
     this.audioTransceiver = this.pc.getTransceivers().find(t => t.kind === 'audio');
     if (/^a=sendrecv/m.test(this.offerSdp.split(/^m=/m).find(m => m.startsWith('audio')) ?? '')) this.audioTransceiver?.setDirection('sendrecv');
@@ -108,7 +113,10 @@ export class SoftViewer {
       iceUseIpv6: false,
       bundlePolicy: 'max-bundle',
       codecs: {
-        video: [useH264({ rtcpFeedback: [useNACK(), usePLI(), useREMB()], parameters: VIDEO_FMTP })],
+        video: [
+          ...(this.high ? [useH264({ rtcpFeedback: [useNACK(), usePLI(), useREMB()], parameters: VIDEO_FMTP_HIGH })] : []),
+          useH264({ rtcpFeedback: [useNACK(), usePLI(), useREMB()], parameters: VIDEO_FMTP }),
+        ],
         audio: [useOPUS({ parameters: OPUS_FMTP })],
       },
       headerExtensions: { video: [useSdesMid(), useAbsSendTime()], audio: [useSdesMid()] },
@@ -322,4 +330,14 @@ function withTimeout(p, ms, what) {
   let timer;
   return Promise.race([p, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(what)), ms); })])
     .finally(() => clearTimeout(timer));
+}
+
+// The offer without its H.264 Constrained High codec (profile-level-id 64...).
+function withoutHigh(sdp) {
+  const lines = sdp.split('\r\n');
+  const high = new Set(lines.map(l => /^a=fmtp:(\d+) .*profile-level-id=64/i.exec(l)?.[1]).filter(Boolean));
+  if (!high.size) return sdp;
+  return lines.filter(l => !/^a=(rtpmap|fmtp|rtcp-fb):(\d+)/.test(l) || !high.has(/^a=\w+(?:-\w+)?:(\d+)/.exec(l)[1]))
+    .map(l => (l.startsWith('m=video') ? l.split(' ').filter((p, i) => i < 3 || !high.has(p)).join(' ') : l))
+    .join('\r\n');
 }

@@ -94,10 +94,11 @@ public final class ScreenCapturer: NSObject, SCStreamOutput, SCStreamDelegate {
 
     /// Changes the picture size of the running stream (no restart: sound carries on, and the change takes a few
     /// frames). Buffers of the old size may still arrive for a moment; the caller skips those.
-    public func update(width: Int, height: Int, sourceRect: CGRect? = nil) async throws {
+    public func update(width: Int, height: Int, sourceRect: CGRect? = nil, fps: Int? = nil) async throws {
         guard let s = stream, let c = config else { return }
         c.width = width
         c.height = height
+        if let fps { c.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps)) }
         let whole = CGRect(origin: .zero, size: displayPointSize)
         c.sourceRect = sourceRect ?? whole
         Self.setDetail(c, retina: CGFloat(width) > (sourceRect ?? whole).width)

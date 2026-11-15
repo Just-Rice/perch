@@ -159,7 +159,12 @@ test('pairing over the relay: the Mac on screen with sound, and input reaching t
   await enterCode(page);
   await assertPlaying(page);
   assert.equal(await page.eval(`window.__perch.conn.via`), 'relay', 'the viewer used the relay');
+  // A browser that wants a tap before sound pauses the relay's audio context (this test browser is told not to, so
+  // pause it as one would): the sound waits, and the first click starts it.
+  await page.eval(`window.__perch.conn.media.audio.ac.suspend()`);
+  assert.equal(await page.eval(`window.__perch.conn.media.soundPaused`), true);
   await assertInputReachesMac(page);
+  await page.waitFor(`window.__perch.conn.media.audio.ac.state === 'running'`, { what: 'the sound started by the click' });
   const st = await app.call('state');
   assert.equal(st.session?.route, 'pair');
   assert.equal(st.session?.transport, 'relay', 'the Mac used the relay');

@@ -61,8 +61,27 @@ export class RelayMedia {
     decoder.configure({ codec: 'opus', sampleRate: 48000, numberOfChannels: 2 });
     this.audio = { ac, dest, decoder, playAt: 0 };
     this.stream.addTrack(dest.stream.getAudioTracks()[0]);
-    ac.resume?.().catch(() => {});
+    // Browsers start an audio context paused until the person taps, clicks or types, and a paused one plays nothing:
+    // the sound came through the relay but was never heard. Start it now if allowed, and on the first touch otherwise.
+    this.resume();
+    this._onGesture = () => this.resume();
+    for (const type of ['pointerdown', 'keydown', 'touchend']) document.addEventListener(type, this._onGesture, true);
   }
+
+  // Starts the sound if the browser paused it. Safe to call any time (the viewer calls it when sound is turned on).
+  resume() {
+    const ac = this.audio?.ac;
+    if (!ac || this.closed || ac.state === 'running' || ac.state === 'closed') return;
+    ac.resume?.().then(() => {
+      if (ac.state === 'running' && this._onGesture) {
+        for (const type of ['pointerdown', 'keydown', 'touchend']) document.removeEventListener(type, this._onGesture, true);
+        this._onGesture = null;
+        this.log('relay sound: started');
+      }
+    }, () => {});
+  }
+
+  get soundPaused() { return !!this.audio && this.audio.ac.state !== 'running'; }
 
   // One H.264 access unit: {keyframe, ptsUs, data}.
   video({ keyframe, ptsUs, data }) {
@@ -162,6 +181,10 @@ export class RelayMedia {
   close() {
     if (this.closed) return;
     this.closed = true;
+    if (this._onGesture) {
+      for (const type of ['pointerdown', 'keydown', 'touchend']) document.removeEventListener(type, this._onGesture, true);
+      this._onGesture = null;
+    }
     try { if (this.decoder && this.decoder.state !== 'closed') this.decoder.close(); } catch {}
     if (this.audio) {
       try { if (this.audio.decoder.state !== 'closed') this.audio.decoder.close(); } catch {}

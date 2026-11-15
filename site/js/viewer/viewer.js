@@ -675,6 +675,19 @@ export class Viewer {
       try { await v.play(); } catch {}
       if (hasAudio && !this.prefs.get('muted')) this.$('soundPrompt').hidden = false;
     }
+    // Over the Worker relay the picture plays but the sound waits for a tap (the browser paused its audio context):
+    // say so, the same way. Any tap or key starts it; the prompt goes once it has.
+    if (hasAudio && !this.prefs.get('muted') && this.session.media?.soundPaused) {
+      this.$('soundPrompt').hidden = false;
+      const check = () => {
+        if (this.session.media?.soundPaused) return;
+        this.$('soundPrompt').hidden = true;
+        clearInterval(this.soundCheck);
+      };
+      clearInterval(this.soundCheck);
+      this.soundCheck = setInterval(check, 500);
+      this.timers.push(this.soundCheck);
+    }
     this._soundUi();
   }
 
@@ -701,6 +714,8 @@ export class Viewer {
     v.muted = muted;
     this.prefs.set('muted', muted);
     if (!muted) v.play().catch(() => {});
+    // Over the Worker relay the sound comes from an audio context the browser may have paused: this tap starts it.
+    if (!muted) this.session.media?.resume?.();
     this.$('soundPrompt').hidden = true;
     this._soundUi();
   }

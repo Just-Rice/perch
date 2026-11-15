@@ -1110,3 +1110,46 @@ test('guest link: watch only, alongside the owner or alone; ends when stopped or
   await app.advance(61_000);
   assert.equal((await app.call('state')).guest, null);
 });
+
+test('sign-in security switches: a passkey, the backup password or a pairing link alone, when the owner says so', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  // With the code on (the default), a passkey is followed by the code step.
+  let s = await passkey(t, ctx);
+  assert.equal(s.end.t, 'ready');
+  assert.ok(s.v.all.some(m => m.t === 'totp'), 'asked for the code');
+  s.v.send({ t: 'bye' });
+  await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
+  // Off: the passkey alone signs in, with no code step.
+  await app.call('updateSettings', { codeWithPasskey: false });
+  s = await passkey(t, ctx, { code: '000000' });
+  assert.equal(s.end.t, 'ready');
+  assert.ok(!s.v.all.some(m => m.t === 'totp'), 'no code step');
+  assert.match((await app.call('state')).activity.map(a => a.text).join('\n'), /No 6-digit code after a passkey/);
+  s.v.send({ t: 'bye' });
+  await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
+
+  // The backup password alone.
+  await setBackupPassword(app, 'correct horse battery staple');
+  await app.call('updateSettings', { backupOn: true, codeWithBackup: false });
+  const b = viewer(t, { label: 'Backup viewer' });
+  await b.open({ route: 'backup', macName: (await app.call('state')).macName });
+  const bEnd = await b.signInBackup({ password: 'correct horse battery staple', code: '000000' });
+  assert.equal(bEnd.t, 'ready');
+  assert.ok(!b.all.some(m => m.t === 'totp'));
+  b.send({ t: 'bye' });
+  await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
+
+  // A pairing link alone: the new device is saved without a code.
+  await app.call('updateSettings', { codeWithPairing: false });
+  const before = (await app.call('state')).devices.length;
+  const made = await pair(t, app, { label: 'New device' });
+  const p = made.v, pEnd = made.end;
+  assert.equal(pEnd.t, 'ready');
+  assert.ok(p.paired, 'paired');
+  assert.equal((await app.call('state')).devices.length, before + 1);
+
+  // Codes back on need the authenticator app; switching them all off makes the app optional.
+  await app.call('updateSettings', { codeWithPasskey: true, codeWithBackup: true, codeWithPairing: true });
+  assert.equal((await app.call('state')).settings.codeWithPasskey, true);
+});

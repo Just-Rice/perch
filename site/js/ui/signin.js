@@ -56,8 +56,16 @@ export async function signIn(conn, ctx, ui) {
   }
 
   ui.stage('verifying');
-  let m = await conn.next(['totp', 'denied'], REPLY_MS);
+  // The 6-digit code comes next, unless the Mac's owner switched it off for this way of signing in (then the Mac says
+  // ready straight away; when pairing, paired first).
+  let m = await conn.next(['totp', 'paired', 'ready', 'denied'], REPLY_MS);
   if (m.t === 'denied') throw deniedError(m);
+  if (m.t === 'paired') {
+    ctx.onPaired?.(m);
+    m = await conn.next(['ready', 'denied'], REPLY_MS);
+    if (m.t === 'denied') throw deniedError(m);
+  }
+  if (m.t === 'ready') return { hi, ready: m };
 
   // The 6-digit code. A wrong code (final: false) keeps the session open: just ask again.
   let error = null;
@@ -134,6 +142,8 @@ async function backupSteps(conn, ctx, ui) {
 
 async function pairSteps(conn, ctx, ui, hi) {
   const { pair } = ctx;
+  // A device that can't easily keep a passkey: offer the backup sign-in before anything is made (the link stays unused).
+  if (ctx.offerBackup) throw new PerchError('use-backup', { name: hi.name });
   const proof = await bindProof(pair.pairSecret, 'pair', conn.bind);
   // `origin`: which site this is, so the Mac makes the passkey for this site's domain (it must be one it accepts).
   conn.send({ t: 'pair1', pairId: toB64url(pair.pairId), proof: toB64url(proof), origin: globalThis.location?.origin });

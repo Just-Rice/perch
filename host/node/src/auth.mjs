@@ -219,7 +219,7 @@ export class Auth {
 
   // `siteOrigin`: which accepted site the link should open (default: the official one).
   createPairing(siteOrigin = null) {
-    if (!this.store.config.totp.set) throw new Error('Set up the authenticator app first.');
+    if (this.store.codeNeeded('pair') && !this.store.config.totp.set) throw new Error('Set up the authenticator app first.');
     const site = siteOrigin ? this.siteFor(siteOrigin) : this.primarySite;
     if (!site) throw new Error('That site isn’t one this Mac accepts sign-ins from.');
     const id = randomBytes(PAIR_ID_BYTES);

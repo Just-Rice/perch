@@ -66,7 +66,8 @@ export function pairing(ctx) {
 
   function render(st) {
     if (!st) return;
-    const ready = st.totp?.set === true;
+    // Pairing waits for the authenticator app, unless the owner switched the code off for pairing.
+    const ready = st.totp?.set === true || st.settings?.codeWithPairing === false;
     show($('pairLocked'), !ready);
     $('pairStartBtn').disabled = !ready;
     $('stepPair').dataset.disabled = String(!ready);

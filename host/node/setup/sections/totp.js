@@ -64,9 +64,13 @@ export function totp(ctx) {
     if (!set) say(ok, '');
     if (pending) setText($('totpAccount'), `Perch (${st.macName})`);
     setText($('totpSetAt'), set && st.totp.setAt ? ` on ${dateOnly(st.totp.setAt)}` : '');
+    // Every code switched off (Settings, Sign-in): the app is optional.
+    const s = st.settings ?? {};
+    const optional = !set && s.codeWithPasskey === false && s.codeWithBackup === false && s.codeWithPairing === false;
+    show($('totpOptional'), optional);
     const num = $('numTotp');
-    num.dataset.done = String(set);
-    setText(num, set ? '✓' : '2');
+    num.dataset.done = String(set || optional);
+    setText(num, set ? '✓' : optional ? '–' : '2');
   }
 
   return { render };

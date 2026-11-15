@@ -560,6 +560,12 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     }
     assert.equal(mock.raw.settings.idleMinutes, 120);
 
+    // Sign-in: the 6-digit code can be switched off per way in.
+    await click(page, '#setCodePasskey');
+    await until(() => lastPatch()?.codeWithPasskey === false, 'code after a passkey off');
+    await click(page, '#setCodePasskey');
+    await until(() => lastPatch()?.codeWithPasskey === true, 'and on again');
+
     // Where "talk through this Mac" plays: hidden until the app has listed the Mac's sound outputs.
     assert.equal(await evaluate(page, `document.getElementById('micOutputRow').hidden`), true);
     mock.raw.audioOutputs = [{ uid: 'BuiltIn', name: 'MacBook Air Speakers', main: true }, { uid: 'BlackHole2ch', name: 'BlackHole 2ch', main: false }];

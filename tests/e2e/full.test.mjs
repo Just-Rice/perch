@@ -193,6 +193,43 @@ test('backup sign-in: Mac name and password (checked by OPAQUE), then the code',
   assert.equal((await app.call('state')).session?.route, 'backup');
 });
 
+test('a Chromebook: a pairing link offers the backup sign-in, with the Mac\u2019s name filled in; opening Perch goes straight there', async () => {
+  // (The backup password was set by the test before.) ?device=chromebook stands in for the browser saying it has no
+  // easy passkey of its own.
+  const password = 'amber-otter-quietly-sings-loud';
+  const { macName } = await app.call('state');
+  const { link } = await app.call('pairStart');
+  const page = await openPage(stack, link.replace('connect.html#', `connect.html?${testParams()}&device=chromebook#`), { name: 'chromebook' });
+  await page.waitScreen('message', { timeoutMs: 20000 });
+  assert.match(await page.text('#msgTitle'), /backup sign-in/);
+  assert.equal(await page.text('#msgSecondary'), 'Make a passkey anyway');
+  assert.equal((await app.call('state')).pairing !== null, true, 'the pairing link is left unused');
+  await page.click('#msgPrimary');
+  await page.waitScreen('backup');
+  assert.equal(await page.eval(`document.getElementById('macName').value`), macName, 'the Mac\u2019s name is filled in');
+  // The owner switched the 6-digit code off for the backup sign-in (Setup, Settings, Sign-in): name and password alone.
+  // (This also keeps the Mac's clock where it is: every fresh code moves it on 30 seconds.)
+  await app.call('updateSettings', { codeWithBackup: false });
+  await page.click('#password');
+  await page.type(password);
+  await page.click('#btnBackupGo');
+  await assertPlaying(page);
+  assert.equal((await app.call('state')).session?.route, 'backup');
+  await app.call('updateSettings', { codeWithBackup: true });
+  await page.click('#tbBye');
+  await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
+  // Next time: straight to the backup sign-in, name remembered (on a device that knows no Mac by passkey, as a
+  // Chromebook won't; this test browser remembers the earlier tests' Mac, so forget it here).
+  const macsBefore = await page.eval(`localStorage.getItem('perch.macs.v1')`);
+  await page.eval(`localStorage.removeItem('perch.macs.v1')`);
+  await page.goto(`${stack.base}connect.html?${testParams()}&device=chromebook`);
+  await page.waitScreen('backup');
+  assert.equal(await page.eval(`document.getElementById('macName').value`), macName);
+  if (macsBefore) await page.eval(`localStorage.setItem('perch.macs.v1', ${JSON.stringify(macsBefore)})`);
+  await app.call('pairCancel');
+  assert.deepEqual(page.problems(), []);
+});
+
 test('inside an about:blank tab: same sign-in, same picture', async () => {
   const page = await openPage(stack, `${stack.base}connect.html?${testParams()}`, { name: 'opener' });
   await page.waitScreen('home');

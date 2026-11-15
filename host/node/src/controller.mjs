@@ -129,7 +129,7 @@ export class Controller {
     if (this.active) return 'connected';
     if (this.store.settings.paused) return 'paused';
     if (this.rendezvous.connectedCount === 0) return 'offline';
-    if (!this.store.config.totp.set || this.store.devices.length === 0) return 'needs-setup';
+    if ((this.store.authenticatorNeeded && !this.store.config.totp.set) || this.store.devices.length === 0) return 'needs-setup';
     return 'ready';
   }
 
@@ -140,7 +140,7 @@ export class Controller {
       case 'connected': return `${this.active.label} is connected`;
       case 'paused': return 'Paused: nobody can connect';
       case 'offline': return 'Offline: can’t reach the internet. Retrying…';
-      case 'needs-setup': return !this.store.config.totp.set ? 'Finish setting up: add Perch to your authenticator app'
+      case 'needs-setup': return this.store.authenticatorNeeded && !this.store.config.totp.set ? 'Finish setting up: add Perch to your authenticator app'
         : 'Finish setting up: pair a phone or computer';
       default: return 'Ready: open just-rice.github.io/perch to connect';
     }
@@ -366,7 +366,7 @@ export class Controller {
       if (!this.auth.guestInfo()) return { reason: 'link-expired' };
       return this.guests.size >= MAX_GUESTS ? { reason: 'busy', retryAfter: 30 } : null;
     }
-    if (!s.config.totp.set) return { reason: 'not-set-up' };
+    if (s.authenticatorNeeded && !s.config.totp.set) return { reason: 'not-set-up' };
     if (hello.route === 'passkey' && s.devices.length === 0) return { reason: 'not-set-up' };
     if (hello.route === 'backup' && (!s.settings.backupOn || !s.config.backup.record)) return { reason: 'backup-off' };
     const locked = this.auth.lockedFor(hello.route);
@@ -801,6 +801,10 @@ export class Controller {
     const s = this.store;
     for (const [k, v] of Object.entries(patch)) {
       switch (k) {
+        case 'codeWithPasskey': case 'codeWithBackup': case 'codeWithPairing':
+          if (typeof v !== 'boolean') throw new Error(`${k} must be true or false.`);
+          if (v && !s.config.totp.set) throw new Error('Set up the authenticator app first (step 2), then switch this on.');
+          break;
         case 'loginItem': case 'keepAwake': case 'backupOn': case 'paused': case 'lockOnDisconnect': case 'curtain':
           if (typeof v !== 'boolean') throw new Error(`${k} must be true or false.`);
           break;
@@ -835,6 +839,12 @@ export class Controller {
       await this._applyListening();
     }
     if ('keepAwake' in patch) this.app.command('keep-awake', { on: after.keepAwake });
+    for (const [k, what] of [['codeWithPasskey', 'after a passkey'], ['codeWithBackup', 'with the backup password'],
+      ['codeWithPairing', 'when pairing a device']]) {
+      if (k in patch && after[k] !== before[k]) {
+        s.activity('settings', `${after[k] ? 'The 6-digit code is asked for' : 'No 6-digit code'} ${what}`);
+      }
+    }
     // The curtain can go up or down in the middle of a session.
     if ('curtain' in patch && this.active) {
       this.app.command('session', { active: true, viewer: this.active.label, route: this.active.route, curtain: after.curtain });

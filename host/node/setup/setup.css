@@ -377,3 +377,6 @@ pre.code { font-family: var(--mono); font-size: .85rem; line-height: 1.5; backgr
 .name-box form { margin-top: 6px; max-width: 34em; }
 .name-box label { margin-top: 4px; }
 .name-box input:invalid { border-color: var(--bad); }
+
+/* Groups inside Settings */
+.settings-head { margin: 22px 0 2px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 1.02rem; }

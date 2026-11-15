@@ -232,7 +232,7 @@ export class Session {
       this.log?.info(`passkey sign-in refused: ${e.message}`);
       return this._deny(e.reason);
     }
-    this._askCode();
+    this._codeOrDone();
   }
 
   // The challenge a one-tap sign-in must have signed: over the certificate this viewer's DTLS actually used (the one
@@ -285,7 +285,7 @@ export class Session {
     // The password is proven: this was not a failed attempt after all. The code still has to be right.
     this.backupAttempt?.undo();
     this.backupAttempt = null;
-    this._askCode();
+    this._codeOrDone();
   }
 
   // A guest: the link itself is the pass (the owner handed it out on purpose). It only ever lets them watch.
@@ -334,7 +334,14 @@ export class Session {
       return this._deny(e.reason);
     }
     this.newDeviceLabel = cleanLabel(msg.label) || this.label;
-    this._askCode();
+    this._codeOrDone();
+  }
+
+  // The 6-digit code next, unless the owner switched it off for this route in Setup.
+  _codeOrDone() {
+    if (this.store.codeNeeded(this.route)) return this._askCode();
+    this.auth.succeed(this.route);
+    return this._complete();
   }
 
   _askCode() {
@@ -353,6 +360,11 @@ export class Session {
       return;
     }
     this.auth.succeed(this.route);
+    this._complete();
+  }
+
+  // Signed in (and, on the pairing route, the new device saved).
+  _complete() {
     if (this.route === 'pair') {
       // The owner may have cancelled the link (or it ran out) while this viewer was typing the code.
       if (!this.auth.pairingInfo() || this.auth.pairing?.holder !== this) return this._deny('link-expired');

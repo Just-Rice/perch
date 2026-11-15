@@ -3,7 +3,7 @@
 import { pageEnv } from './env.js';
 import { MacStore, lastUsedText } from './macs.js';
 import { Prefs } from './prefs.js';
-import { deviceLabel, isAppleDevice, isTouchFirst } from './device.js';
+import { deviceLabel, isAppleDevice, isTouchFirst, passkeyFriendly, platformAuthenticatorAvailable } from './device.js';
 import { parsePairHash, parseGuestHash, parseUserHandle } from './pairlink.js';
 import { Connection, PerchError } from './connection.js';
 import { signIn, loadOpaque } from './signin.js';
@@ -36,6 +36,10 @@ export function start() {
     log: env.test || env.demo ? (...a) => console.debug('[perch]', ...a) : () => {},
   };
   app.prefs = new Prefs({ apple: app.apple });
+  // Passkey or backup sign-in, by device. Tests on this computer can say which (?device=chromebook|passkey).
+  const forced = env.test ? env.params.get('device') : null;
+  app.passkeyFriendly = forced === 'chromebook' ? Promise.resolve(false) : forced === 'passkey' ? Promise.resolve(true)
+    : platformAuthenticatorAvailable().then(platformAuthenticator => passkeyFriendly(ua, { platformAuthenticator }));
   // Asked once, straight away: is this copy of the site served by a Mac owner's own relay (relay/)?
   app.ownBroker = ownRelayBroker(env);
   // Tests and the demo look inside through this; the real site never sets it.
@@ -58,10 +62,15 @@ export function start() {
   }
   $('app').hidden = false;
   if (pair?.error) return showMessage(app, failureMessage('bad-link'), null);
-  if (pair) return runSession(app, { route: 'pair', pair });
+  if (pair) return app.passkeyFriendly.then(ok => runSession(app, { route: 'pair', pair, offerBackup: !ok }));
   if (guest?.error) return showMessage(app, failureMessage('bad-link'), null);
   if (guest) return runSession(app, { route: 'guest', guest });
-  showHome(app);
+  app.passkeyFriendly.then(ok => {
+    // A device that can't easily keep a passkey goes straight to the backup sign-in, unless it already knows a Mac by
+    // its passkey. The home page (Back) still offers a passkey.
+    if (!ok && app.macs.list().length === 0) showBackup(app);
+    else showHome(app);
+  });
 }
 
 // A copy of this site served by the owner's own relay Worker (relay/ deploys it alongside the relay): that relay is
@@ -263,6 +272,7 @@ async function runSession(app, target) {
     guest: target.guest ?? null,
     quick: target.quick ?? null,
     alwaysTap: env.params.get('tap') === '1',
+    offerBackup: !!target.offerBackup,
     onHi: hi => ui.setMacName(hi.name),
     onPaired: m => {
       saved = app.macs.save({
@@ -299,8 +309,26 @@ async function runSession(app, target) {
       return runSession(app, { ...target, transport: 'relay', quick: null });
     }
     if (e.kind === 'cancelled') return showHome(app);
+    if (e.kind === 'use-backup') return showPairChoice(app, target, e.name);
     showFailure(app, e, target);
   }
+}
+
+// A pairing link opened on a device that can't easily keep a passkey (a Chromebook): sign in with the Mac's name and
+// backup password instead, or make a passkey anyway. The link is left unused, so either works.
+function showPairChoice(app, target, name) {
+  app.ui.message({
+    title: 'Use the backup sign-in on this device?',
+    body: `This device can't easily keep a passkey of its own, so it's quicker to sign in to ${name || 'your Mac'} with ` +
+      'the Mac\u2019s name and the backup password you chose in Perch\u2019s Setup on the Mac (turn on Backup sign-in ' +
+      'there first if you haven\u2019t).',
+  }, {
+    primary: { label: 'Use the backup sign-in', onClick: () => {
+      if (name) app.prefs.set('backupName', name);
+      showBackup(app, { name });
+    } },
+    secondary: { label: 'Make a passkey anyway', onClick: () => runSession(app, { ...target, offerBackup: false }) },
+  });
 }
 
 function cancel(app) {

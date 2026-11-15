@@ -279,6 +279,11 @@ site (`pairStart(site)`), by default the Mac's own relay's site when it has one,
 paired before sites had their own RP IDs stay on
 `just-rice.github.io`. The backup route has no origin check (the Mac can't see where a password was typed).
 
+**Codes are the owner's choice.** Settings `codeWithPasskey`, `codeWithBackup` and `codeWithPairing` (all on by
+default) say whether the 6-digit code follows a passkey, the backup password and a pairing passkey. With one off, the
+Mac sends `ready` (pairing: `paired`, then `ready`) straight after the step before, with no `totp`; viewers accept
+either. Switching one on needs the authenticator app set up; with all three off the app is optional.
+
 **Limits.** Five wrong 6-digit codes on a route lock that route for 1 minute, doubling per further failure up to 1
 hour; a success resets it. A failed passkey step never counts (a signature can't be guessed, and counting it would
 let anyone with `sigKey` lock the owner out); backup sign-in counts each password attempt. Passkey, pairing and backup

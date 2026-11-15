@@ -123,6 +123,8 @@
         <h2 id="hTotp">Add Perch to your authenticator app</h2>
         <p class="lead">Each time you connect, Perch asks for a 6-digit code from this app as well as your passkey, so a
           lost phone or a guessed password is never enough on its own.</p>
+        <p class="small muted" id="totpOptional" hidden>Optional now: no 6-digit code is asked for anywhere (Settings,
+          Sign-in). Set it up if you want codes back.</p>
       </div>
     </div>
 
@@ -446,6 +448,32 @@ npx wrangler deploy</pre></li>
         <span class="switch-text"><b>Pause Perch</b>
           <span class="muted">Nobody can connect while Perch is paused.</span></span>
         <input type="checkbox" role="switch" id="setPaused" data-setting="paused">
+      </label>
+    </div>
+    <h3 class="settings-head">Sign-in</h3>
+    <p class="small muted">Each switch adds the 6-digit code from your authenticator app to that way in. Switching one off
+      makes it quicker, and less safe: whoever has the passkey (or knows the backup password, or holds a pairing link)
+      gets in with nothing else. Wrong tries still lock sign-in for a while.</p>
+    <div class="switch-row">
+      <label class="switch" for="setCodePasskey">
+        <span class="switch-text"><b>Ask for the code after a passkey</b>
+          <span class="muted">Off: a passkey alone signs in (Face ID or Touch ID on your device).</span></span>
+        <input type="checkbox" role="switch" id="setCodePasskey" data-setting="codeWithPasskey">
+      </label>
+    </div>
+    <div class="switch-row">
+      <label class="switch" for="setCodeBackup">
+        <span class="switch-text"><b>Ask for the code with the backup password</b>
+          <span class="muted">Off: the Mac's name and the backup password are enough. Not recommended: a password can
+            be watched or guessed.</span></span>
+        <input type="checkbox" role="switch" id="setCodeBackup" data-setting="codeWithBackup">
+      </label>
+    </div>
+    <div class="switch-row">
+      <label class="switch" for="setCodePairing">
+        <span class="switch-text"><b>Ask for the code when pairing a device</b>
+          <span class="muted">Off: a pairing link alone pairs a device (it still works once, for 10 minutes).</span></span>
+        <input type="checkbox" role="switch" id="setCodePairing" data-setting="codeWithPairing">
       </label>
     </div>
     <div class="field-row">

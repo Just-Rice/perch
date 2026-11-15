@@ -29,7 +29,14 @@ export const DEFAULT_SETTINGS = Object.freeze({
   curtain: false,            // black out the Mac's own screen while a viewer is connected
   micOutput: '',             // where a viewer's microphone is played: '' = the Mac's current output, or a device UID
   quality: DEFAULT_QUALITY,
+  // The 6-digit authenticator code, asked for after each of these (the owner can switch any of them off in Setup).
+  codeWithPasskey: true,
+  codeWithBackup: true,
+  codeWithPairing: true,
 });
+
+// Which code setting covers each route.
+export const CODE_SETTING = Object.freeze({ passkey: 'codeWithPasskey', backup: 'codeWithBackup', pair: 'codeWithPairing' });
 
 export function defaultHome() {
   return join(homedir(), 'Library', 'Application Support', 'Perch');
@@ -184,6 +191,11 @@ export class Store {
     this.save();
     return this.config.settings;
   }
+
+  // Is the 6-digit code asked for on this route? (Guests never get one: the link is their pass.)
+  codeNeeded(route) { return route in CODE_SETTING ? this.settings[CODE_SETTING[route]] !== false : false; }
+  // Is the authenticator app needed at all? Not when every code is switched off.
+  get authenticatorNeeded() { return Object.values(CODE_SETTING).some(k => this.settings[k] !== false); }
 
   // --- authenticator app ---
   get totpSecret() { return this.secrets.totpSecret ? Buffer.from(fromB64url(this.secrets.totpSecret)) : null; }

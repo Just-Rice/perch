@@ -205,7 +205,19 @@ export class SoftViewer {
   // --- the three routes; each resolves to the final message (ready, or denied with final) ---
 
   async _code(code, beforeCode) {
-    let m = await this.next(['totp', 'denied']);
+    // The Mac may skip the code (its owner switched it off for this route): then ready (or paired, then ready) comes
+    // straight away.
+    let m = await this.next(['totp', 'paired', 'ready', 'denied']);
+    if (m.t === 'denied') return m;
+    if (m.t === 'paired') {
+      this.paired = m;
+      m = await this.next(['ready', 'denied']);
+    }
+    if (m.t === 'ready') {
+      this.readyAt = Date.now();
+      this.ready = m;
+      return m;
+    }
     if (m.t === 'denied') return m;
     await beforeCode?.();
     for (const c of Array.isArray(code) ? code : [code]) {

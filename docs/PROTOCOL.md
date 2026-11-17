@@ -297,8 +297,10 @@ owner's passkeys. Hellos are limited per topic (host topic: passkey and pairing;
 3 sessions signing in at once each, and a session whose viewer hasn't answered the offer within 15 s is dropped. TOTP codes are accepted for the previous, current and
 next 30-second step, and each step only once.
 
-`ready`: `{t:"ready", name, hv, display: {id, width, height}, displays: [{id, name, width, height, main}],
-quality, audio, input, locked}` — `input` false means Accessibility permission is missing (view only).
+`ready`: `{t:"ready", name, hv, display: {id, width, height}, displays: [{id, name, x?, y?, width, height, main}],
+quality, audio, input, locked}` — `input` false means Accessibility permission is missing (view only). Sizes and
+positions are in points; `x`, `y` (from 0.3.3) are each display's top-left corner in the Mac's arrangement, which the
+viewer's display map and edge flip use (without them it takes the displays to sit side by side in the order listed).
 
 ## Control channel: during a session
 

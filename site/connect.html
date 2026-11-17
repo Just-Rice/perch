@@ -197,10 +197,12 @@
         <option value="fast" hidden disabled>Fast (60 fps)</option>
       </select>
     </label>
-    <label class="tb-select" id="tbDisplayWrap" hidden>
-      <span class="sr-only">Which display</span>
-      <select id="tbDisplay" title="Which display"></select>
-    </label>
+    <span class="tb-displays" id="tbDisplayWrap" role="group" aria-label="Which display" hidden>
+      <span class="tb-displays-label" aria-hidden="true">Display</span>
+      <span class="tb-chips" id="tbDisplays"></span>
+      <button type="button" id="tbDisplayMap" class="tb-btn" data-icon="displays" title="Displays, as arranged on the desk"
+        aria-label="Show how the displays are arranged" aria-expanded="false" aria-controls="displayMap"></button>
+    </span>
     <button type="button" id="tbKeyboard" class="tb-btn" data-icon="keyboard" title="Keyboard" aria-label="Show the keyboard" hidden></button>
     <button type="button" id="tbKeys" class="tb-btn tb-text" title="Special keys" aria-label="Special keys" aria-pressed="false">⌘</button>
     <button type="button" id="tbSound" class="tb-btn" data-icon="sound" title="Sound" aria-label="Mute"></button>
@@ -215,6 +217,16 @@
     <button type="button" id="tbMore" class="tb-btn" data-icon="more" title="More" aria-label="More options" aria-expanded="false" aria-controls="moreMenu"></button>
     <button type="button" id="tbBye" class="tb-btn tb-bye" data-icon="power" title="Disconnect" aria-label="Disconnect"></button>
   </div>
+
+  <!-- The Mac's displays as they sit on the desk: choose one (viewer.js, displays.js) -->
+  <div id="displayMap" class="menu display-map" role="group" aria-label="Displays, as arranged" hidden>
+    <p class="menu-head">Displays, as arranged</p>
+    <div class="map-area" id="displayMapArea"></div>
+    <p class="fine">Or hold the pointer at an edge of the picture to move to the display beyond it.</p>
+  </div>
+
+  <!-- The edge flip: which display is beyond the edge the pointer is waiting at -->
+  <div id="edgeHint" class="edge-hint" aria-hidden="true" hidden><span id="edgeHintText"></span><i class="edge-fill"></i></div>
 
   <div id="moreMenu" class="menu" role="group" aria-label="More options" hidden>
     <p class="menu-head">This bar</p>

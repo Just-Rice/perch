@@ -1,26 +1,28 @@
-// Settings: each change is saved straight away (no Save button). If Perch refuses one, the control goes back to
-// what it was and the reason is shown underneath.
+// Settings, in three cards (the 6-digit code switches, video quality, and "This Mac"): each change is saved straight
+// away (no Save button). If Perch refuses one, the control goes back to what it was and the reason is shown in that
+// control's own card.
 import { $, setText, show, say } from '../lib/dom.js';
 
 const IDLE_LABEL = (m) => (m === 0 ? 'Never' : m % 60 === 0 ? `${m / 60} hour${m === 60 ? '' : 's'}` : `${m} minutes`);
 
 export function settings(ctx) {
-  const error = $('settingsError');
-  const saved = $('settingsSaved');
   const idle = $('setIdle');
   const micOutput = $('setMicOutput');
   const pending = new Set(); // settings being saved right now: live updates don't overwrite them meanwhile
-  let savedTimer = null;
+  const savedTimers = new Map();
 
-  async function save(key, value, revert) {
+  async function save(control, key, value, revert) {
+    const card = control.closest('.card');
+    const saved = card.querySelector('.saved');
+    const error = card.querySelector('.msg.bad');
     pending.add(key);
     say(error, '');
     setText(saved, 'Saving…');
     try {
       await ctx.post('updateSettings', { patch: { [key]: value } });
       setText(saved, 'Saved.');
-      clearTimeout(savedTimer);
-      savedTimer = setTimeout(() => setText(saved, ''), 2500);
+      clearTimeout(savedTimers.get(card));
+      savedTimers.set(card, setTimeout(() => setText(saved, ''), 2500));
     } catch (e) {
       revert();
       setText(saved, '');
@@ -31,25 +33,26 @@ export function settings(ctx) {
     }
   }
 
-  for (const input of document.querySelectorAll('#settingsCard input[data-setting]')) {
+  const switches = [...document.querySelectorAll('input[data-setting]')];
+  for (const input of switches) {
     input.addEventListener('change', () => {
       const want = input.checked;
-      save(input.dataset.setting, want, () => { input.checked = !want; });
+      save(input, input.dataset.setting, want, () => { input.checked = !want; });
     });
   }
   idle.addEventListener('change', () => {
     const before = String(ctx.state?.settings?.idleMinutes ?? '');
-    save('idleMinutes', Number(idle.value), () => { idle.value = before; });
+    save(idle, 'idleMinutes', Number(idle.value), () => { idle.value = before; });
   });
   micOutput.addEventListener('change', () => {
     const before = ctx.state?.settings?.micOutput ?? '';
-    save('micOutput', micOutput.value, () => { micOutput.value = before; });
+    save(micOutput, 'micOutput', micOutput.value, () => { micOutput.value = before; });
   });
   for (const radio of document.querySelectorAll('#setQuality input[type=radio]')) {
     radio.addEventListener('change', () => {
       if (!radio.checked) return;
       const before = ctx.state?.settings?.quality;
-      save('quality', radio.value, () => {
+      save(radio, 'quality', radio.value, () => {
         for (const r of document.querySelectorAll('#setQuality input[type=radio]')) r.checked = r.value === before;
       });
     });
@@ -58,7 +61,7 @@ export function settings(ctx) {
   function render(st) {
     if (!st) return;
     const s = st.settings ?? {};
-    for (const input of document.querySelectorAll('#settingsCard input[data-setting]')) {
+    for (const input of switches) {
       if (!pending.has(input.dataset.setting)) input.checked = s[input.dataset.setting] === true;
     }
     if (!pending.has('idleMinutes') && typeof s.idleMinutes === 'number') {

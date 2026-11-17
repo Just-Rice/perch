@@ -78,6 +78,8 @@ export function about(ctx) {
       yes: 'Start over', no: 'Cancel', danger: true,
       onYes: async () => {
         await ctx.post('reset');
+        // Everything starts again from the setup steps, with the devices and activity (now empty) under them.
+        $('tabSecurity').click();
         window.scrollTo({ top: 0 });
         $('macName').focus();
       },

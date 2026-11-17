@@ -352,6 +352,44 @@ test('desktop: keys go to the Mac with the protocol\'s code, key and modifier bi
   await page.close();
 });
 
+test('desktop: displays — the map, and holding the pointer at an edge moves to the display beyond it', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  const n = await count(page);
+  const shown = () => page.eval(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent`);
+
+  // The map: both displays, side by side (the demo Mac, like one before 0.3.3, doesn't say where they sit).
+  await page.click('#tbDisplayMap');
+  assert.equal(await page.eval(`document.getElementById('displayMap').hidden`), false);
+  assert.equal(await page.eval(`document.querySelectorAll('#displayMapArea .map-display').length`), 2);
+  const [a, b] = await page.eval(`[...document.querySelectorAll('#displayMapArea .map-display')].map(e => e.getBoundingClientRect().left)`);
+  assert.ok(a < b, 'the first display on the left');
+  await page.shot('viewer-demo-display-map-desktop');
+  await page.click('#displayMapArea .map-display:nth-child(2)');
+  assert.equal(await shown(), '2');
+  await page.mouse('mousePressed', 640, 400, { button: 'left', clickCount: 1 });
+  await page.mouse('mouseReleased', 640, 400, { button: 'left', clickCount: 1 });
+  assert.equal(await page.eval(`document.getElementById('displayMap').hidden`), true, 'a click on the picture closes it');
+
+  // The edge flip: display 2 has display 1 to its left. Resting at the left edge names it, then moves there.
+  const box = await page.eval(`(() => { const r = document.getElementById('surface').getBoundingClientRect(); return { l: r.left, r: r.right, y: (r.top + r.bottom) / 2 }; })()`);
+  await page.mouse('mouseMoved', box.l + 200, box.y);
+  await page.mouse('mouseMoved', box.l + 1, box.y);
+  await page.waitFor(`!document.getElementById('edgeHint').hidden`, { what: 'edge hint' });
+  assert.match(await page.text('#edgeHintText'), /^← Built-in/);
+  await page.shot('viewer-demo-edge-flip-desktop');
+  await page.waitFor(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent === '1'`, { what: 'flipped to display 1' });
+  assert.equal(await page.eval(`document.getElementById('edgeHint').hidden`), true);
+  // Still at the edge: it doesn't flip again until the pointer has moved away.
+  await sleep(700);
+  assert.equal(await shown(), '1');
+  await page.mouse('mouseMoved', box.r - 200, box.y);
+  await page.mouse('mouseMoved', box.r - 1, box.y);
+  await page.waitFor(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent === '2'`, { what: 'and on to display 2' });
+  const ids = (await messages(page, n)).filter(m => m.t === 'display').map(m => m.id);
+  assert.deepEqual(ids, [2, 1, 2]);
+});
+
 test('desktop: toolbar controls — quality, display, stats, keys bar, more menu, full screen, sound, disconnect', async () => {
   const page = await openPage(stack, demoUrl({ sound: 'blocked' }));
   await ready(page);
@@ -362,7 +400,10 @@ test('desktop: toolbar controls — quality, display, stats, keys bar, more menu
   await page.waitFor(`document.getElementById('soundPrompt').hidden && !document.getElementById('video').muted`, { what: 'sound on' });
 
   await page.eval(`(() => { const s = document.getElementById('tbQuality'); s.value = 'sharp'; s.dispatchEvent(new Event('change')); })()`);
-  await page.eval(`(() => { const s = document.getElementById('tbDisplay'); s.value = '2'; s.dispatchEvent(new Event('change')); })()`);
+  assert.equal(await page.eval(`document.querySelectorAll('#tbDisplays .tb-chip').length`), 2, 'a button for each display');
+  assert.equal(await page.eval(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent`), '1');
+  await page.click('#tbDisplays .tb-chip:nth-child(2)');
+  assert.equal(await page.eval(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent`), '2');
   await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'display')`);
   const ctl = (await messages(page, n)).filter(m => m.channel === 'control' && m.t !== 'ping');
   assert.deepEqual(ctl.map(m => ({ t: m.t, preset: m.preset, id: m.id })),

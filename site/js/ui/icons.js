@@ -16,6 +16,7 @@ const PATHS = {
   close: 'M18 6 6 18M6 6l12 12',
   power: 'M12 3v9M18.4 6.6a9 9 0 1 1-12.8 0',
   display: 'M3 4h18v12H3zM8 20h8M12 16v4',
+  displays: 'M2 7h11v8H2zM15 4h7v6h-7zM5 19h5M7.5 15v4',
   mac: 'M5 5h14a1 1 0 0 1 1 1v10H4V6a1 1 0 0 1 1-1zM2 19h20',
   chevron: 'M9 6l6 6-6 6',
   trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13',

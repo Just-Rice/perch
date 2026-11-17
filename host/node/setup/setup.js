@@ -19,6 +19,8 @@ import { session } from './sections/session.js';
 import { activity } from './sections/activity.js';
 import { about } from './sections/about.js';
 import { restart } from './sections/restart.js';
+import { tabs } from './sections/tabs.js';
+import { startCipher } from './lib/cipher.js';
 
 let state = null;
 let stopWatching = () => {};
@@ -44,8 +46,7 @@ const ctx = {
   farewell() {
     gone = true;
     stopWatching();
-    for (const card of document.querySelectorAll('main > section')) card.hidden = card.id !== 'farewell';
-    $('toc').hidden = true;
+    for (const el of document.querySelectorAll('main > *, main section')) el.hidden = el.id !== 'farewell';
     showBanner('');
     setText($('statePillText'), 'Uninstalled');
     $('statePill').dataset.tone = 'neutral';
@@ -54,7 +55,7 @@ const ctx = {
   },
 };
 
-const parts = [header, restart, permissions, totp, pairing, devices, backup, guest, relay, workerRelay, sites, settings, session, activity, about].map(make => make(ctx));
+const parts = [tabs, header, restart, permissions, totp, pairing, devices, backup, guest, relay, workerRelay, sites, settings, session, activity, about].map(make => make(ctx));
 
 function apply(next) {
   if (!next || typeof next !== 'object' || gone) return;
@@ -62,39 +63,10 @@ function apply(next) {
   for (const part of parts) {
     try { part.render(next); } catch (e) { console.error('Setup: render failed', e); }
   }
-  syncToc();
 }
 
-// The jump links: only to cards that are showing, with the one being read marked.
-const tocLinks = [...document.querySelectorAll('#toc a')].map(a => [a, document.getElementById(a.hash.slice(1))]);
-function syncToc() {
-  $('toc').hidden = gone;
-  for (const [a, card] of tocLinks) a.parentElement.hidden = !card || card.hidden;
-  markToc();
-}
-function markToc() {
-  // The last showing card whose top has passed a line a third of the way down the window.
-  const line = window.innerHeight / 3;
-  let current = null;
-  for (const [a, card] of tocLinks) {
-    if (a.parentElement.hidden) continue;
-    current ??= a;
-    if (card.getBoundingClientRect().top <= line) current = a;
-  }
-  for (const [a] of tocLinks) {
-    if (a === current) {
-      if (a.getAttribute('aria-current') !== 'true') {
-        a.setAttribute('aria-current', 'true');
-        // Keep the marked chip in view in the scrolling row (no effect on the side list).
-        const row = a.closest('ul');
-        if (row.scrollWidth > row.clientWidth) row.scrollTo({ left: a.offsetLeft - row.offsetLeft - row.clientWidth / 2 + a.offsetWidth / 2 });
-      }
-    } else a.removeAttribute('aria-current');
-  }
-}
-let tocFrame = 0;
-window.addEventListener('scroll', () => { tocFrame ||= requestAnimationFrame(() => { tocFrame = 0; markToc(); }); }, { passive: true });
-window.addEventListener('resize', markToc);
+// The moving background (lib/cipher.js): still for anyone who asks their Mac for less motion.
+startCipher(document.getElementById('cipher'));
 
 // Countdowns every second; "5 minutes ago" and the like every 30 seconds.
 setInterval(() => { if (state && !gone) for (const p of parts) p.tick?.(state); }, 1000);

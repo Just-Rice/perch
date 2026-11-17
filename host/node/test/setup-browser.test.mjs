@@ -83,6 +83,8 @@ async function click(page, selector) {
   const box = await evaluate(page, `(() => {
     const el = document.querySelector(${q(selector)});
     if (!el) return { missing: true };
+    // As an in-page link would: choose the tab it's in, or open the folded setup steps.
+    el.dispatchEvent(new CustomEvent('perch:reveal', { bubbles: true }));
     el.scrollIntoView({ block: 'center' });
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height) return { hidden: true };
@@ -102,7 +104,8 @@ async function click(page, selector) {
 
 // Focuses a field, selects what's in it and types over it.
 async function type(page, selector, textToType) {
-  await evaluate(page, `(() => { const el = document.querySelector(${q(selector)}); el.focus(); el.select?.(); })()`);
+  await evaluate(page, `(() => { const el = document.querySelector(${q(selector)});
+    el.dispatchEvent(new CustomEvent('perch:reveal', { bubbles: true })); el.focus(); el.select?.(); })()`);
   await page.send('Input.insertText', { text: textToType });
 }
 

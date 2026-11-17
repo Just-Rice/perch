@@ -141,6 +141,58 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
   background: rgba(255, 255, 255, .06); color: inherit; font: inherit; font-size: .95rem; cursor: pointer;
 }
 .tb-select option { background: #161a21; color: #e8ebf0; }
+/* Which display: numbered buttons, each with an outline in its display's shape, and the map button */
+.tb-displays { display: inline-flex; align-items: center; gap: 2px; }
+.tb-displays[hidden] { display: none; }
+.tb-displays-label { display: none; }
+.tb-chips { display: inline-flex; gap: 2px; padding: 3px; border-radius: 12px; background: rgba(255, 255, 255, .06); }
+.tb-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 10px; border: 0; border-radius: 9px;
+  background: transparent; color: #cfd5de; font: inherit; font-weight: 700; font-size: .92rem; cursor: pointer;
+}
+.tb-chip:hover { background: rgba(255, 255, 255, .1); }
+.tb-chip[aria-pressed="true"] { background: #2dd4bf; color: #04201d; }
+.tb-chip .shape { display: inline-block; border: 1.7px solid currentColor; border-radius: 2px; }
+/* In the More menu (phones, and a bar on the left or right): a labelled row; the map stays in the toolbar's place. */
+.menu .tb-displays { display: flex; justify-content: space-between; gap: 12px; font-weight: 600; }
+.menu .tb-displays[hidden] { display: none; }
+.menu .tb-displays-label { display: inline; }
+.menu #tbDisplayMap { display: none; }
+
+/* The map of the displays (a menu of its own, where the More menu opens) */
+.display-map .map-area { position: relative; height: 128px; }
+.map-display {
+  position: absolute; display: flex; align-items: center; justify-content: center; padding: 0; border: 1.5px solid #3a414d;
+  border-radius: 6px; background: #262c36; color: #cfd5de; font: inherit; font-weight: 700; font-size: .9rem; cursor: pointer;
+}
+.map-display:hover { border-color: #5eead4; }
+.map-display.main::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 4px; border-radius: 4px 4px 0 0; background: rgba(255, 255, 255, .35);
+}
+.map-display.on { border-color: #2dd4bf; background: #0f2f2c; color: #5eead4; }
+
+/* The edge flip's note: the display beyond the edge the pointer waits at, filling up until the view moves there */
+.edge-hint {
+  position: absolute; z-index: 3; display: flex; align-items: center; pointer-events: none; padding: 0 12px;
+  background: linear-gradient(90deg, transparent, rgba(45, 212, 191, .28));
+}
+.edge-hint[hidden] { display: none; }
+.edge-hint.at-right { top: 0; bottom: 0; right: 0; width: min(180px, 30%); justify-content: flex-end; }
+.edge-hint.at-left { top: 0; bottom: 0; left: 0; width: min(180px, 30%); background: linear-gradient(270deg, transparent, rgba(45, 212, 191, .28)); }
+.edge-hint.at-top { left: 0; right: 0; top: 0; height: 90px; justify-content: center; align-items: flex-start; padding-top: 64px; background: linear-gradient(0deg, transparent, rgba(45, 212, 191, .28)); }
+.edge-hint.at-bottom { left: 0; right: 0; bottom: 0; height: 90px; justify-content: center; align-items: flex-end; padding-bottom: 16px; background: linear-gradient(180deg, transparent, rgba(45, 212, 191, .28)); }
+.edge-hint span { background: #2dd4bf; color: #04201d; font-weight: 700; font-size: .9rem; border-radius: 999px; padding: 5px 12px; white-space: nowrap; }
+.edge-fill { position: absolute; background: #2dd4bf; }
+.edge-hint.at-left .edge-fill, .edge-hint.at-right .edge-fill { bottom: 0; height: 3px; width: 0; }
+.edge-hint.at-right .edge-fill { right: 0; }
+.edge-hint.at-left .edge-fill { left: 0; }
+.edge-hint.at-top .edge-fill, .edge-hint.at-bottom .edge-fill { left: 0; width: 3px; height: 0; }
+.edge-hint.at-top .edge-fill { top: 0; }
+.edge-hint.at-bottom .edge-fill { bottom: 0; }
+.edge-hint.charging .edge-fill { transition: width .4s linear, height .4s linear; }
+.edge-hint.charging.at-left .edge-fill, .edge-hint.charging.at-right .edge-fill { width: 100%; }
+.edge-hint.charging.at-top .edge-fill, .edge-hint.charging.at-bottom .edge-fill { height: 100%; }
+@media (prefers-reduced-motion: reduce) { .edge-hint.charging .edge-fill { transition: none; } }
 .tb-volume { display: inline-flex; align-items: center; padding: 0 6px; }
 .tb-volume input { width: 84px; accent-color: #2dd4bf; }
 .viewer :focus-visible { outline: 3px solid #2dd4bf; outline-offset: 1px; }

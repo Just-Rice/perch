@@ -15,6 +15,7 @@
   --bad: #b42318;
   --bad-soft: #fde4e1;
   --good: #14804a;
+  --glyph: 15, 118, 110;   /* the background's characters (lib/cipher.js), as r, g, b */
   --radius: 14px;
   --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 4px 16px rgba(16, 24, 40, .06);
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -36,6 +37,7 @@
     --bad: #ff8a7a;
     --bad-soft: #3a1714;
     --good: #4ade80;
+    --glyph: 45, 212, 191;
     --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 4px 16px rgba(0, 0, 0, .3);
     color-scheme: dark;
   }
@@ -342,26 +344,37 @@ input[role=switch]:focus-visible { outline: 3px solid var(--accent); outline-off
 #pairSiteLabel { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-weight: 600; }
 #pairSite { min-height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; padding: 0 10px; }
 
-/* --- jump links (inside the sticky header) --- */
-main > section { scroll-margin-top: 136px; }
-.toc { border-top: 1px solid var(--line); }
-.toc ul {
-  list-style: none; margin: 0 auto; padding: 8px 0; width: min(780px, 100% - 32px); display: flex; gap: 6px;
-  overflow-x: auto; scrollbar-width: none;
-}
-.toc ul::-webkit-scrollbar { display: none; }
-.toc a {
-  display: block; padding: 7px 12px; border-radius: 999px; white-space: nowrap; text-decoration: none;
-  color: var(--muted); font-weight: 600; font-size: .9rem;
-}
-.toc a:hover { color: var(--text); background: var(--surface-2); }
-.toc a[aria-current="true"] { color: var(--accent); background: var(--accent-soft); }
-/* Room beside the column: the links become a list down the left that stays put while the page scrolls. */
-@media (min-width: 1200px) {
-  main > section { scroll-margin-top: 84px; }
-  .toc { position: absolute; top: 96px; left: calc(50% - 390px - 216px); width: 192px; border: 0; }
-  .toc ul { width: auto; flex-direction: column; gap: 2px; padding: 0; overflow: visible; }
-  .toc a { border-radius: 10px; white-space: normal; }
+/* --- the moving background (lib/cipher.js), behind everything; the page sits above it --- */
+canvas.cipher { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; display: block; }
+main, footer.foot { position: relative; z-index: 1; }
+.card { scroll-margin-top: 84px; }
+
+/* --- getting started: the steps fold into one line in the top card once all are done (sections/tabs.js) --- */
+.setup-done { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin-top: 12px; padding-top: 12px;
+  border-top: 1px solid var(--line); }
+.done-chip { display: inline-flex; align-items: center; gap: 5px; font-size: .85rem; font-weight: 650; color: var(--good);
+  background: var(--surface-2); border-radius: 999px; padding: 3px 10px; }
+.done-chip::before { content: "✓"; }
+.steps-hide { margin: -8px 0 18px; text-align: right; }
+
+/* --- the four tabs: a segmented control --- */
+.tabs { display: flex; gap: 2px; width: fit-content; max-width: 100%; margin: 6px 0 18px; padding: 4px;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: 14px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab { display: inline-flex; align-items: center; gap: 7px; padding: 8px 16px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--muted); font: inherit; font-size: .95rem; font-weight: 650; white-space: nowrap;
+  cursor: pointer; }
+.tab:hover { color: var(--text); }
+.tab[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.tab .count { font-size: .75rem; font-weight: 700; border-radius: 999px; padding: 1px 8px; background: var(--surface);
+  color: var(--muted); }
+.tab .count:empty { display: none; }
+.tab[aria-selected="true"] .count { background: var(--accent-soft); color: var(--accent); }
+.panel:focus-visible { outline-offset: 6px; border-radius: 18px; }
+/* Narrow: all four stay in sight as a 2 × 2 grid, rather than scrolling out of view. */
+@media (max-width: 600px) {
+  .tabs { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .tab { justify-content: center; padding: 8px 10px; font-size: .9rem; }
 }
 
 /* The relay card */

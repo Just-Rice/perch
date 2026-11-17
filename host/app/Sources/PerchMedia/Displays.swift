@@ -13,9 +13,12 @@ public struct DisplayInfo: Equatable {
     public let pixelHeight: Int
     public let isMain: Bool
 
-    /// As the protocol lists it: `{id, name, width, height, main}`, sizes in points.
+    /// As the protocol lists it: `{id, name, x, y, width, height, main}`, in points; x and y are the display's top-left
+    /// corner in the global arrangement (System Settings › Displays), which lets a viewer show the arrangement and flip
+    /// to the display beyond an edge.
     public var json: [String: Any] {
-        ["id": Int(id), "name": name, "width": Int(bounds.width), "height": Int(bounds.height), "main": isMain]
+        ["id": Int(id), "name": name, "x": Int(bounds.minX), "y": Int(bounds.minY), "width": Int(bounds.width),
+         "height": Int(bounds.height), "main": isMain]
     }
 }
 

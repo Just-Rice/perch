@@ -64,7 +64,7 @@ export function totp(ctx) {
     if (!set) say(ok, '');
     if (pending) setText($('totpAccount'), `Perch (${st.macName})`);
     setText($('totpSetAt'), set && st.totp.setAt ? ` on ${dateOnly(st.totp.setAt)}` : '');
-    // Every code switched off (Settings, Sign-in): the app is optional.
+    // Every code switched off (Sign-in & security, When to ask for the 6-digit code): the app is optional.
     const s = st.settings ?? {};
     const optional = !set && s.codeWithPasskey === false && s.codeWithBackup === false && s.codeWithPairing === false;
     show($('totpOptional'), optional);

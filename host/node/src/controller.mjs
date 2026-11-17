@@ -43,6 +43,8 @@ function cleanDisplays(list) {
     width: Number.isFinite(d.width) ? d.width : 0,
     height: Number.isFinite(d.height) ? d.height : 0,
     main: !!d.main,
+    // Where it sits in the arrangement (top-left corner, points); older apps don't say.
+    ...(Number.isFinite(d.x) && Number.isFinite(d.y) ? { x: d.x, y: d.y } : {}),
   }));
 }
 

@@ -68,8 +68,11 @@ asset_url() {
     grep -E "^${URL_RE}//[^ ]*/$1\$" | head -n 1; } || true
 }
 TAG="$( { printf '%s' "$RELEASE_JSON" | grep -o '"tag_name": *"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/'; } || true)"
-ZIP_URL="$(asset_url "Perch-[0-9][0-9.]*${SUFFIX}\\.zip")"
-SUM_URL="$(asset_url "Perch-[0-9][0-9.]*${SUFFIX}\\.zip\\.sha256")"
+# x.y.z, or x.y.z-alpha.N (beta, rc) for a test build asked for by PERCH_VERSION. Spelled out so the Intel file
+# (Perch-x.y.z-intel.zip) can never pass for a test build of the other chip's.
+VER_RE='[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?'
+ZIP_URL="$(asset_url "Perch-${VER_RE}${SUFFIX}\\.zip")"
+SUM_URL="$(asset_url "Perch-${VER_RE}${SUFFIX}\\.zip\\.sha256")"
 if [ -n "$TAG" ] && [ -z "$ZIP_URL" ] && [ -n "$SUFFIX" ]; then
   fail "Perch ${TAG#v} has no version for Intel Macs. Intel support starts with Perch 0.3."
 fi

@@ -65,6 +65,14 @@ packaged app (its bundled Node and host). Long browser runs: prefix with `caffei
    (`PERCH_SIGNING_P12`, `PERCH_SIGNING_P12_PASSWORD` secrets), and publishes `Perch-0.2.0.zip` with its checksum.
    `install.sh` and the app's update check pick it up.
 
+**Test builds.** `host/scripts/alpha.sh` tags what is committed as the next version's test build (`v0.3.4-alpha.1`,
+then `.2`, …), waits for the Release workflow to build and sign it and publish it as a pre-release, and installs it on
+this Mac once nobody is connected (`--now` doesn't wait, `--no-install` only publishes). Signed with Perch's
+certificate, a test build keeps Perch's permissions, unlike a local `make-app.sh` build. Pre-releases are installed
+only by name (`PERCH_VERSION=0.3.4-alpha.1` before `bash` in the install command) and never offered by the update
+check; the next full release (0.3.4) counts as newer, so a Mac on a test build is offered it as usual. Website changes
+in a test build go live only when `main` is pushed.
+
 **The signing certificate** is a long-lived self-signed code-signing certificate (`host/scripts/signing-cert.sh`).
 macOS ties Perch's permissions to it, so it must never change: a new certificate means every user grants the two
 permissions again. Keep the `.p12` and its password backed up somewhere safe, and never commit them.

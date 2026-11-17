@@ -11,6 +11,8 @@ import { pillFor } from '../setup/sections/header.js';
 import { suggestPassword, newMacName } from '../src/names.mjs';
 import * as setupNames from '../setup/lib/names.js';
 import * as sharedNames from '../../../site/js/shared/rendezvous.js';
+import { ROUTE_WORDS as setupRouteWords } from '../setup/lib/route.js';
+import { ROUTE_WORDS as sharedRouteWords } from '../../../site/js/shared/route.js';
 
 test('Mac names: the Setup page’s copy of the rules is the website’s, and both kinds of name are accepted', () => {
   assert.equal(setupNames.CUSTOM_MAC_NAME_RE.source, sharedNames.CUSTOM_MAC_NAME_RE.source);
@@ -102,4 +104,8 @@ test('countdowns and friendly times', () => {
   assert.equal(toMs('2026-10-17T12:00:00Z'), now);
   assert.equal(toMs(new Date(now)), now);
   assert.ok(Number.isNaN(toMs(null)));
+});
+
+test('Setup names the connection route exactly as the website does', () => {
+  assert.deepEqual({ ...setupRouteWords }, { ...sharedRouteWords });
 });

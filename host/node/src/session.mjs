@@ -12,6 +12,7 @@ import { AuthError } from './auth.mjs';
 import { MediaSender, ResolutionGovernor, FpsGovernor, ladderAtLeast } from './media.mjs';
 import { readAnswer, sessionKeys } from '../../../site/js/shared/wsrelay.js';
 import { validateInput, RateLimiter, POINTER_RATE, INPUT_RATE, CONTROL_RATE } from './input.mjs';
+import { ROUTE_WORDS } from '../../../site/js/shared/route.js';
 
 const ANSWER_TIMEOUT_MS = 15000; // offer sent, no answer yet
 
@@ -101,9 +102,20 @@ export class Session {
     peer.onMicRtp = rtp => this._onMic(rtp);
     const unwatch = peer.onConnectionState(s => {
       if (s === 'failed' || s === 'closed') this.end('disconnected', { sendBye: false });
+      // A connection that stalls and comes back: logged, so drops can be told apart from a slow picture.
+      else if (s === 'disconnected' && this.signedInAt) {
+        this.interruptedAt = this.now();
+        this.log?.info('connection interrupted; waiting for it to come back');
+      } else if (s === 'connected' && this.interruptedAt) {
+        this.log?.info(`connection back after ${((this.now() - this.interruptedAt) / 1000).toFixed(1)} s`);
+        this.interruptedAt = null;
+      }
     });
     subs.push({ unSubscribe: unwatch });
   }
+
+  // Which way this session's connection runs (shared/route.js), or null while it isn't known yet.
+  get path() { return this.peer?.route?.()?.kind ?? null; }
 
   _detach() {
     for (const s of this.peerSubs) s.unSubscribe?.();
@@ -392,6 +404,8 @@ export class Session {
     const who = this.deviceLabel && this.deviceLabel !== this.label ? `${this.label} (${this.deviceLabel})` : this.label;
     this.store.activity(this.guest ? 'guest' : 'sign-in', this.guest ? `A guest started watching: ${this.label}` : `Signed in with ${how}: ${who}`);
     this.log?.info(`signed in (${this.route})`);
+    const path = this.peer.route?.();
+    if (path) this.log?.info(`route: ${ROUTE_WORDS[path.kind].toLowerCase()} (${path.local} ↔ ${path.remote})`);
     // Which H.264 profile this viewer agreed to, known before the Mac is asked for a picture (the Worker relay has no
     // such agreement: Baseline there).
     this.videoProfile = this.peer.videoProfile === 'high' ? 'high' : 'baseline';

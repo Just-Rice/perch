@@ -155,6 +155,7 @@ export class WsPeer {
     this.offerSdp = offerText;    // the binding (bind.js) is made over these texts, as over SDP with WebRTC
     this.answerSdp = answerText;
     this.transport = 'relay';
+    this.route = () => ({ kind: 'worker', local: 'relay', remote: 'relay' });
     this.onMicRtp = null;          // no microphone over the relay (yet)
     this.connectionState = 'new';
     this.stateChange = new Event(log);

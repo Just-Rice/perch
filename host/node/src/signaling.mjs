@@ -173,6 +173,10 @@ export class Signaling {
       return this._refuse(where, sid, 'busy', 5);
     }
     if (session.state !== 'offered') return; // ended while gathering (paused, timed out...)
+    // What the viewer can fall back on, for working out later why a session went the way it did.
+    if (this.hub.relay?.active || ws) {
+      this.log?.info(`offer ${sid.slice(0, 6)}: ${iceServers.length ? 'with TURN logins' : 'no TURN logins'}${ws ? ', with the Worker relay' : ''}`);
+    }
     // caps: what this Mac can do beyond protocol 1 ("quick" = one-tap passkey sign-in, see bind.js).
     entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp, ...(this.hub.caps?.length ? { caps: this.hub.caps } : {}),
       ...(iceServers.length ? { iceServers } : {}), ...(ws ? { ws } : {}) };

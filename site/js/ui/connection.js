@@ -241,7 +241,7 @@ export class Connection {
     }
   }
 
-  async getStats() { return this.pc ? this.pc.getStats() : new Map(); }
+  async getStats() { return this.pc ? this.pc.getStats() : (this.media?.statsReport() ?? new Map()); }
 
   // Ends the connection from this side. With bye, tells the Mac first so it can tidy up straight away.
   // --- the viewer's microphone, played on the Mac ---

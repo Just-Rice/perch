@@ -65,6 +65,12 @@ test('a werift viewer connects; channels have the right labels and reliability; 
   const { host, viewer, pc, offer, answer } = await connect();
   try {
     assert.equal(await waitConnected(host), 'connected');
+    // Both ends on this machine: the route is a direct one on the local network. The viewer's address may be one it
+    // listed (host) or one the Mac learned from its checks (prflx).
+    const route = host.route();
+    assert.equal(route.kind, 'lan');
+    assert.equal(route.local, 'host');
+    assert.ok(['host', 'prflx'].includes(route.remote), route.remote);
     for (let i = 0; i < 100 && Object.keys(viewer.channels).length < 3; i++) await sleep(20);
     const ch = viewer.channels;
     assert.deepEqual(Object.keys(ch).sort(), ['control', 'input', 'pointer']);

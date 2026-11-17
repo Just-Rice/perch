@@ -44,7 +44,7 @@ export class RelayMedia {
     this.codec = null;
     this.waitKey = true;
     this.closed = false;
-    this.stats = { frames: 0, decoded: 0, skipped: 0, audio: 0 };
+    this.stats = { frames: 0, decoded: 0, skipped: 0, audio: 0, bytes: 0 };
     this.audio = null;
     if (typeof globalThis.AudioDecoder === 'function' && typeof globalThis.AudioContext === 'function') {
       try { this._startAudio(); } catch (e) { this.log(`relay sound unavailable: ${e.message}`); this.audio = null; }
@@ -87,6 +87,7 @@ export class RelayMedia {
   video({ keyframe, ptsUs, data }) {
     if (this.closed) return;
     this.stats.frames++;
+    this.stats.bytes += data?.byteLength ?? 0;
     if (keyframe) {
       const codec = codecFromAnnexB(data) ?? this.codec ?? 'avc1.42e01f';
       if (!this.decoder || this.decoder.state === 'closed' || codec !== this.codec) this._configure(codec);
@@ -107,6 +108,18 @@ export class RelayMedia {
       this.log(`relay video: ${e.message}`);
       this._reset();
     }
+  }
+
+  // The numbers the Connection details panel shows, in the shape of a WebRTC stats report (viewer/stats.js reads it):
+  // nothing is lost over the relay (it runs over TCP), but frames can be skipped to catch up.
+  statsReport() {
+    const big = this.canvas.width > 16 && this.canvas.height > 16;
+    return new Map([['relay-video', {
+      id: 'relay-video', type: 'inbound-rtp', kind: 'video', timestamp: performance.now(),
+      bytesReceived: this.stats.bytes, packetsReceived: this.stats.frames, packetsLost: 0,
+      framesDecoded: this.stats.decoded, frameWidth: big ? this.canvas.width : null, frameHeight: big ? this.canvas.height : null,
+      decoderImplementation: 'WebCodecs',
+    }]]);
   }
 
   _configure(codec) {

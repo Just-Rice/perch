@@ -9,6 +9,7 @@ import { RTCPeerConnection, RTCSctpTransport, Connection, createSelfSignedCertif
   NamedCurveAlgorithm, useH264, useOPUS, useNACK, usePLI, useREMB, useSdesMid, useAbsSendTime } from 'werift';
 import { CONTROL_CHANNEL, INPUT_CHANNEL, POINTER_CHANNEL } from '../../../site/js/shared/proto.js';
 import { fingerprintBytes } from '../../../site/js/shared/bind.js';
+import { routeOf } from '../../../site/js/shared/route.js';
 import { X509Certificate } from 'node:crypto';
 
 export const VIDEO_FMTP = 'profile-level-id=42e01f;packetization-mode=1;level-asymmetry-allowed=1';
@@ -156,6 +157,15 @@ export class HostPeer {
   get videoProfile() { return profileOf(this.videoTransceiver.sender.codec); }
   get audioSender() { return this.audioTransceiver.sender; }
   get connectionState() { return this.pc.connectionState; }
+
+  // Which way the connection runs once ICE has chosen (shared/route.js): 'lan', 'internet' or 'turn', with the two
+  // candidate types for the log; null before then.
+  route() {
+    const pair = this.pc.iceTransports?.[0]?.connection?.nominated;
+    const local = pair?.localCandidate, remote = pair?.remoteCandidate;
+    const kind = routeOf(local?.type, remote?.type, remote?.host);
+    return kind ? { kind, local: local.type, remote: remote.type } : null;
+  }
 
   // Resolves to the complete offer text, exactly as it must be sent.
   async createOffer({ timeoutMs = GATHER_TIMEOUT_MS } = {}) {

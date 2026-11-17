@@ -192,7 +192,7 @@ export class Controller {
       pairing: this.auth.pairingInfo(),
       guest: (g => g ? { ...g, watching: this.guests.size } : null)(this.auth.guestInfo()),
       session: a ? { viewer: a.label, route: a.route, since: new Date(a.signedInAt).toISOString(), deviceId: a.deviceId,
-        transport: a.transport } : null,
+        transport: a.transport, path: a.path ?? null } : null,
       activity: s.config.log.slice(-ACTIVITY_SHOWN).reverse(),
       update: this.update,
       restart: this.installed ? { version: this.installed.version, running: this.hv, sameSigner: this.installed.sameSigner,

@@ -6,7 +6,7 @@
 import { PointerInput } from './pointer.js';
 import { KeyboardInput } from './keyboard.js';
 import { Banners } from './banners.js';
-import { readStats, summarize, linkQuality, QUALITY_WORDS, statsLines } from './stats.js';
+import { readStats, summarize, linkQuality, QUALITY_WORDS, statsLines, selectedRoute } from './stats.js';
 import { IDENTITY, isZoomed, viewTransform, clampView } from './coords.js';
 import { arrangement, neighbour, entryPoint, EdgeFlip, EDGE_DWELL_MS } from './displays.js';
 import { errorMessage } from '../ui/messages.js';
@@ -646,7 +646,8 @@ export class Viewer {
     dot.title = QUALITY_WORDS[q];
     const panel = this.$('stats');
     if (panel.hidden) return;
-    const lines = statsLines(sum, { pingMs: this.pingMs, decoder: snap.video?.decoder });
+    const route = this.session.via === 'relay' ? 'worker' : selectedRoute(report);
+    const lines = statsLines(sum, { pingMs: this.pingMs, decoder: snap.video?.decoder, route });
     if (this.status.fps != null || this.status.kbps != null) {
       lines.push(['Mac sends', `${this.status.fps ?? '–'} fps, ${this.status.kbps ?? '–'} kbit/s`]);
     }

@@ -23,6 +23,15 @@ const BYE_TEXT = {
 };
 const CAPTURE_ERRORS = ['no-screen-permission', 'capture-failed'];
 const MAX_GUESTS = 3;
+// Finishing updates by itself (tick()): only once nobody has been connected, signing in, pairing or holding a guest
+// link for this long; a restart that didn't take isn't tried again for the same version for half an hour, an update
+// for six hours.
+export const IDLE_BEFORE_AUTO_MS = 2 * 60 * 1000;
+const AUTO_RESTART_RETRY_MS = 30 * 60 * 1000;
+const AUTO_UPDATE_RETRY_MS = 6 * 60 * 60 * 1000;
+// How often to ask GitHub for a new version: daily, or every six hours when Perch may update itself.
+const UPDATE_CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
+const AUTO_UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 const publicDevice = d => ({ id: d.id, label: d.label, createdAt: d.createdAt ?? null, lastUsedAt: d.lastUsedAt ?? null });
 
@@ -86,6 +95,15 @@ export class Controller {
     this.captureOn = false;
     this.inputEcho = [];
     this.pairTimer = null;
+    // Finishing updates (see tick()). appPath: the Perch.app this host runs from (main.mjs sets it; null outside one).
+    // signer: who signed that app when this host started. installed: {version, sameSigner} of the copy on disk when it
+    // isn't the version running.
+    this.appPath = null;
+    this.signer = null;
+    this.installed = null;
+    this.lastBusyAt = now();
+    this.lastUpdateCheckAt = null;
+    this.maintenanceTimer = null;
   }
 
   // Connects the signaling topics for the current identity. Call once the store and auth are ready.
@@ -95,6 +113,7 @@ export class Controller {
     this.relay.warm(); // fetch relay logins now, so the first viewer's offer doesn't wait for them
     this.workerRelay.warm();
     this._useRelayBroker();
+    this._keepOwnRelaySite();
     this.started = true;
     this._changed();
   }
@@ -174,6 +193,8 @@ export class Controller {
         transport: a.transport } : null,
       activity: s.config.log.slice(-ACTIVITY_SHOWN).reverse(),
       update: this.update,
+      restart: this.installed ? { version: this.installed.version, running: this.hv, sameSigner: this.installed.sameSigner,
+        autoAfterMs: IDLE_BEFORE_AUTO_MS } : null,
       test: !!this.config.test,
     };
   }
@@ -184,6 +205,7 @@ export class Controller {
     return {
       state, text: this.stateText(state), macName: this.store.macName, setupUrl: this.setupUrl,
       settings: { ...this.store.settings }, ...(this.update ? { update: this.update } : {}),
+      ...(this.installed ? { restart: { version: this.installed.version } } : {}),
     };
   }
 
@@ -352,6 +374,7 @@ export class Controller {
         return this._notify('Perch', u ? `Perch ${u.version} is available.` : 'Perch is up to date.');
       }
       case 'update': return this.installUpdate();
+      case 'restart': return this.relaunch('the menu bar');
       case 'quit': return this.onQuit();
       default: this.log.debug(`menu action ${action} ignored`);
     }
@@ -819,6 +842,7 @@ export class Controller {
           if (v && !s.config.totp.set) throw new Error('Set up the authenticator app first (step 2), then switch this on.');
           break;
         case 'loginItem': case 'keepAwake': case 'backupOn': case 'paused': case 'lockOnDisconnect': case 'curtain':
+        case 'autoUpdate':
           if (typeof v !== 'boolean') throw new Error(`${k} must be true or false.`);
           break;
         case 'idleMinutes':
@@ -863,6 +887,10 @@ export class Controller {
       this.app.command('session', { active: true, viewer: this.active.label, route: this.active.route, curtain: after.curtain });
     }
     if ('loginItem' in patch) this.app.command('login-item', { on: after.loginItem });
+    if ('autoUpdate' in patch && after.autoUpdate !== before.autoUpdate) {
+      s.activity('settings', after.autoUpdate ? 'Automatic updates turned on (only while nobody is connected)'
+        : 'Automatic updates turned off');
+    }
     this._changed();
     return { ...after };
   }
@@ -882,8 +910,9 @@ export class Controller {
     return { ok: true };
   }
 
-  relaunch() {
-    this.store.activity('settings', 'Perch restarted from Setup');
+  relaunch(from = 'Setup') {
+    this.store.activity('settings', this.installed ? `Perch restarted from ${from} to finish updating to ${this.installed.version}`
+      : `Perch restarted from ${from}`);
     this.app.command('relaunch', {});
     return { ok: true };
   }
@@ -953,6 +982,7 @@ export class Controller {
     // Tests never ask GitHub: they must not depend on the network or on what has been released.
     if (!this.updater?.checkForUpdate || this.config.test) return null;
     const log = this.log.child('updater');
+    this.lastUpdateCheckAt = this.now();
     try {
       this.update = (await this.updater.checkForUpdate(this.hv, { log: m => log.info(m) })) ?? null;
     } catch (e) {
@@ -967,7 +997,101 @@ export class Controller {
     if (!this.updater?.installUpdate) throw new Error('This copy of Perch can’t update itself.');
     if (this.config.test) throw new Error('Updates are turned off in test mode.');
     const log = this.log.child('updater');
-    return this.updater.installUpdate({ log: m => log.info(m) });
+    const started = this.updater.installUpdate({ log: m => log.info(m) });
+    // The install script quits Perch and opens the new one. Should that fail, the new copy is on disk while this one
+    // runs on: look a few times over the next minutes, so Setup and the menu bar can offer the restart soon.
+    for (const s of [20, 45, 90, 180, 300]) setTimeout(() => this.refreshInstalled().catch(() => {}), s * 1000).unref?.();
+    return started;
+  }
+
+  // --- finishing updates by itself ---
+
+  // Every half minute (main.mjs): looks at the Perch.app on disk and, once nobody has needed Perch for
+  // IDLE_BEFORE_AUTO_MS, restarts into a newer copy that is already installed, or (when automatic updates are on)
+  // installs a new release. Resolves to what it did: 'restart', 'update' or null.
+  startMaintenance(everyMs = 30_000) {
+    clearInterval(this.maintenanceTimer);
+    this.maintenanceTimer = setInterval(() => this.tick().catch(e => this.log.warn(`maintenance: ${e?.message ?? e}`)), everyMs);
+    this.maintenanceTimer.unref?.();
+  }
+
+  async tick() {
+    const t = this.now();
+    if (this._busy()) this.lastBusyAt = t;
+    if (this.updater?.checkForUpdate && !this.config.test && this.lastUpdateCheckAt !== null &&
+        t - this.lastUpdateCheckAt >= (this.store.settings.autoUpdate ? AUTO_UPDATE_CHECK_EVERY_MS : UPDATE_CHECK_EVERY_MS)) {
+      await this.checkForUpdates().catch(() => {});
+    }
+    await this.refreshInstalled();
+    if (this._busy() || this.now() - this.lastBusyAt < IDLE_BEFORE_AUTO_MS) return null;
+    if (this.installed) return this._autoRestart();
+    if (this.update && this.store.settings.autoUpdate) return this._autoUpdate(this.update.version);
+    return null;
+  }
+
+  // Someone connected, signing in or watching, or a pairing or guest link waiting to be used: a restart would cut them
+  // off (links live only in memory).
+  _busy() {
+    return this.sessions.size > 0 || this.guests.size > 0 || !!this.auth.pairingInfo() || !!this.auth.guestInfo();
+  }
+
+  // An update that replaced the files on disk but couldn't restart Perch leaves this (older) copy running, and macOS
+  // won't let a copy whose files are gone record the screen. Spot it, so Setup and the menu bar can say "restart to
+  // finish updating", and tick() can do it.
+  async refreshInstalled() {
+    if (!this.appPath || !this.updater?.installedVersion) return this.installed;
+    const v = await this.updater.installedVersion(this.appPath);
+    if (v === null) return this.installed; // mid-install, or unreadable: keep what was known
+    const running = this.hv;
+    const next = v !== running ? v : null;
+    if (next !== (this.installed?.version ?? null) || (next && this.installed.sameSigner === false)) {
+      // Signed like this one? Screen Recording and Accessibility belong to the signer: a copy signed otherwise needs
+      // them given again, at the Mac.
+      const sameSigner = next && this.signer ? (await this.updater.signerOf?.(this.appPath)) === this.signer : null;
+      const was = this.installed;
+      this.installed = next ? { version: next, sameSigner } : null;
+      if (next && was?.version !== next) this.log.info(`Perch ${next} is installed but ${running} is running: restarting finishes the update`);
+      if (was?.version !== this.installed?.version || was?.sameSigner !== this.installed?.sameSigner) this._changed();
+    }
+    return this.installed;
+  }
+
+  async _autoRestart() {
+    const { version, sameSigner } = this.installed;
+    // Only into a copy signed like this one, which keeps Screen Recording and Accessibility (they can't be given
+    // back from afar). Setup and the menu bar still offer the restart either way.
+    if (sameSigner !== true) return null;
+    if (this.store.autoTriedRecently('restart', version, AUTO_RESTART_RETRY_MS, this.now())) return null;
+    this.store.noteAutoTry('restart', version, this.now());
+    this.store.activity('settings', `Perch restarted by itself to finish updating to ${version} (nobody was connected)`);
+    this.log.info(`restarting into ${version}`);
+    this.app.command('relaunch', {});
+    return 'restart';
+  }
+
+  async _autoUpdate(version) {
+    if (!this.updater?.installUpdate || this.config.test) return null;
+    if (this.store.autoTriedRecently('update', version, AUTO_UPDATE_RETRY_MS, this.now())) return null;
+    this.store.noteAutoTry('update', version, this.now());
+    this.store.activity('settings', `Updating by itself to Perch ${version} (nobody was connected)`);
+    await this.installUpdate();
+    return 'update';
+  }
+
+  // Before 0.3.2 one workers.dev relay was built in as a sign-in site for every Mac. Since then a Mac's own relay
+  // Worker becomes a sign-in site of that Mac only, when it is saved; a relay saved before that would stop accepting
+  // sign-ins after the update (and its devices paired there with it), so it is added here, once. If the owner then
+  // removes it in Setup, it stays removed.
+  _keepOwnRelaySite() {
+    const s = this.store;
+    if (s.config.ownRelaySiteChecked) return;
+    const base = this.workerRelay.base;
+    if (base && !this.auth.siteFor(base)) {
+      s.addSite({ origin: base, url: `${base}/connect` });
+      s.activity('settings', `Sign-ins are still accepted from ${base} (this Mac's relay)`);
+    }
+    s.config.ownRelaySiteChecked = true;
+    s.save();
   }
 
   testInputEcho() {

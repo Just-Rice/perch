@@ -81,8 +81,14 @@ struct MenuModel: Equatable {
                              enabled: live && (passwordSet || backup), checked: backup, key: "",
                              tip: passwordSet || backup ? nil : "Choose a backup password in Setup first."))
 
+        // A newer Perch is already on disk but this one is still running (an update that couldn't restart Perch):
+        // only a restart finishes it, so that is offered instead of updating again.
+        if let v = Self.restartVersion(status) {
+            entries.append(.item(title: "Restart to Finish Updating to \(v)", command: .event("restart"), enabled: live,
+                                 checked: nil, key: "", tip: "Perch \(v) is installed. Restarting Perch starts using it."))
+        }
         entries.append(.item(title: "Check for Updates…", command: .event("check-updates"), enabled: live, checked: nil, key: "", tip: nil))
-        if let v = Self.updateVersion(status) {
+        if Self.restartVersion(status) == nil, let v = Self.updateVersion(status) {
             entries.append(.item(title: "Update to \(v)…", command: .event("update"), enabled: live, checked: nil, key: "", tip: nil))
         }
         entries.append(.separator)
@@ -108,6 +114,12 @@ struct MenuModel: Equatable {
         guard let s = JSONValue.string(status["setupUrl"]), let url = URL(string: s),
               let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return nil }
         return url
+    }
+
+    /// `restart` is `{version}`: the version installed on disk, when it isn't the one running.
+    private static func restartVersion(_ status: [String: Any]) -> String? {
+        guard let v = JSONValue.object(status["restart"]).flatMap({ JSONValue.string($0["version"]) }), !v.isEmpty else { return nil }
+        return String(v.prefix(32))
     }
 
     /// `update` is `{version, ...}` from the host's updater (a bare version string is accepted too).

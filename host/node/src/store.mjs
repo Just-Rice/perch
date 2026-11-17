@@ -33,6 +33,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   codeWithPasskey: true,
   codeWithBackup: true,
   codeWithPairing: true,
+  // Install a new version by itself once nobody has been connected for a couple of minutes (off: Setup and the menu
+  // bar say when one is out, and the owner chooses when).
+  autoUpdate: false,
 });
 
 // Which code setting covers each route.
@@ -274,6 +277,16 @@ export class Store {
     this.config.sites = this.sites.filter(x => x.origin !== origin);
     this.save();
     return this.config.sites.length < before;
+  }
+
+  // --- things Perch did by itself (restarting into an installed update, updating), so a failed try isn't repeated ---
+  autoTriedRecently(kind, version, withinMs, now) {
+    const last = this.config.autoTried?.[kind];
+    return !!last && last.version === version && now - Date.parse(last.at) < withinMs;
+  }
+  noteAutoTry(kind, version, now) {
+    this.config.autoTried = { ...this.config.autoTried, [kind]: { version, at: new Date(now).toISOString() } };
+    this.save();
   }
 
   // --- lockouts ---

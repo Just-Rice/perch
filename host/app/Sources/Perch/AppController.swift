@@ -315,9 +315,12 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
                 sendEvent(["e": "relaunch", "ok": false, "error": "Not done in test runs."])
                 return
             }
+            // Opens Perch again once this process has really gone (stopping the host and capture can take a few
+            // seconds): `open` while it is still running would only bring the old one forward.
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/sh")
-            p.arguments = ["-c", "sleep 1.5; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+            p.arguments = ["-c", "i=0; while kill -0 \"$1\" 2>/dev/null && [ $i -lt 150 ]; do sleep 0.2; i=$((i+1)); done; " +
+                           "/usr/bin/open \"$0\"", Bundle.main.bundlePath, String(ProcessInfo.processInfo.processIdentifier)]
             do {
                 try p.run()
                 Log.shared.info("relaunching")

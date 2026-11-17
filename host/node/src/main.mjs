@@ -18,7 +18,6 @@ import { Controller } from './controller.mjs';
 import { applyWeriftPatches } from './rtc.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const UPDATE_EVERY_MS = 24 * 60 * 60 * 1000;
 const FIRST_UPDATE_CHECK_MS = 60 * 1000;
 
 const firstExisting = paths => paths.find(p => existsSync(p)) ?? null;
@@ -162,9 +161,14 @@ async function main() {
   if (updater?.checkForUpdate) {
     controller.updater = updater;
     if (!config.test) {
-      const check = () => controller.checkForUpdates().catch(e => log.debug(e.message));
-      setTimeout(check, FIRST_UPDATE_CHECK_MS).unref();
-      setInterval(check, UPDATE_EVERY_MS).unref();
+      // The first check a minute after starting; after that the controller's maintenance tick checks daily (every six
+      // hours with automatic updates on), and notices an update that is installed but not yet running.
+      setTimeout(() => controller.checkForUpdates().catch(e => log.debug(e.message)), FIRST_UPDATE_CHECK_MS).unref();
+      controller.appPath = updater.appBundleOf?.() ?? null;
+      if (controller.appPath) {
+        updater.signerOf(controller.appPath).then(signer => { controller.signer = signer; }).catch(() => {});
+        controller.startMaintenance();
+      }
     }
   }
 

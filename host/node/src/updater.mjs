@@ -3,7 +3,7 @@
 // and opens it again).
 //
 // Checking never throws: no network, GitHub being down or a strange answer all simply mean "no update right now".
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 
 export const REPO = 'Just-Rice/perch';
 export const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
@@ -126,4 +126,42 @@ export function installUpdate(options) {
   child.unref();
   log('updater: update started');
   return { started: true };
+}
+
+// --- finishing an update ---
+//
+// An update only takes effect once Perch has restarted. These look at the copy of Perch on disk, so the host can tell
+// when it is newer than the one running (an update that replaced the files but couldn't restart Perch) and say so.
+
+// The Perch.app this host runs from (…/Perch.app/Contents/Helpers/node), or null when it isn't running from one.
+export function appBundleOf(execPath = process.execPath) {
+  const m = /^(\/.+\.app)\/Contents\/Helpers\/node$/.exec(String(execPath ?? ''));
+  return m ? m[1] : null;
+}
+
+function runTool(cmd, args, { execFileImpl = execFile, timeoutMs = 20_000 } = {}) {
+  return new Promise((resolve) => {
+    execFileImpl(cmd, args, { timeout: timeoutMs }, (err, stdout, stderr) =>
+      resolve({ ok: !err, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }));
+  });
+}
+
+// The version of the Perch.app at `appPath` as it is on disk now, or null (mid-install, missing, unreadable).
+export async function installedVersion(appPath, opts) {
+  if (!appPath) return null;
+  const r = await runTool('/usr/bin/plutil',
+    ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', `${appPath}/Contents/Info.plist`], opts);
+  const v = r.ok ? r.stdout.trim() : '';
+  return parseVersion(v) ? v : null;
+}
+
+// Who signed the Perch.app at `appPath`: its designated requirement, which is what macOS ties Screen Recording and
+// Accessibility to. Null when the signature is broken or can't be read.
+export async function signerOf(appPath, opts) {
+  if (!appPath) return null;
+  const verify = await runTool('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath], opts);
+  if (!verify.ok) return null;
+  const r = await runTool('/usr/bin/codesign', ['-d', '-r-', appPath], opts);
+  const m = /designated => (.+)/.exec(`${r.stdout}\n${r.stderr}`);
+  return r.ok && m ? m[1].trim() : null;
 }

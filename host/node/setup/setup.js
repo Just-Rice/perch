@@ -18,6 +18,7 @@ import { settings } from './sections/settings.js';
 import { session } from './sections/session.js';
 import { activity } from './sections/activity.js';
 import { about } from './sections/about.js';
+import { restart } from './sections/restart.js';
 
 let state = null;
 let stopWatching = () => {};
@@ -53,7 +54,7 @@ const ctx = {
   },
 };
 
-const parts = [header, permissions, totp, pairing, devices, backup, guest, relay, workerRelay, sites, settings, session, activity, about].map(make => make(ctx));
+const parts = [header, restart, permissions, totp, pairing, devices, backup, guest, relay, workerRelay, sites, settings, session, activity, about].map(make => make(ctx));
 
 function apply(next) {
   if (!next || typeof next !== 'object' || gone) return;

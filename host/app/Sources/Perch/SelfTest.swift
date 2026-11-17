@@ -452,6 +452,11 @@ enum SelfTest {
         s["update"] = ["version": "0.2.0", "url": "https://example.invalid"]
         check("menu: an available update adds Update to x.y.z…", items(M(status: s, viewer: nil, problem: nil))["Update to 0.2.0…"]?.command == .event("update"))
         check("menu: no update item without an update", items(M(status: ready, viewer: nil, problem: nil)).keys.allSatisfy { !$0.hasPrefix("Update to") })
+        s["restart"] = ["version": "0.2.0"]
+        i = items(M(status: s, viewer: nil, problem: nil))
+        check("menu: a newer copy on disk offers Restart to Finish Updating instead of Update",
+              i["Restart to Finish Updating to 0.2.0"]?.command == .event("restart") && i.keys.allSatisfy { !$0.hasPrefix("Update to") })
+        check("menu: no restart item without one waiting", items(M(status: ready, viewer: nil, problem: nil)).keys.allSatisfy { !$0.hasPrefix("Restart") })
 
         s = ready
         s["setupUrl"] = "file:///etc/hosts"

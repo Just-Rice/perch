@@ -27,7 +27,7 @@ export function about(ctx) {
     if (!r) return;
     button.disabled = true; // once is enough: Perch is about to restart
     setText(status, 'Updating… Perch will close and open again by itself in a minute or two. Then open Setup ' +
-      'again from the menu bar.');
+      'again from the menu bar. If it doesn\'t, a Restart Perch button appears at the top of this page.');
   });
 
   $('renameMacBtn').addEventListener('click', (e) => {
@@ -100,7 +100,8 @@ export function about(ctx) {
       const servers = Array.isArray(st.rendezvous) ? st.rendezvous : [];
       setText($('aboutOnline'), servers.length === 0 ? '—'
         : servers.some(r => r.connected) ? 'Connected' : 'Not connected. Perch keeps trying.');
-      const u = st.update;
+      // Already installed and only waiting for a restart (the note at the top of the page): nothing to install.
+      const u = st.update && st.update.version !== st.restart?.version ? st.update : null;
       show($('updateBox'), !!u);
       if (u) {
         setText($('updateVersion'), u.version);

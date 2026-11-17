@@ -390,7 +390,7 @@ typing, from Accessibility; test runs pretend the top half of the screen is a te
 whole display), `window-fit {window, ok, error?}`,
 `capture-stopped {reason}`, `capture-error {code, message}`, `lock {locked}`, `login-item {on, status, error?}`,
 `menu {action}` (`pause | resume | disconnect | backup-on | backup-off | keep-awake-on | keep-awake-off |
-login-item-on | login-item-off | check-updates | update | quit`), `input-echo {ev}` (only with `--echo-input`),
+login-item-on | login-item-off | check-updates | update | restart | quit`), `input-echo {ev}` (only with `--echo-input`),
 `log {level, message}`.
 
 Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?, profile?, maxQp?}` (`window`: show only
@@ -402,10 +402,11 @@ MIC frames; only during a session), `keyframe {}`, `bitrate {kbps}`,
 `session {active, viewer?, route?, curtain?}` (menu light, notification, keeps the display awake while active;
 `curtain: true` blacks out the Mac's own displays with windows left out of the capture, lifted by three Esc presses
 at the Mac), `lock {}` (lock the screen; sent when a session ends and the owner chose "lock when a session ends"),
-`status {state, text, macName, setupUrl, settings, update?}` (menu bar contents), `notify {title, body}`,
+`status {state, text, macName, setupUrl, settings, update?, restart?}` (menu bar contents; `restart: {version}` when
+the Perch.app on disk is a different version from the one running, so the menu offers "Restart to Finish Updating"), `notify {title, body}`,
 `permissions {}` (asks for a `permissions` event), `request-permission {which}` (`screen | accessibility`), `reset-permission {which}` (forgets what macOS remembers
 about that permission for Perch, with `tccutil reset`, then asks again; answered with `permission-reset {which, ok}`),
-`relaunch {}` (Perch quits and opens again; neither of these two runs in test runs),
+`relaunch {}` (Perch quits and opens again once the old process has gone; neither of these two runs in test runs),
 `open-url {url}`, `login-item {on}`, `keep-awake {on}`, `uninstall {}`, `quit {}`.
 
 `state` is one of `starting | ready | needs-setup | offline | paused | connected | error`.
@@ -416,6 +417,16 @@ The host serves Setup on `http://127.0.0.1:<random port>/` and only answers requ
 (`?k=` on the first load, then the `X-Perch-Key` header), whose `Host` is `127.0.0.1:<port>` or `localhost:<port>`,
 and — for POSTs — whose `Origin` matches. The app's "Open Setup…" menu item opens that URL. The API is under `/api/`;
 see `host/node/src/setup-server.mjs`.
+
+**Updates.** The host asks GitHub for the latest release a minute after starting, then daily (every six hours with
+the `autoUpdate` setting on). Installing runs `site/install.sh --update`, which quits Perch (`pgrep`/`pkill -a`: the
+script runs from inside Perch, and without `-a` they skip their own ancestors), replaces the app only once it has
+exited, and opens it again. Every half minute the host also reads the version of the Perch.app on disk: a different
+one from the version running means an update that couldn't restart Perch, so Setup and the menu bar offer "Restart
+to finish updating", and once nobody has been connected, signing in, pairing or holding a guest link for two minutes
+the host restarts Perch itself, only into a copy signed like the running one (it keeps Screen Recording and
+Accessibility). With `autoUpdate` on, a new release is installed the same way, while idle. Neither is tried again
+for the same version for 30 minutes (restart) or 6 hours (update).
 
 Pairing links look like `https://just-rice.github.io/perch/connect.html#pair=<b64url(hostId ‖ sigKey ‖ pairId ‖ pairSecret ‖ pin)>`
 (the pin is missing from links made by Perch 0.1) and expire after 10 minutes.

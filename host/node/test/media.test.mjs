@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { H264RtpPayload, RtcpRrPacket, RtcpPayloadSpecificFeedback } from 'werift';
 import { splitAnnexB, groupAccessUnits, packetizeAccessUnit, depacketize, nalType, NAL } from '../src/h264.mjs';
 import { Pacer, BitrateController, VideoClock, AudioClock, MediaSender, FLOOR_KBPS, RTP_MTU, LOSS_MIN_PACKETS,
-  CEILING_MEMORY_MS } from '../src/media.mjs';
+  CEILING_MEMORY_MS, LINK_SLOW_AFTER_MS, LINK_GOOD_AFTER_MS } from '../src/media.mjs';
 import { QUALITY } from '../../../site/js/shared/proto.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -167,9 +167,11 @@ test('bitrate: backs off on loss and on REMB, creeps up when clean, stays within
   b.onReport({ fractionLost: 0.3, rtt: 0.05 });
   assert.equal(b.target, 4250);
   assert.deepEqual(targets, [4250], 'a >10% change is reported');
+  assert.equal(b.link, 'good', 'one bad report is not a slow connection yet');
   b.onReport({ fractionLost: 0.12 });
   assert.equal(targets.length, 1, 'a small further change is not reported');
-  assert.equal(b.link, 'slow');
+  clock.tick(LINK_SLOW_AFTER_MS);
+  assert.equal(b.link, 'slow', 'still losing a few seconds on: slow');
   for (let i = 0; i < 40; i++) { clock.tick(10000); b.onReport({ fractionLost: 0.5 }); }
   assert.equal(b.target, FLOOR_KBPS);
   for (let i = 0; i < 200; i++) { clock.tick(1500); b.onReport({ fractionLost: 0, rtt: 0.03 }); }
@@ -224,6 +226,42 @@ test('bitrate: a low estimate after a still screen is not believed, and a real c
     steps++;
   }
   assert.ok(steps <= 14, `recovered in ${steps} steps`);
+});
+
+test('bitrate: a blip is not a slow connection; the note comes and goes only after a few seconds', () => {
+  const clock = fakeClock();
+  const b = new BitrateController({ preset: QUALITY.balanced, now: clock.now });
+  // Wi-Fi hiccups: a burst of loss every ten seconds, clean in between. The numbers flick to "slow" each time, but
+  // never stay there long enough to tell the viewer the connection is slow.
+  for (let i = 0; i < 10; i++) {
+    clock.tick(500);
+    b.onReport({ fractionLost: 0.2, rtt: 0.02 });
+    assert.equal(b.link, 'good', `hiccup ${i}`);
+    for (let j = 0; j < 19; j++) {
+      clock.tick(500);
+      b.onReport({ fractionLost: 0, rtt: 0.02 });
+      assert.equal(b.link, 'good', `hiccup ${i}, ${j * 500 + 500} ms on`);
+    }
+  }
+  // Really slow: losing steadily. Said once it has lasted LINK_SLOW_AFTER_MS.
+  const c = new BitrateController({ preset: QUALITY.balanced, now: clock.now });
+  let slowAt = null;
+  const from = clock.now();
+  for (let i = 0; i < 20 && slowAt === null; i++) {
+    clock.tick(500);
+    c.onReport({ fractionLost: 0.15, rtt: 0.02 });
+    if (c.link === 'slow') slowAt = clock.now() - from;
+  }
+  assert.ok(slowAt !== null && slowAt >= LINK_SLOW_AFTER_MS && slowAt <= LINK_SLOW_AFTER_MS + 1000, `slow after ${slowAt} ms`);
+  // Fine again: the note stays until the link has been fine for LINK_GOOD_AFTER_MS, and the target is back.
+  const cleanFrom = clock.now();
+  let goodAt = null;
+  for (let i = 0; i < 200 && goodAt === null; i++) {
+    clock.tick(500);
+    c.onReport({ fractionLost: 0, rtt: 0.02 });
+    if (c.link === 'good') goodAt = clock.now() - cleanFrom;
+  }
+  assert.ok(goodAt !== null && goodAt >= LINK_GOOD_AFTER_MS, `good again after ${goodAt} ms`);
 });
 
 test('bitrate: near where the link last ran out it creeps instead of leaping, and a quiet screen never probes', () => {
@@ -343,6 +381,7 @@ test('sender: nothing before start, waits for a keyframe, throttles keyframe req
   video.rtcp({ type: RtcpPayloadSpecificFeedback.type, feedback: { count: 15, bitrate: 900_000n } });
   assert.deepEqual(bitrates, [1875, 938]);
 
+  t += LINK_SLOW_AFTER_MS;
   const s = m.sample();
   assert.equal(s.link, 'slow');
   assert.ok(s.kbps >= 0 && s.fps >= 0);

@@ -19,6 +19,10 @@ const U32 = 2 ** 32;
 export const LOSS_MIN_PACKETS = 50;
 // How long the bitrate where the link last ran out is remembered (see BitrateController).
 export const CEILING_MEMORY_MS = 30000;
+// The viewer's "The connection is slow" note follows `link`, which only changes once the link has looked slow (or
+// fine again) for this long: one Wi-Fi hiccup is not a slow connection, and flashing the note for it was misleading.
+export const LINK_SLOW_AFTER_MS = 4000;
+export const LINK_GOOD_AFTER_MS = 6000;
 
 const randomU32 = () => Math.floor(Math.random() * U32);
 const randomU16 = () => Math.floor(Math.random() * 65536);
@@ -41,6 +45,9 @@ export class BitrateController {
     this.ceiling = 0;       // kbps the link last ran out at, 0 = none known
     this.ceilingAt = -Infinity;
     this.rtt = 0;           // seconds
+    this.linkSlow = false;  // what `link` says
+    this.rawSlow = false;   // what the numbers say right now, and since when
+    this.rawSince = now();
     this.setPreset(preset);
   }
 
@@ -58,6 +65,7 @@ export class BitrateController {
     this.loss = 0;          // smoothed fraction lost (0..1)
     this.remb = 0;          // kbps, 0 = none yet
     this.rembAt = 0;
+    this._trackLink(t);
   }
 
   _knowsCeiling(t) { return this.ceiling > 0 && t - this.ceilingAt < CEILING_MEMORY_MS; }
@@ -78,6 +86,7 @@ export class BitrateController {
 
   _set(kbps) {
     this.target = this._clamp(kbps);
+    this._trackLink(this.now());
     if (Math.abs(this.target - this.reported) > this.reported * 0.1) {
       this.reported = this.target;
       this.onTarget(this.target);
@@ -93,6 +102,7 @@ export class BitrateController {
     const t = this.now();
     this.noteRtt(rtt);
     this.loss = this.loss * 0.6 + fractionLost * 0.4;
+    this._trackLink(t);
     if (fractionLost > 0.1) {
       // Same rule as Google's congestion control: cut by half the loss rate, at most once per round trip (and a bit),
       // so one burst of loss reported several times over isn't cut for several times over.
@@ -149,8 +159,14 @@ export class BitrateController {
   }
 
   get link() {
-    const slow = this.loss > 0.05 || this.rtt > 0.35 || this.target < this.preset.kbps * 0.5;
-    return slow ? 'slow' : 'good';
+    this._trackLink(this.now());
+    return this.linkSlow ? 'slow' : 'good';
+  }
+
+  _trackLink(t) {
+    const raw = this.loss > 0.05 || this.rtt > 0.35 || this.target < this.preset.kbps * 0.5;
+    if (raw !== this.rawSlow) { this.rawSlow = raw; this.rawSince = t; }
+    if (raw !== this.linkSlow && t - this.rawSince >= (raw ? LINK_SLOW_AFTER_MS : LINK_GOOD_AFTER_MS)) this.linkSlow = raw;
   }
 }
 

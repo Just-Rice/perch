@@ -44,6 +44,17 @@
 <main class="page" id="main">
   <div class="banner" id="banner" role="alert" hidden></div>
 
+  <!-- An update is on disk but this Perch is still the old one (sections/restart.js) -->
+  <section class="note warn restart-note" id="restartNote" aria-labelledby="hRestart" hidden>
+    <p id="hRestart"><b>Perch <span id="restartVersion"></span> is installed. Restart Perch to finish updating.</b></p>
+    <p class="small" id="restartDetail"></p>
+    <div class="actions">
+      <button type="button" class="btn primary" id="restartBtn">Restart Perch</button>
+      <span class="small muted" id="restartStatus" role="status"></span>
+    </div>
+    <p class="msg bad" id="restartError" role="alert" hidden></p>
+  </section>
+
   <section class="card hello" aria-labelledby="macName">
     <p class="eyebrow">This Mac</p>
     <h1 class="mac-name" id="macName">…</h1>
@@ -448,6 +459,14 @@ npx wrangler deploy</pre></li>
         <span class="switch-text"><b>Pause Perch</b>
           <span class="muted">Nobody can connect while Perch is paused.</span></span>
         <input type="checkbox" role="switch" id="setPaused" data-setting="paused">
+      </label>
+    </div>
+    <div class="switch-row">
+      <label class="switch" for="setAutoUpdate">
+        <span class="switch-text"><b>Update automatically</b>
+          <span class="muted">When a new version of Perch is out, it installs it and restarts once nobody has been
+            connected for 2 minutes. Off: Setup and the menu bar tell you, and you choose when.</span></span>
+        <input type="checkbox" role="switch" id="setAutoUpdate" data-setting="autoUpdate">
       </label>
     </div>
     <h3 class="settings-head">Sign-in</h3>

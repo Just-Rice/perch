@@ -14,6 +14,11 @@ export const RTP_MTU = 1200;
 const KEYFRAME_MIN_GAP_MS = 500;
 const REMB_FEEDBACK_COUNT = 15;
 const U32 = 2 ** 32;
+// Packet loss is judged over at least this many packets. Chrome sends a receiver report with every NACK, so a single
+// report can cover three packets, and one of them lost would read as 33% loss and cut the bitrate by a sixth.
+export const LOSS_MIN_PACKETS = 50;
+// How long the bitrate where the link last ran out is remembered (see BitrateController).
+export const CEILING_MEMORY_MS = 30000;
 
 const randomU32 = () => Math.floor(Math.random() * U32);
 const randomU16 = () => Math.floor(Math.random() * 65536);
@@ -23,26 +28,48 @@ const randomU16 = () => Math.floor(Math.random() * 65536);
 // Starts at the quality preset's bitrate, backs off quickly when the browser reports loss (or estimates less
 // bandwidth than we send), and creeps back up while the link stays clean. Reports a new target only when it moved by
 // more than 10%, so the encoder isn't reconfigured for every small wobble.
+//
+// It remembers the rate at which the link last ran out (the ceiling) for half a minute: below it the target comes
+// back quickly, but near it only creeps. Without that it went straight back up into the same wall every few seconds,
+// and the picture went sharp, blurry, sharp again with it.
 export class BitrateController {
   // sentKbps: what is actually going out right now (measured), or null when unknown.
   constructor({ preset = QUALITY[DEFAULT_QUALITY], now = () => Date.now(), onTarget = () => {}, sentKbps = () => null } = {}) {
     this.now = now;
     this.onTarget = onTarget;
     this.sentKbps = sentKbps;
+    this.ceiling = 0;       // kbps the link last ran out at, 0 = none known
+    this.ceilingAt = -Infinity;
+    this.rtt = 0;           // seconds
     this.setPreset(preset);
   }
 
+  // A new quality preset. What has been learned about the link carries over: switching to Sharp on a link that just
+  // ran out at 4 Mbit/s starts a little below that, not at 10 Mbit/s only to be cut straight back down.
   setPreset(preset) {
+    const t = this.now();
     this.preset = preset;
-    this.target = preset.kbps;
-    this.reported = preset.kbps;
-    this.startedAt = this.now();
+    const start = this._knowsCeiling(t) ? Math.min(preset.kbps, this.ceiling * 0.85) : preset.kbps;
+    this.target = this._clamp(start);
+    this.reported = this.target;
+    this.startedAt = t;
     this.lastDecrease = 0;
-    this.lastIncrease = this.startedAt;
+    this.lastIncrease = t;
     this.loss = 0;          // smoothed fraction lost (0..1)
-    this.rtt = 0;           // seconds
     this.remb = 0;          // kbps, 0 = none yet
     this.rembAt = 0;
+  }
+
+  _knowsCeiling(t) { return this.ceiling > 0 && t - this.ceilingAt < CEILING_MEMORY_MS; }
+
+  // The link ran out: remember where, then cut to `kbps`. Where is what was really going out, unless the screen was
+  // quiet (then the trickle says nothing about the link, and all there is to go on is the target).
+  _cut(t, kbps) {
+    const sent = this.sentKbps();
+    this.ceiling = sent !== null && !this._appLimited() ? Math.min(sent, this.target) : this.target;
+    this.ceilingAt = t;
+    this.lastDecrease = t;
+    this._set(kbps);
   }
 
   _clamp(kbps) {
@@ -57,23 +84,42 @@ export class BitrateController {
     }
   }
 
-  // A receiver report for our video stream: fractionLost is 0..1 for the last interval, rtt in seconds (or undefined).
+  // The round-trip time in seconds, whenever there is a new one.
+  noteRtt(rtt) { if (Number.isFinite(rtt)) this.rtt = rtt; }
+
+  // Packet loss for our video stream: fractionLost is 0..1 over the last stretch of packets, rtt in seconds (or
+  // undefined).
   onReport({ fractionLost, rtt }) {
     const t = this.now();
-    if (Number.isFinite(rtt)) this.rtt = rtt;
+    this.noteRtt(rtt);
     this.loss = this.loss * 0.6 + fractionLost * 0.4;
     if (fractionLost > 0.1) {
-      // Same rule as Google's congestion control: cut by half the loss rate.
-      this._set(this.target * (1 - 0.5 * fractionLost));
-      this.lastDecrease = t;
+      // Same rule as Google's congestion control: cut by half the loss rate, at most once per round trip (and a bit),
+      // so one burst of loss reported several times over isn't cut for several times over.
+      if (t - this.lastDecrease < 300 + this.rtt * 1000) return;
+      this._cut(t, this.target * (1 - 0.5 * fractionLost));
     } else if (fractionLost < 0.02 && t - this.lastDecrease > 2000 && t - this.lastIncrease > 1000) {
-      // Recover quickly up to the preset's own bitrate (a cut is usually a passing blip), then probe gently above it.
-      let next = this.target * (this.target < this.preset.kbps ? 1.25 : 1.08);
-      // The browser's estimate is a ceiling only while we are really using the link (see onRemb).
-      if (this.remb && t - this.rembAt < 5000 && !this._appLimited()) next = Math.min(next, Math.max(this.target, this.remb));
-      this._set(next);
+      this._set(this._raised(t));
       this.lastIncrease = t;
     }
+  }
+
+  // The next step up on a clean link.
+  _raised(t) {
+    const quiet = this._appLimited();
+    // Recover quickly up to the preset's own bitrate (a cut is usually a passing blip), then probe gently above it.
+    // A quiet screen proves nothing about the link, so it only ever gets back to the preset's bitrate: probing above
+    // that on a still screen was how the target climbed out of reach of the link, ready to crash at the next movement.
+    if (quiet && this.target >= this.preset.kbps) return this.target;
+    let next = this.target * (this.target < this.preset.kbps ? 1.25 : 1.08);
+    if (quiet) next = Math.min(next, this.preset.kbps);
+    // Near where the link last ran out: back quickly to 85% of that, then only 3% a second.
+    if (this._knowsCeiling(t)) {
+      next = this.target < this.ceiling * 0.85 ? Math.min(next, this.ceiling * 0.85) : Math.min(next, this.target * 1.03);
+    }
+    // The browser's estimate is a ceiling only while we are really using the link (see onRemb).
+    if (this.remb && t - this.rembAt < 5000 && !quiet) next = Math.min(next, Math.max(this.target, this.remb));
+    return Math.max(next, this.target);
   }
 
   // True while much less is going out than the target allows: a still screen needs almost no data. The browser's
@@ -92,13 +138,14 @@ export class BitrateController {
     // Ignore the first two seconds: the browser's estimate starts low and ramps up as data arrives.
     if (t - this.startedAt < 2000) return;
     if (this.remb >= this.target * 0.9) return;
-    // After a still screen the estimate is low only because little was sent. Cutting the target to it would leave
-    // the next burst of movement starved for many seconds (dropped frames, a blurry picture). Only believe a low
-    // estimate when it is below what is actually being sent: that is real congestion.
-    const sent = this.sentKbps();
-    if (sent !== null && sent < this.target * 0.6 && this.remb > sent * 1.2) return;
-    this._set(this.remb * 0.9);
-    this.lastDecrease = t;
+    // On a quiet screen a low estimate is not believed at all. Chrome's estimate after any delay blip is 85% of what
+    // it is receiving, and a still screen sends a trickle: one Wi-Fi hiccup made it 500 kbit/s and the target followed
+    // it down from 10 Mbit/s, taking the picture's sharpness and size with it (host.log, November 2026). If the link
+    // really did get worse, the first movement shows it as loss and a low estimate while busy, and that is acted on.
+    if (this._appLimited()) return;
+    // Busy and the browser says it's getting too much: follow it down, but by at most half, once a second.
+    if (t - this.lastDecrease < 1000) return;
+    this._cut(t, Math.max(this.remb * 0.9, this.target * 0.5));
   }
 
   get link() {
@@ -419,7 +466,9 @@ export class MediaSender {
       if (p.type === RtcpRrPacket.type || p.type === RtcpSrPacket.type) {
         for (const r of p.reports ?? []) {
           if (r.ssrc !== this.video.ssrc) continue;
-          this.bitrate.onReport({ fractionLost: r.fractionLost / 256, rtt: this.video.rtt });
+          this.bitrate.noteRtt(this.video.rtt);
+          const fractionLost = this._lossOver(r);
+          if (fractionLost !== null) this.bitrate.onReport({ fractionLost, rtt: this.video.rtt });
         }
       } else if (p.type === RtcpPayloadSpecificFeedback.type && p.feedback?.count === REMB_FEEDBACK_COUNT) {
         this.bitrate.onRemb(Number(p.feedback.bitrate));
@@ -427,6 +476,25 @@ export class MediaSender {
     } catch (e) {
       this.log?.debug('rtcp:', e.message);
     }
+  }
+
+  // The share of packets lost since the last judgement, once at least LOSS_MIN_PACKETS more have been expected; null
+  // until then. Worked out from the report's running totals (highest sequence number seen, packets lost so far), not
+  // its own fraction, which only covers the few packets since the browser's previous report.
+  _lossOver(r) {
+    const highest = r.highestSequence;
+    let lost = r.packetsLost;
+    if (!Number.isFinite(highest) || !Number.isFinite(lost)) return r.fractionLost / 256;
+    if (lost >= 0x800000) lost -= 0x1000000; // a signed 24-bit total (duplicates can make it negative)
+    const base = this.lossBase;
+    if (!base || highest < base.highest) {
+      this.lossBase = { highest, lost };
+      return null;
+    }
+    const expected = highest - base.highest;
+    if (expected < LOSS_MIN_PACKETS) return null;
+    this.lossBase = { highest, lost };
+    return Math.min(1, Math.max(0, (lost - base.lost) / expected));
   }
 
   // Video actually sent over the last second, in kbit/s (null until sending has started).

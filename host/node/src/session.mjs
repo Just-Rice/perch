@@ -415,10 +415,10 @@ export class Session {
     this._timer(() => {
       this.lastSample = this.media.sample();
       // A link that can't carry this picture size at full frame rate gets a smaller picture (and the size comes back
-      // when the link does).
+      // when the link does), except in a preset that holds its size (Sharp): there it gets fewer frames instead.
       if (!this.guest) {
         const target = this.media.bitrate.target;
-        const sized = this.governor.update(target, this.wantedEdge()) !== undefined;
+        const sized = !this._preset().holdSize && this.governor.update(target, this.wantedEdge()) !== undefined;
         const timed = this.fpsGovernor.update(target, this.governor.need(this.captureEdge())) !== undefined;
         if (sized || timed) this.hub.captureChanged(this);
       }
@@ -439,13 +439,21 @@ export class Session {
     return this.fpsGovernor.fps;
   }
 
-  // What to capture at right now: wantedEdge, less if the link can't carry it.
+  // What to capture at right now: wantedEdge, less if the link can't carry it (unless the preset holds its size).
   captureEdge() {
+    if (this._preset().holdSize) return this.wantedEdge();
     return Math.min(this.wantedEdge(), this.governor.cap ?? Infinity);
   }
 
+  // The coarsest the encoder may go (H.264 quantiser), or undefined for no limit beyond its own.
+  captureMaxQp() {
+    return this._preset().maxQp;
+  }
+
+  _preset() { return QUALITY[this.quality] ?? QUALITY.balanced; }
+
   _presetRates() {
-    const p = QUALITY[this.quality] ?? QUALITY.balanced;
+    const p = this._preset();
     this.governor.setFps(p.fps);
     this.fpsGovernor.set(p.fps, p.maxFps ?? p.fps);
   }

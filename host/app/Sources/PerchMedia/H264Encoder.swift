@@ -9,7 +9,10 @@
 //    B-frames, so no extra delay). Otherwise Constrained Baseline (42e01f), which every browser decodes.
 //  * Bitrate is controlled only through AverageBitRate (DataRateLimits is accepted but does nothing in this mode;
 //    AverageBitRate = 0 breaks the encoder). MaxAllowedFrameQP 51 lets it go blurry instead of stalling on
-//    complex content.
+//    complex content. A lower cap (the Sharp preset) is honoured: measured on scrolling text, cap 30 keeps 30 fps at
+//    2880x1620 from about 6 Mbit/s, and below that rate control drops frames instead of smearing the picture. It can
+//    also drop a forced keyframe at very low rates (800 kbit/s), so the caller lifts the cap until one gets through;
+//    the cap can be changed on a running session.
 //  * The first frame of a new session takes ~220 ms; warmUp() pays that before a viewer is waiting.
 import Foundation
 import VideoToolbox
@@ -51,7 +54,11 @@ public final class H264Encoder {
     private var session: VTCompressionSession?
     private var warming = false
 
-    public init(width: Int, height: Int, fps: Int, bitsPerSecond: Int, high: Bool = false) throws {
+    /// H.264's coarsest quantiser: no cap beyond the codec's own.
+    public static let noQPCap = 51
+
+    /// `maxQP`: the coarsest quantiser allowed (nil: none), so rate control drops frames instead of blurring.
+    public init(width: Int, height: Int, fps: Int, bitsPerSecond: Int, high: Bool = false, maxQP: Int? = nil) throws {
         self.width = width
         self.height = height
         let spec = [kVTVideoEncoderSpecification_EnableLowLatencyRateControl: true] as CFDictionary
@@ -84,7 +91,7 @@ public final class H264Encoder {
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanFalse)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_AverageBitRate, value: max(bitsPerSecond, 50_000) as CFNumber)
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: fps as CFNumber)
-        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: 51 as CFNumber)
+        VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: (maxQP ?? Self.noQPCap) as CFNumber)
         // Keyframes come only when asked for; don't let a periodic one surprise the bitrate budget.
         VTSessionSetProperty(session, key: kVTCompressionPropertyKey_MaxKeyFrameInterval, value: Int32.max as CFNumber)
         // BT.709 in the SPS (what browsers assume for HD video), matching the 420v buffers we feed in.
@@ -119,6 +126,13 @@ public final class H264Encoder {
     public func setBitRate(_ bitsPerSecond: Int) -> OSStatus {
         guard let s = session else { return -1 }
         return VTSessionSetProperty(s, key: kVTCompressionPropertyKey_AverageBitRate, value: max(bitsPerSecond, 50_000) as CFNumber)
+    }
+
+    /// Changes the coarsest quantiser allowed on the running session (nil: no cap).
+    @discardableResult
+    public func setMaxQP(_ qp: Int?) -> OSStatus {
+        guard let s = session else { return -1 }
+        return VTSessionSetProperty(s, key: kVTCompressionPropertyKey_MaxAllowedFrameQP, value: (qp ?? Self.noQPCap) as CFNumber)
     }
 
     @discardableResult

@@ -393,8 +393,9 @@ whole display), `window-fit {window, ok, error?}`,
 login-item-on | login-item-off | check-updates | update | quit`), `input-echo {ev}` (only with `--echo-input`),
 `log {level, message}`.
 
-Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?}` (`window`: show only the part of the
-display that window covers, following it), `windows {}` (asks for a `windows` event), `window-fit {window, w, h}`
+Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?, profile?, maxQp?}` (`window`: show only
+the part of the display that window covers, following it; `maxQp`: the coarsest H.264 quantiser the encoder may use,
+18–51, so on a slow link it drops frames instead of blurring; the Sharp preset sends it), `windows {}` (asks for a `windows` event), `window-fit {window, w, h}`
 (reshape it to `w:h` through Accessibility; never done in test runs), `clipboard-get {images?, auto?}` (answered with a `clipboard {ok, text, image?, mime?, auto?}` event; `image` is base64 PNG), `clipboard-set {text?, image?, paste?}` (answered with
 `clipboard-set {ok}`; test runs use a pretend clipboard), `mic {on, device?}` (start or stop playing
 MIC frames; only during a session), `keyframe {}`, `bitrate {kbps}`,

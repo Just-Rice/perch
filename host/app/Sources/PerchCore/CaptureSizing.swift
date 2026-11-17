@@ -11,6 +11,8 @@ public struct CaptureRequest: Equatable {
     public var window: UInt32?
     /// H.264 Constrained High (every viewer's browser agreed to it) rather than Constrained Baseline.
     public var high: Bool = false
+    /// The coarsest quantiser the encoder may use (detail first: it drops frames instead), or nil for no limit.
+    public var maxQP: Int?
 
     public init(displayID: UInt32? = nil, maxEdge: Int = 1920, fps: Int = 30, kbps: Int = 5000, audio: Bool = true,
                 window: UInt32? = nil) {
@@ -27,6 +29,7 @@ public struct CaptureRequest: Equatable {
         audio = JSONValue.bool(c["audio"]) ?? true
         window = JSONValue.number(c["window"]).flatMap { $0 >= 1 && $0 <= Double(UInt32.max) ? UInt32($0) : nil }
         high = JSONValue.string(c["profile"]) == "high"
+        maxQP = JSONValue.int(c["maxQp"]).map(CaptureSizing.clampQP)
     }
 }
 
@@ -36,6 +39,8 @@ public enum CaptureSizing {
     public static func clampFps(_ v: Int) -> Int { min(max(v, 1), 60) }
     /// VideoToolbox misbehaves with an AverageBitRate of 0, and below ~100 kbit/s nothing is readable anyway.
     public static func clampKbps(_ v: Int) -> Int { min(max(v, 100), 50_000) }
+    /// H.264 quantisers run 0–51; below 18 the encoder would spend bits on detail nobody can see.
+    public static func clampQP(_ v: Int) -> Int { min(max(v, 18), 51) }
 
     /// The encoded size for a display of pixelWidth × pixelHeight: the longest edge at most maxEdge, the display's
     /// shape kept, both sides even (4:2:0 video needs that), and never bigger than the display itself.

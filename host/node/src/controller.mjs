@@ -409,6 +409,8 @@ export class Controller {
 
   _sendCapture(session) {
     const preset = QUALITY[session.quality] ?? QUALITY[DEFAULT_QUALITY];
+    // Detail first (Sharp): the encoder drops frames rather than go coarser than this. An older app ignores it.
+    const maxQp = session.captureMaxQp?.() ?? preset.maxQp;
     this.captureOn = true;
     this.app.command('capture', {
       on: true, display: this._display(session.display).id,
@@ -417,6 +419,7 @@ export class Controller {
       maxEdge: session.captureEdge?.() ?? preset.maxEdge, fps: session.captureFps?.() ?? preset.fps,
       kbps: session.media?.bitrate.target ?? preset.kbps, audio: true,
       ...(session.window ? { window: session.window } : {}),
+      ...(maxQp ? { maxQp } : {}),
       // One picture goes to every viewer: High only when all of them agreed to it.
       profile: (this.lastProfile = this._captureProfile()),
     });

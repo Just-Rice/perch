@@ -46,10 +46,14 @@ export const AUTH_TIMEOUT_MS = 120 * 1000;
 // a second) needs a Mac that lists "fps60" in its offer's caps; older ones ignore it.
 // maxFps: the Mac steps up to this when the link has room for the picture at that rate (and back to fps when it
 // hasn't), so a good connection gets a sharp picture at 60 frames a second and a weaker one keeps text readable.
+// holdSize and maxQp make detail come first: the picture keeps its full size whatever the link does (no stepping down
+// the ladder below), and the encoder may not go coarser than quantiser maxQp (51 is H.264's coarsest, a smeared
+// picture; around 30 small text stays crisp). A link too slow for that gets fewer frames a second instead of a blurry
+// or smaller picture.
 export const QUALITY = {
   smooth:   { maxEdge: 1280, fps: 30, maxFps: 60, kbps: 2500, maxKbps: 6000 },
   balanced: { maxEdge: 1920, fps: 30, maxFps: 60, kbps: 5000, maxKbps: 14000 },
-  sharp:    { maxEdge: 2880, fps: 30, maxFps: 60, kbps: 10000, maxKbps: 30000 },
+  sharp:    { maxEdge: 2880, fps: 30, maxFps: 30, kbps: 10000, maxKbps: 30000, holdSize: true, maxQp: 30 },
   fast:     { maxEdge: 1920, fps: 60, maxFps: 60, kbps: 8000, maxKbps: 20000 },
 };
 export const DEFAULT_QUALITY = 'balanced';

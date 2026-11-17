@@ -8,7 +8,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { H264RtpPayload, RtcpRrPacket, RtcpPayloadSpecificFeedback } from 'werift';
 import { splitAnnexB, groupAccessUnits, packetizeAccessUnit, depacketize, nalType, NAL } from '../src/h264.mjs';
-import { Pacer, BitrateController, VideoClock, AudioClock, MediaSender, FLOOR_KBPS, RTP_MTU } from '../src/media.mjs';
+import { Pacer, BitrateController, VideoClock, AudioClock, MediaSender, FLOOR_KBPS, RTP_MTU, LOSS_MIN_PACKETS,
+  CEILING_MEMORY_MS } from '../src/media.mjs';
 import { QUALITY } from '../../../site/js/shared/proto.js';
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
@@ -174,10 +175,15 @@ test('bitrate: backs off on loss and on REMB, creeps up when clean, stays within
   for (let i = 0; i < 200; i++) { clock.tick(1500); b.onReport({ fractionLost: 0, rtt: 0.03 }); }
   assert.equal(b.target, QUALITY.balanced.maxKbps, 'never above the preset ceiling');
   assert.equal(b.link, 'good');
-  // The browser says it can only take 2 Mbps.
+  // The browser says it can only take 2 Mbps: followed down, but by at most half at a time, once a second.
   clock.tick(1000);
   b.onRemb(2_000_000);
-  assert.equal(b.target, 1800);
+  assert.equal(b.target, QUALITY.balanced.maxKbps / 2, 'one estimate halves the target at most');
+  clock.tick(500);
+  b.onRemb(2_000_000);
+  assert.equal(b.target, QUALITY.balanced.maxKbps / 2, 'and not twice within a second');
+  for (let i = 0; i < 3; i++) { clock.tick(1000); b.onRemb(2_000_000); }
+  assert.equal(b.target, 1800, 'repeated estimates still get all the way down');
   // ... and while the browser keeps saying so (REMB comes about once a second), growth stops at its estimate.
   for (let i = 0; i < 10; i++) { clock.tick(3000); b.onRemb(2_000_000); b.onReport({ fractionLost: 0 }); }
   assert.equal(b.target, 2000, 'grows up to the estimate and no further');
@@ -198,11 +204,17 @@ test('bitrate: a low estimate after a still screen is not believed, and a real c
   assert.equal(b.target, 5000, 'the estimate only reflects how little was sent');
   for (let i = 0; i < 5; i++) { clock.tick(1500); b.onRemb(320_000); b.onReport({ fractionLost: 0 }); }
   assert.ok(b.target >= 5000, 'and it does not hold the target down either');
-  // Real congestion while quiet: the estimate is below even what is being sent.
-  b.onRemb(150_000);
-  assert.equal(b.target, FLOOR_KBPS);
-  // Movement again on a link that is fine: back to the preset's bitrate within about 15 seconds, not half a minute.
-  sent = 300;
+  // A delay blip while quiet: Chrome reports 85% of the trickle it receives, below even what is being sent. That
+  // used to floor the target (10 Mbit/s to ~500 kbit/s in host.log) and the picture with it; it says nothing about
+  // the link, so it is not believed either.
+  b.onRemb(170_000);
+  assert.equal(b.target, 5000, 'a blip on a still screen does not floor the bitrate');
+  // Busy again, and now the browser really is getting too much: followed down.
+  sent = 5000;
+  clock.tick(1100);
+  b.onRemb(3_000_000);
+  assert.equal(b.target, 2700);
+  // The link is fine after all: back to the preset's bitrate within a few seconds, not half a minute.
   let steps = 0;
   while (b.target < QUALITY.balanced.kbps && steps < 60) {
     clock.tick(1100);
@@ -212,6 +224,54 @@ test('bitrate: a low estimate after a still screen is not believed, and a real c
     steps++;
   }
   assert.ok(steps <= 14, `recovered in ${steps} steps`);
+});
+
+test('bitrate: near where the link last ran out it creeps instead of leaping, and a quiet screen never probes', () => {
+  const clock = fakeClock();
+  let sent = 10000;
+  const b = new BitrateController({ preset: QUALITY.sharp, now: clock.now, sentKbps: () => sent });
+  clock.tick(5000);
+  // Busy at 10 Mbit/s and losing 40%: the link ran out at 10 Mbit/s.
+  b.onReport({ fractionLost: 0.4 });
+  assert.equal(b.target, 8000);
+  assert.equal(b.ceiling, 10000);
+  // Loss reported again a moment later is the same burst: not cut twice.
+  clock.tick(100);
+  b.onReport({ fractionLost: 0.4 });
+  assert.equal(b.target, 8000, 'one cut per round trip');
+  // Clean again: quickly back to 85% of the ceiling, then only 3% a second.
+  const seen = [];
+  for (let i = 0; i < 6; i++) {
+    clock.tick(2100);
+    sent = b.target;
+    b.onReport({ fractionLost: 0 });
+    seen.push(b.target);
+  }
+  assert.equal(seen[0], 8500, 'back to 85% of where it ran out, no further in one go');
+  for (let i = 1; i < seen.length; i++) assert.ok(seen[i] <= Math.ceil(seen[i - 1] * 1.03), `step ${i}: ${seen[i - 1]} → ${seen[i]}`);
+  // Half a minute later the ceiling is forgotten and normal probing resumes.
+  clock.tick(40000);
+  sent = b.target;
+  const before = b.target;
+  b.onReport({ fractionLost: 0 });
+  assert.ok(b.target >= Math.round(before * 1.08), `${before} → ${b.target}`);
+
+  // A still screen (little going out) brings the target back to the preset's bitrate but never probes above it.
+  const q = new BitrateController({ preset: QUALITY.sharp, now: clock.now, sentKbps: () => 200 });
+  for (let i = 0; i < 30; i++) { clock.tick(2100); q.onReport({ fractionLost: 0 }); }
+  assert.equal(q.target, QUALITY.sharp.kbps);
+
+  // Switching preset keeps what was learned: Sharp right after the link ran out at 4 Mbit/s starts below that.
+  const c = new BitrateController({ preset: QUALITY.balanced, now: clock.now, sentKbps: () => 4000 });
+  clock.tick(5000);
+  c.target = 4000;
+  c.onReport({ fractionLost: 0.3 });
+  c.setPreset(QUALITY.sharp);
+  assert.equal(c.target, 3400, '85% of the 4 Mbit/s the link ran out at, not 10 Mbit/s');
+  clock.tick(CEILING_MEMORY_MS + 1);
+  c.setPreset(QUALITY.balanced);
+  c.setPreset(QUALITY.sharp);
+  assert.equal(c.target, QUALITY.sharp.kbps, 'an old ceiling is forgotten');
 });
 
 // Something shaped like werift's RTCRtpSender, for the sender tests.
@@ -271,7 +331,8 @@ test('sender: nothing before start, waits for a keyframe, throttles keyframe req
   video.rtcp({ type: RtcpRrPacket.type, reports: [{ ssrc: 1111, fractionLost: 128 }] });
   assert.deepEqual(bitrates, [1875]);
   // REMB (payload-specific feedback, format 15). Nothing has been sent for seconds, so a low estimate only reflects
-  // that; with video flowing again, an estimate below what is being sent is real congestion and is obeyed.
+  // that; with video flowing again, an estimate below what is being sent is real congestion and is obeyed (by at
+  // most half at a time).
   t += 3000;
   video.rtcp({ type: RtcpPayloadSpecificFeedback.type, feedback: { count: 15, bitrate: 900_000n } });
   assert.deepEqual(bitrates, [1875], 'not believed while nothing is going out');
@@ -280,7 +341,7 @@ test('sender: nothing before start, waits for a keyframe, throttles keyframe req
   m.recentBytes += 250_000;
   assert.equal(m.sentKbps(), 2000);
   video.rtcp({ type: RtcpPayloadSpecificFeedback.type, feedback: { count: 15, bitrate: 900_000n } });
-  assert.deepEqual(bitrates, [1875, 810]);
+  assert.deepEqual(bitrates, [1875, 938]);
 
   const s = m.sample();
   assert.equal(s.link, 'slow');
@@ -292,6 +353,41 @@ test('sender: nothing before start, waits for a keyframe, throttles keyframe req
   const n = video.sent.length;
   m.pushVideo(frame(61));
   assert.equal(video.sent.length, n, 'nothing after stop()');
+});
+
+test('sender: loss is judged over at least 50 packets, from the reports\' running totals', () => {
+  const video = fakeSender(1111);
+  let t = 10000;
+  const m = new MediaSender({ video, quality: 'smooth', now: () => t });
+  m.start();
+  const rr = (highestSequence, packetsLost, fractionLost = 0) =>
+    video.rtcp({ type: RtcpRrPacket.type, reports: [{ ssrc: 1111, highestSequence, packetsLost, fractionLost }] });
+  rr(1000, 0);
+  // Chrome sends a report with every NACK: three packets, one lost, its own fraction says 33%. Not a judgement yet.
+  t += 50;
+  rr(1003, 1, 85);
+  assert.equal(m.bitrate.target, QUALITY.smooth.kbps, 'a handful of packets is not enough to judge');
+  // Once 50 or more have been expected, the loss over all of them counts: 2 of 60 is 3%, no cut.
+  t += 50;
+  rr(1060, 2);
+  assert.equal(m.bitrate.target, QUALITY.smooth.kbps);
+  // 30 lost out of the next 100: a real cut, by half the loss rate.
+  t += 1000;
+  rr(1160, 32);
+  assert.equal(m.bitrate.target, Math.round(QUALITY.smooth.kbps * 0.85));
+  // The running total is a signed 24-bit number: duplicates can take it below zero without reading as 16 million.
+  t += 3000;
+  rr(1260, 0xffffff);
+  const after = m.bitrate.target;
+  assert.ok(after >= Math.round(QUALITY.smooth.kbps * 0.85), 'read as no loss (and a step back up), not a cut');
+  assert.ok(m.bitrate.loss < 0.2);
+  // The stream restarting (a lower highest sequence) starts counting again.
+  rr(10, 0);
+  t += 100;
+  rr(20, 5);
+  assert.equal(m.bitrate.target, after, '5 of 10 is too few to judge');
+  assert.equal(LOSS_MIN_PACKETS, 50);
+  m.stop();
 });
 
 test('picture size: steps down when the link can\'t carry it, back up slowly, never past the viewer\'s screen', () => {

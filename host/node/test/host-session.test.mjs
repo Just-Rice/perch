@@ -16,7 +16,9 @@ import { startBroker } from '../../../tests/e2e/broker.mjs';
 import { fromB64url, randomBytes } from '../../../site/js/shared/bytes.js';
 import { startHost, TEST_ORIGIN, TEST_RP_ID, TEST_SITE } from './fake-app.mjs';
 import { SoftViewer, Refused, parsePairLink } from './soft-viewer.mjs';
-import { CLIP_PART_CHARS } from '../src/session.mjs';
+import { CLIP_PART_CHARS, Session } from '../src/session.mjs';
+import { ResolutionGovernor } from '../src/media.mjs';
+import { QUALITY } from '../../../site/js/shared/proto.js';
 import { SoftAuthenticator } from './soft-authenticator.mjs';
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -719,6 +721,7 @@ test('quality, display and keyframe requests reach the app; junk during sign-in 
   v.send({ t: 'quality', preset: 'sharp' });
   const sharp = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
   assert.deepEqual([sharp.maxEdge, sharp.kbps, sharp.display], [2880, 10000, 1]);
+  assert.deepEqual([sharp.fps, sharp.maxQp], [30, 30], 'Sharp: 30 frames a second, and a cap on how coarse it gets');
 
   since = app.commands.length;
   v.send({ t: 'display', id: 99 });          // no such display: ignored
@@ -962,6 +965,7 @@ test('the picture is no bigger than the viewer\'s screen, and capture keeps the 
   assert.equal(end.t, 'ready');
   const first = app.commands.filter(c => c.c === 'capture' && c.on).at(-1);
   assert.deepEqual([first.maxEdge, first.fps, first.kbps], [1920, 30, 5000]);
+  assert.equal(first.maxQp, undefined, 'only Sharp caps the encoder');
   // A phone held upright shows the Mac's picture about 1170 pixels wide.
   let since = app.commands.length;
   v.send({ t: 'view', edge: 1170 });
@@ -1177,4 +1181,16 @@ test('H.264 profile: Constrained High when the viewer agrees to it, Baseline oth
   assert.equal((await guest.signInGuest({ guestSecret: new Uint8Array(b.subarray(16, 48)) })).t, 'ready');
   const back = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
   assert.equal(back.profile, 'baseline');
+});
+
+test('Sharp keeps its picture size on a slow link; the other presets step down', () => {
+  // The size logic alone, on a stand-in for a session: a link carrying 400 kbit/s, read twice (two status periods).
+  const sizeFor = (quality) => {
+    const s = { quality, viewEdge: null, governor: new ResolutionGovernor() };
+    for (const name of ['wantedEdge', 'captureEdge', 'captureMaxQp', '_preset']) s[name] = Session.prototype[name].bind(s);
+    for (let i = 0; i < 2; i++) if (!s._preset().holdSize) s.governor.update(400, s.wantedEdge());
+    return [s.captureEdge(), s.captureMaxQp()];
+  };
+  assert.deepEqual(sizeFor('balanced'), [640, undefined], 'Balanced gets a smaller picture');
+  assert.deepEqual(sizeFor('sharp'), [QUALITY.sharp.maxEdge, 30], 'Sharp keeps every pixel and caps the blur');
 });

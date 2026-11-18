@@ -7,7 +7,7 @@ import { PointerInput } from './pointer.js';
 import { KeyboardInput } from './keyboard.js';
 import { Banners } from './banners.js';
 import { readStats, summarize, linkQuality, QUALITY_WORDS, statsLines } from './stats.js';
-import { IDENTITY, isZoomed, viewTransform, clampView } from './coords.js';
+import { IDENTITY, isZoomed, viewTransform, clampView, SHAPES, CENTER, shownScale } from './coords.js';
 import { errorMessage } from '../ui/messages.js';
 import { fillIcons, setIcon } from '../ui/icons.js';
 import { QUALITY } from '../shared/proto.js';
@@ -83,6 +83,7 @@ export class Viewer {
     this.pointer = new PointerInput({
       surface: this.surface, video: this.video, session,
       view: { get: () => this.view, set: v => this.setView(v) },
+      layout: { get: () => ({ shape: this._shape(), pan: this.pan }), pan: p => this._setPan(p) },
       size: () => [this.display.width || 0, this.display.height || 0],
       enabled, onActivity: activity, touchpad: () => this.touchFirst && !!this.prefs.get('touchpad'),
       onSwipe: dir => this._swipe(dir),
@@ -106,6 +107,7 @@ export class Viewer {
     this._wireKeyboardButton();
     this._wireKeysBar();
     this._wirePlacement();
+    this._wireShape();
 
     this._applyStatus({ locked: this.ready.locked, input: this.ready.input });
     const q = this.prefs.get('quality');
@@ -130,7 +132,7 @@ export class Viewer {
       fit();
     }
     this._on(window, 'resize', () => { this.setView(this.view); this._reportView(); });
-    this._on(this.video, 'resize', () => this._reportView()); // the picture's own size or shape changed
+    this._on(this.video, 'resize', () => { this._reportView(); this._shapeUi(); }); // the picture's own size or shape changed
     this._reportView();
     this._on(document, 'fullscreenchange', () => this._fullscreenChanged());
     this._on(document, 'webkitfullscreenchange', () => this._fullscreenChanged());
@@ -190,7 +192,8 @@ export class Viewer {
     this.$('tbKeys').setAttribute('aria-pressed', 'false');
     this._inviteKeyboard(null);
     // The browser says the mouse is let go only after these listeners are gone: don't leave the pointer hidden.
-    this.root.classList.remove('tb-on', 'zoomed', 'captured', 'touchpad', 'tb-pinned', 'tb-vertical', 'nocursor', ...EDGES.map(e => `tb-${e}`));
+    this.root.classList.remove('tb-on', 'zoomed', 'captured', 'touchpad', 'tb-pinned', 'tb-vertical', 'nocursor', ...EDGES.map(e => `tb-${e}`),
+      ...SHAPES.map(s => `shape-${s}`));
     this.root.hidden = true;
     document.body.classList.remove('viewing');
     navigator.keyboard?.unlock?.();
@@ -939,7 +942,7 @@ export class Viewer {
       const box = this.surface.getBoundingClientRect();
       const [vw, vh] = this.pointer.pictureSize();
       if (!(box.width > 0 && box.height > 0 && vw > 0 && vh > 0)) return;
-      const shown = Math.min(box.width / vw, box.height / vh); // CSS pixels per picture pixel
+      const shown = Math.max(...shownScale(box.width, box.height, vw, vh, this._shape())); // CSS pixels per picture pixel
       const zoom = Math.min(2, Math.max(1, this.view.scale ?? 1));
       const edge = Math.round(Math.max(vw, vh) * shown * (window.devicePixelRatio || 1) * zoom);
       if (this.lastViewEdge && Math.abs(edge - this.lastViewEdge) < this.lastViewEdge * 0.08) return;
@@ -989,6 +992,54 @@ export class Viewer {
     } catch {
       try { await this.surface.requestPointerLock(); } catch { /* pointerlockerror says so */ }
     }
+  }
+
+  // --- the picture's shape on this screen: whole (bars where the shapes differ), filling it, or stretched ---
+
+  _shape() { return SHAPES.includes(this.prefs.get('shape')) ? this.prefs.get('shape') : 'fit'; }
+
+  _wireShape() {
+    const sel = this.$('optShape');
+    this.pan = { ...CENTER };
+    sel.value = this._shape();
+    this._on(sel, 'change', () => {
+      this.prefs.set('shape', SHAPES.includes(sel.value) ? sel.value : 'fit');
+      this._applyShape();
+    });
+    this._applyShape();
+  }
+
+  _applyShape() {
+    const shape = this._shape();
+    for (const s of SHAPES) this.root.classList.toggle(`shape-${s}`, s === shape);
+    this.$('optShape').value = shape;
+    this._setPan(this.pan ?? CENTER);
+    this._shapeUi();
+    this.lastViewEdge = 0;
+    this._reportView();
+  }
+
+  // Where a "fill" picture has slid to: 0..1 each way, as CSS's object-position percentages.
+  _setPan(p) {
+    const x = Math.min(1, Math.max(0, Number(p?.x ?? 0.5))), y = Math.min(1, Math.max(0, Number(p?.y ?? 0.5)));
+    this.pan = { x, y };
+    this.video.style.objectPosition = this._shape() === 'fill' ? `${(x * 100).toFixed(2)}% ${(y * 100).toFixed(2)}%` : '';
+  }
+
+  // Says how much a "fill" picture leaves out, or how much "stretch" squeezes, for this window and this Mac.
+  _shapeUi() {
+    const note = this.$('shapeHelp');
+    const box = this.surface.getBoundingClientRect();
+    const v = this.video, vw = v.videoWidth, vh = v.videoHeight;
+    const shape = this._shape();
+    if (!(vw > 0 && vh > 0 && box.width > 0 && box.height > 0)) { note.hidden = true; return; }
+    const ratio = (box.width / box.height) / (vw / vh);
+    const off = Math.round(Math.abs(1 - Math.min(ratio, 1 / ratio)) * 100);
+    note.hidden = false;
+    note.textContent = off < 2 ? 'This screen and the Mac\u2019s are the same shape.'
+      : shape === 'fill' ? `About ${off}% of the Mac\u2019s screen is off the ${ratio < 1 ? 'sides' : 'top and bottom'}: the picture slides along as the pointer nears an edge${this.touchFirst ? ' (or drag it with two fingers)' : ''}.`
+        : shape === 'stretch' ? `The picture is squeezed by about ${off}% to fit this screen.`
+          : `The whole Mac\u2019s screen, with bars where the shapes differ.`;
   }
 
   // --- where the toolbar sits: any edge, anywhere along it ---

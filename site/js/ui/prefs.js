@@ -14,6 +14,7 @@ export function defaultPrefs({ apple = false } = {}) {
     tbEdge: 'top', tbPos: 0.5, tbAutoHide: null, // null: hide on touch screens only
     keysBar: null, customKeys: [], swipe: 'apps',
     clipSync: true, // what's copied on the Mac lands on this device's clipboard by itself
+    shape: 'fit', // the picture on this screen: 'fit' (whole, bars where the shapes differ), 'fill' or 'stretch'
   };
 }
 
@@ -40,6 +41,7 @@ export class Prefs {
         if (Array.isArray(saved.keysBar)) this.values.keysBar = saved.keysBar.slice(0, 80);
         if (Array.isArray(saved.customKeys)) this.values.customKeys = saved.customKeys.slice(0, 40);
         if (typeof saved.swipe === 'string') this.values.swipe = saved.swipe;
+        if (['fit', 'fill', 'stretch'].includes(saved.shape)) this.values.shape = saved.shape;
       }
     } catch { /* keep the defaults */ }
   }

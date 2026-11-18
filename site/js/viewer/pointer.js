@@ -1,7 +1,7 @@
 // Mouse, pen and touch on the Mac's picture → pointer and input messages (docs/PROTOCOL.md, "Input and pointer
 // channels"). The decisions are made by pure modules (coords.js, wheel.js, touch.js, clicks.js); this file only listens
 // to the page and sends.
-import { toDisplay, zoomAround, panView, isZoomed, IDENTITY } from './coords.js';
+import { toDisplay, zoomAround, panView, isZoomed, IDENTITY, FIT, followPan, shownScale } from './coords.js';
 import { wheelPixels, WheelAccumulator } from './wheel.js';
 import { TouchGestures } from './touch.js';
 import { ClickCounter } from './clicks.js';
@@ -20,13 +20,15 @@ export class PointerInput {
   // is, by how far the finger goes) instead of clicking right under the finger.
   // onSwipe(dir): a swipe sideways (two fingers on a touchpad, three on a touch screen; +1 next, -1 previous) or up
   // and down with three fingers ('up', 'down'). swipesOn(): whether a touchpad's sideways swipe is one (or scrolls).
+  // layout: {get(), pan(p)}: the picture's shape and where a "fill" picture has slid to (coords.js), and sliding it.
   constructor({ surface, video, session, view, size, enabled = () => true, onActivity = () => {}, touchpad = () => false,
-    onSwipe = () => {}, swipesOn = () => false }) {
-    Object.assign(this, { surface, video, session, view, size, enabled, onActivity, touchpad, onSwipe, swipesOn });
+    onSwipe = () => {}, swipesOn = () => false, layout = { get: () => FIT, pan: () => {} } }) {
+    Object.assign(this, { surface, video, session, view, size, enabled, onActivity, touchpad, onSwipe, swipesOn, layout });
     this.swipe = new SwipeDetector();
     this.clicks = new ClickCounter();
     this.wheel = new WheelAccumulator();
-    this.gestures = new TouchGestures({ isZoomed: () => isZoomed(this.view.get()) });
+    // A "fill" picture is moved around with two fingers on a touch screen, as a zoomed one is.
+    this.gestures = new TouchGestures({ isZoomed: () => isZoomed(this.view.get()) || this._fills() });
     this.pendingMove = null;
     this.frame = 0;
     this.gestureTimer = null;
@@ -61,7 +63,7 @@ export class PointerInput {
   // Mac's pointer has been moved to.
   pos(e) {
     if (this.locked) return { ...this.last };
-    const p = this.map(e.clientX, e.clientY);
+    const p = this.map(e.clientX, e.clientY, true);
     this.last = { x: p.x, y: p.y };
     return p;
   }
@@ -70,8 +72,18 @@ export class PointerInput {
   shownSize() {
     const box = this.surface.getBoundingClientRect();
     const [w, h] = this.pictureSize();
-    const s = Math.min(box.width / w, box.height / h) * (this.view.get().scale ?? 1);
-    return [w * s, h * s];
+    const z = this.view.get().scale ?? 1;
+    const [sx, sy] = shownScale(box.width, box.height, w, h, this.layout.get().shape);
+    // Moving across the whole Mac takes one window's width at most, even when a "fill" picture is wider than that.
+    return [Math.min(w * sx, box.width) * z, Math.min(h * sy, box.height) * z];
+  }
+
+  _fills() { return this.layout.get().shape === 'fill'; }
+
+  // "fill": the picture slides after the Mac's pointer (moved by a captured mouse or a touchpad finger), so the part
+  // of the Mac it's on is in view.
+  _followLast() {
+    if (this._fills()) this.layout.pan({ x: this.last.x, y: this.last.y });
   }
 
   detach() {
@@ -81,11 +93,18 @@ export class PointerInput {
     clearTimeout(this.gestureTimer);
   }
 
-  // Page position → the Mac's display (0..1).
-  map(clientX, clientY) {
+  // Page position → the Mac's display (0..1). `follow`: a mouse or pen; with "fill" the picture first slides so
+  // that the pointer's place in the window is its place on the Mac (touches use the picture where it is).
+  map(clientX, clientY, follow = false) {
     const box = this.surface.getBoundingClientRect();
     const [w, h] = this.pictureSize();
-    return toDisplay(clientX, clientY, box, w, h, this.view.get(), EDGE_PX);
+    let layout = this.layout.get();
+    if (follow && layout.shape === 'fill') {
+      const pan = followPan(clientX, clientY, box, this.view.get());
+      this.layout.pan(pan);
+      layout = { ...layout, pan };
+    }
+    return toDisplay(clientX, clientY, box, w, h, this.view.get(), EDGE_PX, layout);
   }
 
   pictureSize() {
@@ -121,6 +140,7 @@ export class PointerInput {
       const dx = e.movementX / sw, dy = e.movementY / sh;
       const clamp = v => Math.min(1, Math.max(0, v));
       this.last = { x: clamp(this.last.x + dx), y: clamp(this.last.y + dy) };
+      this._followLast();
       // Several moves between two screen refreshes go out as one: the newest position, and all the movement.
       const m = this.pendingMove?.dx !== undefined ? this.pendingMove : { dx: 0, dy: 0 };
       this.pendingMove = { t: 'm', x: this.last.x, y: this.last.y, dx: m.dx + dx, dy: m.dy + dy };
@@ -232,6 +252,7 @@ export class PointerInput {
       if (!(sw > 0 && sh > 0)) return;
       const clamp = v => Math.min(1, Math.max(0, v));
       this.last = { x: clamp(this.last.x + (a.x - from.x) * TOUCHPAD_SPEED / sw), y: clamp(this.last.y + (a.y - from.y) * TOUCHPAD_SPEED / sh) };
+      this._followLast();
       this._queueMove(this.last.x, this.last.y);
       return;
     }
@@ -252,6 +273,17 @@ export class PointerInput {
 
   _run(actions) {
     for (const a of actions) {
+      if (a.a === 'pan' && !isZoomed(this.view.get()) && this._fills()) {
+        // Two fingers move a "fill" picture: the hidden part comes into view as the fingers drag it in.
+        const box = this.surface.getBoundingClientRect();
+        const [w, h] = this.pictureSize();
+        const [sx, sy] = shownScale(box.width, box.height, w, h, 'fill');
+        const spareX = w * sx - box.width, spareY = h * sy - box.height;
+        const pan = this.layout.get().pan;
+        const clamp = v => Math.min(1, Math.max(0, v));
+        this.layout.pan({ x: spareX > 0.5 ? clamp(pan.x - a.dx / spareX) : 0.5, y: spareY > 0.5 ? clamp(pan.y - a.dy / spareY) : 0.5 });
+        continue;
+      }
       if (a.a === 'zoom' || a.a === 'pan' || a.a === 'reset') {
         const box = this.surface.getBoundingClientRect();
         const v = this.view.get();

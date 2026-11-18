@@ -247,6 +247,15 @@
       <select id="optWindow" title="Show the whole screen or one window"><option value="">The whole screen</option></select>
     </label>
     <button type="button" id="optFit" class="btn small" data-icon="fullscreen" hidden>Fit this window to my screen</button>
+    <label class="tb-select" id="shapeWrap">
+      <span>Picture</span>
+      <select id="optShape" title="How the Mac's screen fits this screen when their shapes differ">
+        <option value="fit">Whole screen (bars)</option>
+        <option value="fill">Fill this screen</option>
+        <option value="stretch">Stretch to fill</option>
+      </select>
+    </label>
+    <p class="fine" id="shapeHelp" hidden></p>
     <label class="check" id="clipSyncWrap" hidden><input type="checkbox" id="optClipSync"> Share the clipboard (copy on either side, paste on the other)</label>
     <button type="button" id="optPaste" class="btn small" data-icon="paste" hidden>Paste on the Mac</button>
     <button type="button" id="optCopy" class="btn small" data-icon="copy" hidden>Copy the Mac's clipboard</button>

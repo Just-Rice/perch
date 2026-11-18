@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  IDENTITY, MAX_ZOOM, containRect, toDisplay, fromDisplay, clampView, zoomAround, panView, isZoomed, viewTransform,
+  IDENTITY, MAX_ZOOM, containRect, pictureRect, followPan, shownScale, toDisplay, fromDisplay, clampView, zoomAround, panView, isZoomed, viewTransform,
 } from '../../site/js/viewer/coords.js';
 import { wheelPixels, WheelAccumulator, LINE_PX, DOM_DELTA_LINE, DOM_DELTA_PAGE } from '../../site/js/viewer/wheel.js';
 import { ClickCounter, CLICK_MS } from '../../site/js/viewer/clicks.js';
@@ -157,4 +157,47 @@ test('ClickCounter: too slow, too far, or another button starts again', () => {
   assert.equal(c.down(2, 120, 100, CLICK_MS + 150), 1, 'other button');
   assert.equal(c.up(0), 1);
   assert.equal(c.up(2), 1);
+});
+
+test('pictureRect: fill covers the box and slides with the pan; stretch is the box', () => {
+  // A 16:10 Mac on a 4:3 screen: fill is as tall as the box and wider than it.
+  const mid = pictureRect(1024, 768, 1440, 900, 'fill');
+  assert.equal(mid.height, 768);
+  assert.ok(Math.abs(mid.width - 1228.8) < 1e-9 && Math.abs(mid.x + 102.4) < 1e-9 && mid.y === 0);
+  assert.equal(pictureRect(1024, 768, 1440, 900, 'fill', { x: 0, y: 0.5 }).x, 0, 'slid right: the left edge shows');
+  assert.ok(Math.abs(pictureRect(1024, 768, 1440, 900, 'fill', { x: 1, y: 0.5 }).x + 204.8) < 1e-9);
+  assert.deepEqual(pictureRect(1024, 768, 1440, 900, 'stretch'), { x: 0, y: 0, width: 1024, height: 768 });
+  assert.deepEqual(pictureRect(1024, 768, 1440, 900), containRect(1024, 768, 1440, 900), 'fit is the old letterbox');
+  // A tall phone and an ultra-wide monitor: the other way round.
+  const phone = pictureRect(390, 844, 1512, 982, 'fill');
+  assert.ok(phone.height === 844 && phone.width > 390);
+  const wide = pictureRect(3440, 1440, 1440, 900, 'fill');
+  assert.ok(wide.width === 3440 && wide.height > 1440);
+});
+
+test('fill: following the pointer, every spot in the window is that same spot on the Mac, at any shape', () => {
+  for (const [bw, bh, vw, vh] of [[1024, 768, 1440, 900], [390, 844, 1512, 982], [3440, 1440, 1440, 900], [800, 800, 1920, 1080]]) {
+    const b = { left: 5, top: 40, width: bw, height: bh };
+    for (const [fx, fy] of [[0, 0], [1, 1], [0.3, 0.8], [0.5, 0.5]]) {
+      const cx = b.left + fx * bw, cy = b.top + fy * bh;
+      const p = toDisplay(cx, cy, b, vw, vh, IDENTITY, 0, { shape: 'fill', pan: followPan(cx, cy, b) });
+      assert.ok(Math.abs(p.x - fx) < 1e-5 && Math.abs(p.y - fy) < 1e-5, `${bw}x${bh} at ${fx},${fy}: ${p.x},${p.y}`);
+    }
+  }
+  // The last pixel row and column count as the edge (edgePx), as with the whole picture.
+  const b = { left: 0, top: 0, width: 1024, height: 768 };
+  const e = toDisplay(1023, 767, b, 1440, 900, IDENTITY, 2, { shape: 'fill', pan: followPan(1023, 767, b) });
+  assert.deepEqual([e.x, e.y], [1, 1]);
+});
+
+test('stretch and fill: fromDisplay is still the inverse of toDisplay', () => {
+  const b = { left: 10, top: 20, width: 1024, height: 768 };
+  for (const layout of [{ shape: 'stretch' }, { shape: 'fill', pan: { x: 0.2, y: 0.5 } }]) {
+    for (const [x, y] of [[0.1, 0.1], [0.5, 0.5], [0.9, 0.3]]) {
+      const p = fromDisplay(x, y, b, 1440, 900, IDENTITY, layout);
+      const back = toDisplay(p.x, p.y, b, 1440, 900, IDENTITY, 0, layout);
+      assert.ok(Math.abs(back.x - x) < 1e-5 && Math.abs(back.y - y) < 1e-5, `${layout.shape}`);
+    }
+  }
+  assert.deepEqual(shownScale(1024, 768, 1440, 900, 'stretch').map(v => +v.toFixed(4)), [0.7111, 0.8533]);
 });

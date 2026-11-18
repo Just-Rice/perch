@@ -936,6 +936,7 @@ export class Viewer {
     if (typeof levels.speakers === 'number' && !settling && active !== this.$('optSpeakers')) this.$('optSpeakers').value = String(Math.round(levels.speakers * 100));
     this.$('optSpeakers').disabled = levels.speakersAvailable !== true;
     this.$('speakersNote').hidden = levels.speakersAvailable === true;
+    this.$('speakersHelp').hidden = levels.speakersAvailable !== true;
     this._levelText();
   }
 

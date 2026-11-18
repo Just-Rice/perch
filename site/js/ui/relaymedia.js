@@ -6,6 +6,7 @@
 // still gets the picture, without sound.
 
 const MAX_DECODE_QUEUE = 4;   // frames waiting to decode before we skip ahead to the next keyframe
+const KEYFRAME_ASK_EVERY_MS = 1000; // while waiting for a keyframe, ask again this often
 const AUDIO_LEAD_S = 0.04;     // how far ahead of "now" sound is scheduled
 const AUDIO_MAX_LAG_S = 0.25;  // more queued than this and we drop back to "now" (latency beats smoothness here)
 
@@ -93,13 +94,16 @@ export class RelayMedia {
       if (!this.decoder || this.decoder.state === 'closed' || codec !== this.codec) this._configure(codec);
       this.waitKey = false;
     } else if (this.waitKey || !this.decoder) {
+      // Waiting for a keyframe: keep asking (once a second) until one comes. Asking only once could leave the picture
+      // frozen for good if that keyframe never arrived, while the sound and input carried on.
       this.stats.skipped++;
+      this._askKeyframe();
       return;
     } else if (this.decoder.decodeQueueSize > MAX_DECODE_QUEUE) {
       // Falling behind (a slow device): skip to the next keyframe rather than show a picture seconds late.
       this.stats.skipped++;
       this.waitKey = true;
-      this.onKeyframeNeeded();
+      this._askKeyframe(true);
       return;
     }
     try {
@@ -137,7 +141,16 @@ export class RelayMedia {
     try { if (this.decoder && this.decoder.state !== 'closed') this.decoder.close(); } catch {}
     this.decoder = null;
     this.waitKey = true;
-    if (!this.closed) this.onKeyframeNeeded();
+    if (!this.closed) this._askKeyframe(true);
+  }
+
+  // Asks the Mac for a keyframe: now (`now`), or at most once a second while still waiting for one.
+  _askKeyframe(now = false) {
+    const t = performance.now();
+    if (!now && t - (this.lastAsk ?? -Infinity) < KEYFRAME_ASK_EVERY_MS) return;
+    this.lastAsk = t;
+    this.stats.asked = (this.stats.asked ?? 0) + 1;
+    this.onKeyframeNeeded();
   }
 
   _draw(frame) {

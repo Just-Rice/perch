@@ -50,6 +50,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // An answer with no public (server-reflexive) or relay candidate, though STUN servers were asked: UDP is blocked, so a
 // direct connection can't work from here.
+// How many addresses of each kind an SDP offers (host: this device's own; srflx: as a STUN server saw it; relay: a
+// TURN server's), for the Mac's log when the viewer goes by the relay Worker instead.
+export function candidateCounts(sdp) {
+  const out = { host: 0, srflx: 0, relay: 0 };
+  for (const m of String(sdp ?? '').matchAll(/ typ (host|srflx|relay)\b/g)) out[m[1]]++;
+  return out;
+}
+
 export function looksBlocked(answerSdp, iceServers) {
   if (!iceServers?.length || typeof answerSdp !== 'string') return false;
   return !/ typ (srflx|relay)\b/.test(answerSdp);
@@ -171,17 +179,19 @@ export class Connection {
     this.relayServers = cleanIceServers(first.iceServers);
     this.relayOffer = typeof first.ws === 'string' && relayMediaSupported() ? first.ws : null;
     if (this.relayOffer && this.transport === 'relay') {
+      this.relayWhy = { reason: 'asked' };
       await this._answerRelay();
     } else {
       await this._answer();
       if (this.relayOffer && this.transport === 'auto' && looksBlocked(this.answerSdp, this.iceServers)) {
         // Not even a STUN server answered: this network blocks what WebRTC needs. Don't wait for it to fail.
         this.log('this network seems to block direct connections: using the Mac’s Worker relay');
+        this.relayWhy = { reason: 'blocked', cands: candidateCounts(this.answerSdp) };
         this._dropPeerConnection();
         await this._answerRelay();
       }
     }
-    await this.rdv.send(topic, key, this.via === 'relay' ? { t: 'answer', sid: this.sid, ws: this.answerSdp }
+    await this.rdv.send(topic, key, this.via === 'relay' ? { t: 'answer', sid: this.sid, ws: this.answerSdp, ...(this.relayWhy ? { why: this.relayWhy } : {}) }
       : { t: 'answer', sid: this.sid, sdp: this.answerSdp });
     if (this.via === 'relay') this._openRelaySocket();
 

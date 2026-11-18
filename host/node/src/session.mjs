@@ -469,7 +469,10 @@ export class Session {
   _presetRates() {
     const p = this._preset();
     this.governor.setFps(p.fps);
-    this.fpsGovernor.set(p.fps, p.maxFps ?? p.fps);
+    // Over the relay Worker every frame goes through one TCP connection by way of Cloudflare: stepping up to 60 frames
+    // a second there only fills it faster (it did, just before a frozen picture). A preset that asks for 60 outright
+    // (Fast) still gets it.
+    this.fpsGovernor.set(p.fps, this.transport === 'relay' ? p.fps : (p.maxFps ?? p.fps));
   }
 
   _watchIdle() {

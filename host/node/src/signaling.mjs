@@ -196,6 +196,16 @@ export class Signaling {
     }
     if (entry.session.state !== 'offered') return this._drop('second answer');
     this.stats.answers++;
+    if (relay) {
+      // Why the viewer went this way (newer viewers say): its network looked blocked (no address from a STUN or TURN
+      // server), or it was asked to after a direct connection failed. Plain words only, for the log.
+      const w = msg.why && typeof msg.why === 'object' ? msg.why : {};
+      const n = (k) => (Number.isInteger(w.cands?.[k]) ? Math.min(99, Math.max(0, w.cands[k])) : '?');
+      const reason = w.reason === 'blocked' ? 'its network looked blocked' : w.reason === 'asked' ? 'a direct connection had failed or it was asked to'
+        : 'no reason given';
+      this.log?.info(`answer ${msg.sid.slice(0, 6)}: over the Worker relay (${reason}; viewer addresses: host ${n('host')}, ` +
+        `STUN ${n('srflx')}, TURN ${n('relay')})`);
+    }
     try {
       if (relay) await entry.session.answerRelay(msg.ws, (keys, text) => this.hub.relayPeer(entry.session, keys, text));
       else await entry.session.answer(msg.sdp);

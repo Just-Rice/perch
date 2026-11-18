@@ -244,10 +244,11 @@
     <!-- Sound levels, set on the Mac (viewer.js): what is sent here, and the Mac's own speakers -->
     <div class="levels" id="levelsWrap" role="group" aria-labelledby="soundHead" hidden>
       <p class="menu-head" id="soundHead">Sound</p>
-      <label class="level" for="optStream"><span>Sound sent here</span>
+      <label class="level" for="optStream"><span>Sent to this device</span>
         <input type="range" id="optStream" min="0" max="150" step="5"><output id="optStreamOut" for="optStream"></output></label>
-      <label class="level" id="speakersWrap" for="optSpeakers"><span>Mac speakers</span>
+      <label class="level" id="speakersWrap" for="optSpeakers"><span>On the Mac's speakers</span>
         <input type="range" id="optSpeakers" min="0" max="100" step="5"><output id="optSpeakersOut" for="optSpeakers"></output></label>
+      <p class="fine" id="speakersHelp">Only while you're connected. Silent keeps the Mac quiet; you still hear it here.</p>
       <p class="fine" id="speakersNote" hidden>Keeping the Mac's speakers quiet needs macOS 14.2 or later on the Mac.</p>
     </div>
     <p class="menu-head" id="macHead">The Mac</p>

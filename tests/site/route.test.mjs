@@ -44,3 +44,11 @@ test("the viewer reads its route from the browser's stats", () => {
   assert.deepEqual(statsLines({}, { route: 'lan' })[0], ['Route', 'Direct, on your network']);
   assert.deepEqual(statsLines({}, {})[0], ['Route', '–']);
 });
+
+test('a viewer that goes by the relay says how many addresses of each kind it found', async () => {
+  const { candidateCounts } = await import('../../site/js/ui/connection.js');
+  const sdp = ['v=0', 'a=candidate:1 1 udp 2122260223 192.168.1.40 61233 typ host', 'a=candidate:2 1 udp 2122260223 abc.local 5000 typ host',
+    'a=candidate:3 1 udp 1686052607 203.0.113.9 61233 typ srflx raddr 192.168.1.40 rport 61233'].join('\r\n');
+  assert.deepEqual(candidateCounts(sdp), { host: 2, srflx: 1, relay: 0 });
+  assert.deepEqual(candidateCounts(null), { host: 0, srflx: 0, relay: 0 });
+});

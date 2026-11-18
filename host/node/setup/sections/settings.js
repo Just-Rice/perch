@@ -36,7 +36,8 @@ export function settings(ctx) {
   const switches = [...document.querySelectorAll('input[data-setting]')];
   // The two sound sliders: shown as percentages, saved when let go (a level of 0–1, or 0–1.5 for what is sent).
   const sliders = [...document.querySelectorAll('input[type=range][data-level]')];
-  const showLevel = (input) => setText($(`${input.id}Out`), `${input.value}%`);
+  const showLevel = (input) => setText($(`${input.id}Out`),
+    input.id === 'setSpeakers' && Number(input.value) === 0 ? 'Silent' : `${input.value}%`);
   for (const input of sliders) {
     input.addEventListener('input', () => showLevel(input));
     input.addEventListener('change', () => {
@@ -89,9 +90,9 @@ export function settings(ctx) {
     const tap = st.soundTap === true;
     $('setSpeakers').disabled = !tap;
     setText($('soundHint'), tap
-      ? 'Below 100%, Perch keeps this Mac\'s own sound off its speakers while you\'re connected (0% is silent) and ' +
-        'plays it at this level instead. The first time, macOS asks to let Perch record this Mac\'s sound: allow it at ' +
-        'the Mac. The volume keys on the Mac still work as usual.'
+      ? 'These only apply while you\'re connected; afterwards the Mac sounds as usual. At Silent nobody near the Mac ' +
+        'hears anything, and you still hear everything on your device. The first time you lower the speakers, macOS asks ' +
+        'to let Perch record this Mac\'s sound: allow it at the Mac.'
       : 'This Mac\'s speakers always play as usual while you\'re connected: keeping them quiet needs macOS 14.2 or later.');
     if (!pending.has('idleMinutes') && typeof s.idleMinutes === 'number') {
       const v = String(s.idleMinutes);

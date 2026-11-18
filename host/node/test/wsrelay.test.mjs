@@ -193,3 +193,29 @@ test('media over the relay: frames go whole, and a backed-up link drops frames, 
   media.stop();
   peer.close();
 });
+
+test('a keyframe asked for too soon after the last is delayed, not lost (the relay player asks only once)', async () => {
+  let t = 0;
+  const keyframes = [];
+  const peer = { bufferedAmount: 0, _send: () => {} };
+  const media = new WsMediaSender({ peer, now: () => t, onKeyframe: () => keyframes.push(t), onBitrate: () => {} });
+  media.start(); // asks for the first keyframe
+  t = 1000;
+  assert.equal(media.askKeyframe('relay backed up'), true);
+  assert.equal(keyframes.length, 2);
+  t = 1100; // the viewer asks 100 ms later: too soon for another right now…
+  assert.equal(media.askKeyframe('viewer asked'), false);
+  assert.equal(media.askKeyframe('viewer asked'), false, 'asking again meanwhile changes nothing');
+  assert.equal(keyframes.length, 2);
+  t = 1500;
+  await new Promise(r => setTimeout(r, 450)); // …but it comes once the gap is over
+  assert.equal(keyframes.length, 3, 'the delayed one, once');
+  // Stopped meanwhile: nothing more.
+  t = 2500;
+  media.askKeyframe('x');
+  t = 2600;
+  media.askKeyframe('y');
+  media.stop();
+  await new Promise(r => setTimeout(r, 450));
+  assert.equal(keyframes.length, 4);
+});

@@ -590,7 +590,7 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.equal(await text(page, '#setSpeakersOut'), '100%');
     await slide('setSpeakers', 0);
     await until(() => lastPatch()?.macSpeakers === 0, 'Mac speakers silent');
-    assert.equal(await text(page, '#setSpeakersOut'), '0%');
+    assert.equal(await text(page, '#setSpeakersOut'), 'Silent');
     await slide('setStream', 150);
     await until(() => lastPatch()?.streamVolume === 1.5, 'sent at 150%');
     assert.match(await text(page, '#soundHint'), /allow it at the Mac/);

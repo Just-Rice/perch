@@ -432,11 +432,23 @@ export class MediaSender {
   // Throttled: the browser may send several PLIs for one loss, and the encoder only needs one keyframe.
   askKeyframe(why) {
     const t = this.now();
-    if (t - this.lastKeyframeAsk < KEYFRAME_MIN_GAP_MS) return false;
-    this.lastKeyframeAsk = t;
+    const wait = KEYFRAME_MIN_GAP_MS - (t - this.lastKeyframeAsk);
+    if (wait > 0) {
+      // Too soon after the last one: ask once the gap is over instead of not at all. A viewer that asks only once
+      // (the relay's player) would otherwise wait for a keyframe that never comes: the picture froze for good while
+      // sound and input carried on (November 2026).
+      this.keyframeTimer ??= setTimeout(() => { this.keyframeTimer = null; if (this.enabled) this._keyframeNow(`${why}, delayed`); }, wait);
+      this.keyframeTimer.unref?.();
+      return false;
+    }
+    this._keyframeNow(why);
+    return true;
+  }
+
+  _keyframeNow(why) {
+    this.lastKeyframeAsk = this.now();
     this.log?.debug(`keyframe: ${why}`);
     this.onKeyframe();
-    return true;
   }
 
   pushVideo({ keyframe, ptsUs, data }) {
@@ -539,6 +551,8 @@ export class MediaSender {
 
   stop() {
     this.enabled = false;
+    clearTimeout(this.keyframeTimer);
+    this.keyframeTimer = null;
     this.pacer.stop();
     for (const s of this.subs) s.unSubscribe?.();
     this.subs = [];

@@ -240,6 +240,11 @@
     </label>
     <button type="button" id="optEditKeys" class="btn small" data-icon="keyboard">Choose the keys bar's keys</button>
     <label class="check" id="captureClickWrap" hidden><input type="checkbox" id="optCaptureClick"> Capture the mouse when I click the screen</label>
+    <label class="tb-select" id="mouseSpeedWrap" hidden>
+      <span>Captured mouse speed</span>
+      <input type="range" id="optMouseSpeed" min="0.2" max="2" step="0.05" value="1" title="How far a captured mouse moves the Mac's pointer">
+      <output id="mouseSpeedValue" for="optMouseSpeed">1×</output>
+    </label>
     <label class="check" id="swapWrap"><input type="checkbox" id="optSwap"> Ctrl acts as ⌘ (Command)</label>
     <p class="fine" id="swapHelp">Ctrl+C copies, Ctrl+V pastes, as on this keyboard. Turn off to send Ctrl itself.</p>
     <label class="tb-select" id="windowWrap" hidden>

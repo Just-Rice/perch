@@ -214,6 +214,10 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .menu .tb-select { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; font-weight: 600; }
 .menu .tb-select .sr-only { position: static; width: auto; height: auto; overflow: visible; clip: auto; white-space: normal; }
 .menu .tb-select select { flex: 1 1 0; min-width: 0; max-width: 78%; padding-right: 10px; text-overflow: ellipsis; }
+.menu .tb-select input[type=range] { flex: 1 1 0; min-width: 0; accent-color: #2dd4bf; }
+#mouseSpeedWrap { flex-wrap: wrap; row-gap: 2px; }
+#mouseSpeedWrap > span { flex: 1 0 100%; }
+.menu .tb-select output { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; font-weight: 500; }
 
 /* Status notes */
 .banners {

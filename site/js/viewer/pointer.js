@@ -10,6 +10,9 @@ import { SwipeDetector } from './shortcuts.js';
 // The last 2 page pixels at each side of the picture are the Mac's very edge (see coords.js).
 const EDGE_PX = 2;
 
+// A captured mouse's speed, chosen in More: from a fifth as fast to twice as fast as the page's own pointer.
+export const MIN_SPEED = 0.2, MAX_SPEED = 2;
+
 // Touchpad mode: the Mac's pointer moves this many times as far as the finger, across the picture.
 const TOUCHPAD_SPEED = 1.6;
 
@@ -21,8 +24,9 @@ export class PointerInput {
   // onSwipe(dir): a swipe sideways (two fingers on a touchpad, three on a touch screen; +1 next, -1 previous) or up
   // and down with three fingers ('up', 'down'). swipesOn(): whether a touchpad's sideways swipe is one (or scrolls).
   constructor({ surface, video, session, view, size, enabled = () => true, onActivity = () => {}, touchpad = () => false,
-    onSwipe = () => {}, swipesOn = () => false }) {
-    Object.assign(this, { surface, video, session, view, size, enabled, onActivity, touchpad, onSwipe, swipesOn });
+    onSwipe = () => {}, swipesOn = () => false, mouseSpeed = () => 1 }) {
+    // mouseSpeed(): how far a captured mouse moves the Mac's pointer, 1 = as far as on this screen.
+    Object.assign(this, { surface, video, session, view, size, enabled, onActivity, touchpad, onSwipe, swipesOn, mouseSpeed });
     this.swipe = new SwipeDetector();
     this.clicks = new ClickCounter();
     this.wheel = new WheelAccumulator();
@@ -118,7 +122,8 @@ export class PointerInput {
     if (this.locked) {
       const [sw, sh] = this.shownSize();
       if (!(sw > 0 && sh > 0) || (!e.movementX && !e.movementY)) return;
-      const dx = e.movementX / sw, dy = e.movementY / sh;
+      const k = Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number(this.mouseSpeed()) || 1));
+      const dx = e.movementX * k / sw, dy = e.movementY * k / sh;
       const clamp = v => Math.min(1, Math.max(0, v));
       this.last = { x: clamp(this.last.x + dx), y: clamp(this.last.y + dy) };
       // Several moves between two screen refreshes go out as one: the newest position, and all the movement.

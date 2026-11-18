@@ -17,10 +17,17 @@ import { Viewer } from '../viewer/viewer.js';
 import { toB64url, fromB64url, randomBytes } from '../shared/bytes.js';
 import { normalizeMacName, isMacName } from '../shared/rendezvous.js';
 import { relayBase, relayBroker } from '../shared/wsrelay.js';
+import { startCipher } from '../shared/cipher.js';
 
 const $ = id => document.getElementById(id);
 
 export function start() {
+  // The moving background behind the sign-in screens: faint behind their column, and off while the viewer shows the
+  // Mac's screen (there it would only cost the device's power).
+  startCipher(document.getElementById('cipher'), {
+    calm: () => document.getElementById('main'),
+    paused: () => document.body.classList.contains('viewing'),
+  });
   const env = pageEnv();
   const ua = navigator.userAgent;
   const touchOpts = { maxTouchPoints: navigator.maxTouchPoints || 0, coarsePointer: matchMedia('(pointer: coarse)').matches };

@@ -109,3 +109,11 @@ test('countdowns and friendly times', () => {
 test('Setup names the connection route exactly as the website does', () => {
   assert.deepEqual({ ...setupRouteWords }, { ...sharedRouteWords });
 });
+
+test('Setup\'s moving background is the website\'s, unchanged', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const here = new URL('.', import.meta.url);
+  const setupCopy = await readFile(new URL('../setup/lib/cipher.js', here), 'utf8');
+  const site = await readFile(new URL('../../../site/js/shared/cipher.js', here), 'utf8');
+  assert.equal(setupCopy, site, 'copy site/js/shared/cipher.js to host/node/setup/lib/cipher.js');
+});

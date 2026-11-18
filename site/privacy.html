@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- No scripts at all on this page: it only has words to read. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="light dark">
 <title>Perch: privacy</title>
@@ -13,6 +13,7 @@
 <link rel="stylesheet" href="css/perch.css">
 </head>
 <body class="doc">
+<canvas class="cipher" id="cipher" aria-hidden="true"></canvas>
 <div class="wrap">
   <header class="site">
     <a class="brand" href="./">
@@ -139,5 +140,6 @@
     <a href="https://github.com/Just-Rice/perch/issues">Report a problem</a>
   </div>
 </footer>
+<script type="module" src="js/doc.js"></script>
 </body>
 </html>

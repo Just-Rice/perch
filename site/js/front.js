@@ -1,7 +1,11 @@
 // Front page: the copy button and the about:blank button.
 import { openInBlankTab } from './blank.js';
+import { startCipher } from './shared/cipher.js';
 
 const $ = id => document.getElementById(id);
+
+// The moving background, faint behind the page's column of text and full strength in the margins.
+startCipher($('cipher'), { calm: () => document.querySelector('.wrap') });
 
 $('copyCmd').addEventListener('click', async () => {
   const text = $('installCmd').textContent;

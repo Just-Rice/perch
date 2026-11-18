@@ -168,15 +168,25 @@ test('backup sign-in: Mac name and password (checked by OPAQUE), then the code',
   await page.waitScreen('home');
   await page.click('#btnBackup');
   await page.waitScreen('backup');
-  // A wrong password first.
+  // A wrong password first: found out at the meeting point, from the Mac's reply to the password's first message, so
+  // the viewer never answers the offer (nothing is connected). Still a failed try in the Mac's log.
+  const answersBefore = (await app.call('debug')).signaling.answers;
   await page.click('#macName');
   await page.type(macName);
   await page.click('#password');
   await page.type('not the password');
+  const t0 = Date.now();
   await page.click('#btnBackupGo');
-  await page.waitFor(`document.getElementById('backupError').textContent.trim().length > 0 || document.getElementById('msgTitle').textContent.length > 0`,
+  // ("Something went wrong" is the message screen's text before anything is shown, so wait for the real one.)
+  // (It comes back to the password form with the reason under it; "Something went wrong" is only the message screen's
+  // text before anything is shown, so it can't be what's waited for.)
+  await page.waitFor(`document.getElementById('backupError').textContent.trim().length > 0 || !document.getElementById('s-message').hidden`,
     { timeoutMs: 20000, what: 'wrong password message' });
   assert.equal(await page.eval(`document.getElementById('viewer').hidden`), true);
+  console.log(`wrong password reported after ${Date.now() - t0} ms`);
+  assert.equal((await app.call('debug')).signaling.answers, answersBefore, 'no connection was even started');
+  await sleep(300);
+  assert.ok((await app.call('state')).activity.some(a => /Wrong backup password/.test(a.text)), 'counted and logged');
   // Then the right one.
   await page.goto(`${stack.base}connect.html?${testParams()}`);
   await page.waitScreen('home');

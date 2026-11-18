@@ -12,6 +12,8 @@ import { PROTO, MIN_PEER_PROTO } from '../../../site/js/shared/proto.js';
 
 export const HELLOS_PER_MINUTE = 20;
 export const MAX_UNAUTHENTICATED = 3;
+// The first message of a backup sign-in when it comes with the hello (OPAQUE's KE1 is 96 bytes; base64url and room).
+const MAX_OPAQUE_TEXT = 512;
 export const MAX_SDP_BYTES = 32 * 1024;
 export const MAX_RELAY_TEXT = 8 * 1024;
 const ID16_RE = /^[A-Za-z0-9_-]{22}$/;   // 16 random bytes in base64url
@@ -98,6 +100,7 @@ export class Signaling {
     this._forget();
     if (msg.t === 'hello') return this._hello(kind, where, msg);
     if (msg.t === 'answer') return this._answer(kind, where, msg);
+    if (msg.t === 'cancel') return this._cancel(kind, where, msg);
     // Our own offers and refusals go to reply topics, which we don't listen to; anything else is noise.
   }
 
@@ -155,10 +158,20 @@ export class Signaling {
     if (no) return this._refuse(where, sid, no.reason, no.retryAfter);
     if (this.hub.unauthenticatedCount(kind) >= MAX_UNAUTHENTICATED) return this._refuse(where, sid, 'busy', 10);
 
-    let session, sdp, iceServers = [], ws = null;
+    let session, sdp, iceServers = [], ws = null, early = null;
     try {
       session = this.hub.createSession(hello, kind);
       entry.session = session;
+      // Backup sign-in started right here (newer viewers): the password's first message came with the hello and its
+      // reply goes back with the offer, so a wrong password is known in a second or two, before any connection is
+      // built. It counts against the lockout just as it would over the connection.
+      if (route === 'backup' && typeof msg.opaque1 === 'string' && msg.opaque1.length <= MAX_OPAQUE_TEXT) {
+        early = session.earlyBackup(msg.opaque1);
+        if (early.refuse) {
+          session.end('denied', { sendBye: false });
+          return this._refuse(where, sid, early.refuse, early.retryAfter);
+        }
+      }
       // The owner's relay logins, if any (relay.mjs), are fetched while the offer is being made; so is the Worker
       // relay offer (wsrelay.mjs), which a viewer whose network blocks WebRTC answers instead.
       const relay = this.hub.relayIceServers ? Promise.resolve(this.hub.relayIceServers()).catch(() => []) : [];
@@ -179,9 +192,17 @@ export class Signaling {
     }
     // caps: what this Mac can do beyond protocol 1 ("quick" = one-tap passkey sign-in, see bind.js).
     entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp, ...(this.hub.caps?.length ? { caps: this.hub.caps } : {}),
-      ...(iceServers.length ? { iceServers } : {}), ...(ws ? { ws } : {}) };
+      ...(iceServers.length ? { iceServers } : {}), ...(ws ? { ws } : {}), ...(early?.res ? { opaque2: early.res } : {}) };
     this.stats.offers++;
     await this._reply(where, sid, entry.offer);
+  }
+
+  // The viewer gave up before connecting: with a backup sign-in started at the meeting point, because the password
+  // turned out wrong. Ending it now frees its place among the sessions still signing in.
+  _cancel(kind, where, msg) {
+    const entry = typeof msg.sid === 'string' ? this.sids.get(msg.sid) : null;
+    if (!entry?.session || entry.topic !== where.topic || entry.session.state !== 'offered') return this._drop('cancel for an unknown session');
+    entry.session.cancelled(msg.reason === 'wrong-password' ? 'wrong-password' : 'cancelled');
   }
 
   async _answer(kind, where, msg) {

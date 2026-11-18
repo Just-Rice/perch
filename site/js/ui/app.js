@@ -6,7 +6,7 @@ import { Prefs } from './prefs.js';
 import { deviceLabel, isAppleDevice, isTouchFirst, passkeyFriendly, platformAuthenticatorAvailable } from './device.js';
 import { parsePairHash, parseGuestHash, parseUserHandle } from './pairlink.js';
 import { Connection, PerchError } from './connection.js';
-import { signIn, loadOpaque } from './signin.js';
+import { signIn, loadOpaque, backupEarly } from './signin.js';
 import { Screens } from './screens.js';
 import { getAssertion, webauthnAvailable, webauthnErrorKind } from './passkey.js';
 import { prepareQuick, quickRequest } from './quick.js';
@@ -263,19 +263,25 @@ async function runSession(app, target) {
   if (app.run !== run) return; // cancelled, or another session started, while we waited
   const known = mac?.relay && relayBase(mac.relay, { allowLocal: env.allowLocalRelay }) === mac.relay ? relayBroker(mac.relay) : null;
   const brokers = [...new Set([own, known, ...env.brokers].filter(Boolean))];
+  // Backup sign-in: the password is checked at the meeting point, before connecting (signin.js backupEarly). If the
+  // password library can't be had right now, it is checked over the connection instead, as before.
+  const early = route === 'backup' && target.password
+    ? await backupEarly(target.password).catch(e => { app.log(`early password check unavailable: ${e?.message}`); return null; })
+    : null;
+  if (app.run !== run) return;
   const conn = new Connection({
     route, ...ids, macName: target.macName, pairId: pair?.pairId, label: app.label, pin,
     guestId: target.guest?.guestId, guestSecret: target.guest?.guestSecret,
     certificate: target.quick?.cert ?? null,
     brokers, iceServers: env.iceServers, log: app.log, onStage: s => ui.stage(s),
-    transport: target.transport ?? env.transport, allowLocalRelay: env.allowLocalRelay,
+    transport: target.transport ?? env.transport, allowLocalRelay: env.allowLocalRelay, early,
   });
   app.conn = conn;
   // Tests on this computer can't answer a microphone prompt, so they may ask for a generated tone instead.
   if (env.test && env.params.get('tonemic') === '1') conn.micSource = toneMicrophone;
   let saved = mac || null;
   const ctx = {
-    route, rpId: env.rpId, label: app.label, credentialId: mac?.credentialId, password: target.password, pair,
+    route, rpId: env.rpId, label: app.label, credentialId: mac?.credentialId, password: target.password, pair, early,
     guest: target.guest ?? null,
     quick: target.quick ?? null,
     alwaysTap: env.params.get('tap') === '1',

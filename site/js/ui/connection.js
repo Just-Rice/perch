@@ -94,9 +94,11 @@ export class Connection {
   // the Mac has one). allowLocalRelay: accept a loopback relay address (tests on this computer only).
   constructor({ route, hostId, sigKey, macName, pairId, guestId = null, guestSecret = null, label, brokers, iceServers, pin = null,
     certificate = null, log = () => {}, onStage = () => {}, PeerConnection = globalThis.RTCPeerConnection,
-    transport = 'auto', allowLocalRelay = false, WebSocketImpl = globalThis.WebSocket }) {
+    transport = 'auto', allowLocalRelay = false, WebSocketImpl = globalThis.WebSocket, early = null }) {
+    // early: {hello(), offer(first)} for a sign-in that starts at the meeting point (signin.js backupEarly): more for the
+    // hello, and a look at the offer before connecting that may throw (a wrong password), which cancels with the Mac.
     Object.assign(this, { route, hostId, sigKey, macName, pairId, guestId, guestSecret, label, brokers, iceServers, pin, certificate,
-      log, onStage, PeerConnection, transport, allowLocalRelay, WebSocketImpl });
+      log, onStage, PeerConnection, transport, allowLocalRelay, WebSocketImpl, early });
     this.sid = toB64url(randomBytes(16));
     this.rdv = null;
     this.pc = null;
@@ -164,12 +166,22 @@ export class Connection {
     await this.rdv.send(topic, key, {
       t: 'hello', sid: this.sid, pv: PROTO, route, label: this.label,
       ...(this.pairId ? { pairId: toB64url(this.pairId) } : {}),
+      ...(this.early?.hello?.() ?? {}),
     });
     const first = await this._race(reply, OFFER_TIMEOUT_MS, () => new PerchError('timeout'));
     if (first.t === 'refuse') {
       throw this._fail(new PerchError('refuse', { reason: first.reason, retryAfter: first.retryAfter, hv: first.hv }));
     }
     if (!(Number(first.pv) >= MIN_PEER_PROTO) || typeof first.sdp !== 'string') throw this._fail(new PerchError('old-mac'));
+    if (this.early) {
+      try {
+        await this.early.offer(first);
+      } catch (e) {
+        // Wrong (the password): say so to the Mac, which frees the place this sign-in held, and stop before connecting.
+        await this.rdv.send(topic, key, { t: 'cancel', sid: this.sid, reason: e?.kind ?? 'cancelled' }).catch(() => {});
+        throw this._fail(e instanceof PerchError ? e : new PerchError('unexpected', { message: e?.message }));
+      }
+    }
     this.hv = first.hv;
     this.caps = Array.isArray(first.caps) ? first.caps.filter(c => typeof c === 'string') : [];
 

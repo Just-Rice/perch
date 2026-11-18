@@ -456,6 +456,50 @@ test('backup sign-in: wrong password, right password and code; its lockout leave
   assert.equal((await app.call('debug')).signaling.listening.name, null);
 });
 
+test('backup sign-in checked at the meeting point: a wrong password is known before connecting, and still counts', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app, macName } = ctx;
+  const password = await app.call('suggestPassword');
+  await setBackupPassword(app, password);
+
+  // Wrong: the reply comes with the offer, the viewer cancels, nothing is connected. Quick, logged, and it doesn't
+  // keep one of the three places for sessions still signing in.
+  for (let i = 0; i < 4; i++) {
+    const v = viewer(t);
+    const t0 = Date.now();
+    const result = await v.open({ route: 'backup', macName, ...(await v.backupEarly('not-the-password')) });
+    assert.equal(result, null, 'cancelled before connecting');
+    assert.equal(v.earlyReply, true, 'the Mac answered the password with its offer');
+    assert.ok(Date.now() - t0 < 5000, `${Date.now() - t0} ms`);
+  }
+  let st;
+  for (let i = 0; i < 30; i++) {
+    st = await app.call('state');
+    if (st.activity.filter(a => /Wrong backup password/.test(a.text)).length === 4) break;
+    await new Promise(r => setTimeout(r, 100));
+  }
+  assert.equal(st.activity.filter(a => /Wrong backup password/.test(a.text)).length, 4, 'four failures logged');
+
+  // Right: connects, and only the proof is left to give (over the connection, bound to it).
+  const right = viewer(t, { label: 'Library computer' });
+  const hi = await right.open({ route: 'backup', macName, ...(await right.backupEarly(password)) });
+  assert.equal(hi.route, 'backup');
+  const end = await right.finishBackupEarly({ code: () => app.freshCode() });
+  assert.equal(end.t, 'ready', JSON.stringify(end));
+  st = await app.call('state');
+  assert.equal(st.session.route, 'backup');
+  right.send({ t: 'bye' });
+
+  // The lockout counts tries made this way too (the sign-in above started the count again): five wrong, and the next
+  // is refused at once.
+  for (let i = 0; i < 5; i++) {
+    const v = viewer(t);
+    assert.equal(await v.open({ route: 'backup', macName, ...(await v.backupEarly('nope')) }), null, `try ${i + 1}`);
+  }
+  const locked = await refusal(viewer(t).open({ route: 'backup', macName }));
+  assert.equal(locked.reason, 'locked-out');
+});
+
 test('a name the owner chose: checked, normalized, and backup sign-in works with it', async (t) => {
   const ctx = await pairedHost(t);
   const { app, macName } = ctx;

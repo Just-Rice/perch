@@ -54,9 +54,14 @@ security never depends on it — see Binding.)
 
 Messages (all carry `sid`, a random 16-byte base64url session id chosen by the viewer):
 
-1. viewer → topic: `{t:"hello", sid, pv, route, label, pairId?}` — `pv` = viewer's `PROTO`; `route` is
+1. viewer → topic: `{t:"hello", sid, pv, route, label, pairId?, opaque1?}` — `pv` = viewer's `PROTO`; `route` is
    `"passkey"`, `"backup"` or `"pair"`; `label` is a short device description such as `"Safari on iPhone"`.
-2. Mac → reply topic: `{t:"offer", sid, pv, minPv, hv, sdp, iceServers?}` — `hv` is the app version; `sdp` the
+   `opaque1` (backup only, from 0.3.5's website on): OPAQUE's first login message, so the password is checked here
+   rather than after connecting. The Mac counts it against the backup lockout at once, as it would `opaque1` over
+   the connection, and puts its reply in the offer as `opaque2`; the viewer checks the password from that reply and,
+   if it is wrong, sends `{t:"cancel", sid, reason:"wrong-password"}` instead of an answer (the Mac logs the failure
+   and frees the session's place). A right one connects and gives only `opaque3` (bound to the connection).
+2. Mac → reply topic: `{t:"offer", sid, pv, minPv, hv, sdp, iceServers?, ws?, opaque2?}` — `hv` is the app version; `sdp` the
    complete offer (ICE gathering finished, no trickle); `iceServers` the owner's relay logins, if a relay is set up
    (see Relay). Or `{t:"refuse", sid, reason, retryAfter?, pv, minPv, hv}` where reason is
    `version | busy | paused | locked-out | backup-off | not-set-up | rate`.

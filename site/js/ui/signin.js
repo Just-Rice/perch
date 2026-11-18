@@ -118,8 +118,36 @@ async function passkeyStep(conn, ctx, ui, hi) {
   }
 }
 
+// Backup sign-in started at the meeting point: the password's first message goes with the hello and the Mac's reply
+// comes back with its offer, so a wrong password is known in a second or two, before anything is connected. A Mac
+// from before 0.3.5 doesn't reply then: the whole exchange happens over the connection, as before (backupSteps).
+export async function backupEarly(password) {
+  const opaque = await loadOpaque();
+  const { clientLoginState, startLoginRequest } = opaque.client.startLogin({ password });
+  const early = {
+    fin: null,
+    hello: () => ({ opaque1: startLoginRequest }),
+    offer: (first) => {
+      if (typeof first.opaque2 !== 'string') return;
+      let fin = null;
+      try { fin = opaque.client.finishLogin({ clientLoginState, loginResponse: first.opaque2, password }); } catch {}
+      // A wrong password can't be told apart from a wrong Mac name; the Mac has counted it as a failed try either way.
+      if (!fin) throw new PerchError('wrong-password');
+      early.fin = fin;
+    },
+  };
+  return early;
+}
+
 async function backupSteps(conn, ctx, ui) {
   ui.stage('password');
+  const early = ctx.early?.fin;
+  if (early) {
+    // Already checked at the meeting point: only the proof is left, made over this connection.
+    const proof = await bindProof(fromB64url(early.sessionKey), 'backup', conn.bind);
+    conn.send({ t: 'opaque3', fin: early.finishLoginRequest, proof: toB64url(proof) });
+    return;
+  }
   const opaque = await loadOpaque();
   const { clientLoginState, startLoginRequest } = opaque.client.startLogin({ password: ctx.password });
   conn.send({ t: 'opaque1', req: startLoginRequest });

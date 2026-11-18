@@ -177,7 +177,8 @@ export class Session {
     this.bind = await bindingHash(new Uint8Array(nonce), this.peer.offerSdp, this.peer.answerSdp);
     if (this.state !== 'connecting') return;
     this.state = 'auth';
-    this.step = FIRST_STEP[this.route];
+    // A backup sign-in started at the meeting point only has its proof left to give.
+    this.step = this.serverLoginState && this.route === 'backup' ? 'opaque3' : FIRST_STEP[this.route];
     this._send({ t: 'hi', pv: PROTO, hv: this.hub.hv, nonce: toB64url(nonce), name: this.store.macName, route: this.route });
   }
 
@@ -258,6 +259,29 @@ export class Session {
     if (!r || r.length !== 16 || !Number.isSafeInteger(q.ts)) throw new AuthError('bad-proof', 'one-tap sign-in: malformed');
     this.auth.useQuickNonce(q.r, q.ts); // throws if stale or seen before
     return quickChallenge(r, q.ts, fingerprint);
+  }
+
+  // Backup sign-in started at the meeting point (signaling.mjs): the password's first message came with the hello.
+  // Counted against the lockout exactly as _opaque1 counts it. Answers {res} for the offer, or {refuse, retryAfter?}.
+  earlyBackup(req) {
+    if (this.route !== 'backup' || this.serverLoginState) return { refuse: 'protocol' };
+    const attempt = this.auth.attempt('backup');
+    const start = this.auth.opaqueLoginStart(req);
+    if (!start) {
+      this.auth.note('failure', `Backup sign-in refused: malformed request (${this.label})`);
+      return attempt.lockedMs ? { refuse: 'locked-out', retryAfter: seconds(attempt.lockedMs) } : { refuse: 'wrong-password' };
+    }
+    this.backupAttempt = attempt;
+    this.serverLoginState = start.serverLoginState;
+    return { res: start.loginResponse };
+  }
+
+  // The viewer gave up before connecting (signaling.mjs, cancel): after a wrong password, a failed try for the log.
+  cancelled(reason) {
+    if (this.state !== 'offered') return;
+    if (reason === 'wrong-password' && this.serverLoginState) this.auth.note('failure', `Wrong backup password (${this.label})`);
+    this.serverLoginState = null;
+    this.end('denied', { sendBye: false });
   }
 
   async _opaque1(msg) {

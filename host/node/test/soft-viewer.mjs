@@ -64,7 +64,10 @@ export class SoftViewer {
   }
 
   // Rendezvous and WebRTC up to the Mac's `hi`. Throws Refused when the Mac refuses the hello.
-  async open({ route, hostId, sigKey, macName, pairId, guestId, guestSecret, pv = PROTO, tamper = {}, timeoutMs = 15000, rawHello = null }) {
+  // `extra`: more for the hello (a backup sign-in's first message). `onOffer(first)`: may look at the offer before
+  // connecting; false cancels (as the website does after a wrong password) and open() resolves to null.
+  async open({ route, hostId, sigKey, macName, pairId, guestId, guestSecret, pv = PROTO, tamper = {}, timeoutMs = 15000, rawHello = null,
+    extra = {}, onOffer = null }) {
     this.route = route;
     const topic = route === 'backup' ? await nameTopic(macName) : route === 'guest' ? await guestTopic(guestId) : await hostTopic(hostId);
     const key = route === 'backup' ? await nameEnvelopeKey(macName) : route === 'guest' ? await guestEnvelopeKey(guestSecret)
@@ -77,7 +80,7 @@ export class SoftViewer {
       if (msg.sid === this.sid && (msg.t === 'offer' || msg.t === 'refuse')) gotReply(msg);
     });
     const hello = rawHello ?? {
-      t: 'hello', sid: this.sid, pv, route, label: this.label, ...(pairId ? { pairId: toB64url(pairId) } : {}),
+      t: 'hello', sid: this.sid, pv, route, label: this.label, ...(pairId ? { pairId: toB64url(pairId) } : {}), ...extra,
     };
     await this.rv.send(topic, key, hello);
     const first = await withTimeout(reply, timeoutMs, 'no offer from the Mac');
@@ -85,6 +88,12 @@ export class SoftViewer {
     if (first.t === 'refuse') {
       this.rv.close();
       throw new Refused(first);
+    }
+    if (onOffer && (await onOffer(first)) === false) {
+      await this.rv.send(topic, key, { t: 'cancel', sid: this.sid, reason: 'wrong-password' });
+      this.rv.close();
+      this.rv = null;
+      return null;
     }
     this.offerSdp = tamper.offer ? tamper.offer(first.sdp) : first.sdp;
     this.pc = this._peer();
@@ -279,6 +288,32 @@ export class SoftViewer {
     const resp = this.authenticator.create(m.options, createOverrides);
     this.credentialId = resp.id;
     this.send({ t: 'pair-cred', response: resp, label: this.label });
+    return this._code(code, beforeCode);
+  }
+
+  // Backup sign-in started at the meeting point: spread the result into open(). Its onOffer checks the password from
+  // the Mac's reply in the offer (false: wrong, and open() cancels); finishBackupEarly() then only sends the proof.
+  async backupEarly(password) {
+    await opaque.ready;
+    const { clientLoginState, startLoginRequest } = opaque.client.startLogin({ password });
+    this.earlyFin = null;
+    return {
+      extra: { opaque1: startLoginRequest },
+      onOffer: (first) => {
+        this.earlyReply = typeof first.opaque2 === 'string';
+        if (!this.earlyReply) return true;
+        let fin = null;
+        try { fin = opaque.client.finishLogin({ clientLoginState, loginResponse: first.opaque2, password }); } catch {}
+        this.earlyFin = fin ?? null;
+        return !!fin;
+      },
+    };
+  }
+
+  async finishBackupEarly({ code, beforeCode }) {
+    const fin = this.earlyFin;
+    const proof = await bindProof(fromB64url(fin.sessionKey), 'backup', this.bind);
+    this.send({ t: 'opaque3', fin: fin.finishLoginRequest, proof: toB64url(proof) });
     return this._code(code, beforeCode);
   }
 

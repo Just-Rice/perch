@@ -17,8 +17,7 @@ import {
 } from './shortcuts.js';
 
 const HIDE_AFTER_MS = 3500;  // the toolbar tucks itself away after this long without being used
-const SHOW_ZONE_PX = 56;     // moving the mouse this close to the top brings it back
-const SIDE_ZONE_PX = 16;     // ...or this close to the bottom or a side, when the bar lives there
+const EDGE_ZONE_PX = 6;      // a hidden bar comes back when the mouse touches its edge (this close to it), and only then
 const EDGES = ['top', 'bottom', 'left', 'right'];
 const DOUBLE_ESC_MS = 600;   // Esc twice within this brings back a hidden pointer
 const PING_MS = 2000;
@@ -899,8 +898,8 @@ export class Viewer {
     this._on(this.root, 'pointermove', e => {
       if (e.pointerType === 'touch' || this.pointer?.locked || !this._autoHide()) return;
       const box = this.root.getBoundingClientRect();
-      const near = { top: e.clientY - box.top < SHOW_ZONE_PX, bottom: box.bottom - e.clientY < SIDE_ZONE_PX,
-        left: e.clientX - box.left < SIDE_ZONE_PX, right: box.right - e.clientX < SIDE_ZONE_PX };
+      const near = { top: e.clientY - box.top < EDGE_ZONE_PX, bottom: box.bottom - e.clientY < EDGE_ZONE_PX,
+        left: e.clientX - box.left < EDGE_ZONE_PX, right: box.right - e.clientX < EDGE_ZONE_PX };
       if (near[this.prefs.get('tbEdge')]) this._showToolbar();
     });
     this._on(this.surface, 'pointerdown', () => { this._toggleMenu(false); this._closeKeysEditor(); });
@@ -1012,7 +1011,7 @@ export class Viewer {
         prefs.set('tbHideNoted', true);
         this.banners.show('tbhide', { kind: 'info', icon: 'hideBar', title: 'The bar is hidden.',
           body: this.touchFirst ? 'Tap the small tab at the edge to bring it back.'
-            : 'Move the pointer to that edge, or click the small tab, to bring it back. To keep it showing, turn off "Hide the bar" in More.',
+            : 'Move the pointer to the very edge of the window to bring it back. To keep it showing, turn off "Hide the bar" in More.',
           dismissible: true });
         clearTimeout(this.hideNoteTimer);
         this.hideNoteTimer = setTimeout(() => this.banners.hide('tbhide'), 6000);
@@ -1107,6 +1106,8 @@ export class Viewer {
     // So does the keys bar, with a mouse (on a touch screen it comes and goes with the phone keyboard).
     const bar = this.$('keysBar');
     root.style.setProperty('--keys-h', `${!this.touchFirst && !bar.hidden ? bar.offsetHeight : 0}px`);
+    // A bar at the bottom that comes and goes sits above the keys bar rather than over it.
+    root.style.setProperty('--keys-up', `${!bar.hidden ? bar.offsetHeight : 0}px`);
     const box = this.surface.getBoundingClientRect();
     const key = `${Math.round(box.width)}x${Math.round(box.height)}`;
     if (key !== this.surfaceKey) {

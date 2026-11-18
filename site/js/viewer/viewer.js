@@ -297,6 +297,7 @@ export class Viewer {
     }
     if (st.width > 0 && st.height > 0) { this.display.width = st.width; this.display.height = st.height; }
     if (Array.isArray(st.displays)) this._setDisplays(st.displays, st.display);
+    if (st.levels && typeof st.levels === 'object') this._showLevels(st.levels);
     // Which window is being shown, if any. Just after choosing one here the Mac's older notes still say otherwise.
     if ('window' in st && performance.now() >= (this.windowChosenAt ?? -Infinity) + 1500) this._showWindow(st.window ?? null);
   }
@@ -754,8 +755,8 @@ export class Viewer {
     this._placePickers = () => {
       const pickers = [$('tbQuality').closest('label'), $('tbDisplayWrap')];
       const menu = (narrow.matches || this.root.classList.contains('tb-vertical')) && !this.guest;
-      // In the menu they go under "This bar"'s settings, before "The Mac".
-      if (menu && pickers[0].parentElement !== $('moreMenu')) $('macHead').before(...pickers);
+      // In the menu they go under "This bar"'s settings, before "Sound" and "The Mac".
+      if (menu && pickers[0].parentElement !== $('moreMenu')) $('levelsWrap').before(...pickers);
       else if (!menu && pickers[0].parentElement !== $('toolbar')) $('tbKeyboard').before(...pickers);
     };
     this._placePickers();
@@ -869,6 +870,20 @@ export class Viewer {
     on('clipClose', 'click', () => this._closeClip());
     this._on($('clipSheet'), 'keydown', e => { if (e.key === 'Escape') { e.preventDefault(); this._closeClip(); } });
 
+    // Sound levels, set on the Mac: what is sent here (0–150%) and its own speakers (0–100%, 0 = silent). Sent while
+    // a slider moves (at most a few times a second) and once more when it's let go; the Mac's status echoes them back.
+    this._showLevels(this.ready.levels);
+    const sendLevels = (final) => {
+      const now = performance.now();
+      if (!final && now - (this.levelsSentAt ?? 0) < 150) return;
+      this.levelsSentAt = now;
+      this.session.send({ t: 'levels', stream: Number($('optStream').value) / 100, speakers: Number($('optSpeakers').value) / 100 });
+    };
+    for (const id of ['optStream', 'optSpeakers']) {
+      on(id, 'input', () => { this._levelText(); sendLevels(false); });
+      on(id, 'change', () => { this.levelsDragged = performance.now(); sendLevels(true); });
+    }
+
     // Talking through the Mac, where the Mac, the browser and the connection all can.
     this.micOn = false;
     $('optMic').hidden = this.guest || !this.session.canMic;
@@ -905,6 +920,28 @@ export class Viewer {
       if (near[this.prefs.get('tbEdge')]) this._showToolbar();
     });
     this._on(this.surface, 'pointerdown', () => { this._toggleMenu(false); this._closeKeysEditor(); });
+  }
+
+  // The sound sliders, from the Mac's own levels (ready, then status). Only the owner's viewer, and only where the Mac
+  // knows about them; the speakers slider only where the Mac can keep its speakers quiet.
+  _showLevels(levels) {
+    const wrap = this.$('levelsWrap');
+    const ok = !this.guest && !!levels && this.session.caps?.includes('levels');
+    wrap.hidden = !ok;
+    if (!ok) return;
+    // Just let go of: the Mac's echo of the previous value mustn't pull the slider back.
+    const settling = performance.now() - (this.levelsDragged ?? -Infinity) < 600;
+    const active = document.activeElement;
+    if (typeof levels.stream === 'number' && !settling && active !== this.$('optStream')) this.$('optStream').value = String(Math.round(levels.stream * 100));
+    if (typeof levels.speakers === 'number' && !settling && active !== this.$('optSpeakers')) this.$('optSpeakers').value = String(Math.round(levels.speakers * 100));
+    this.$('optSpeakers').disabled = levels.speakersAvailable !== true;
+    this.$('speakersNote').hidden = levels.speakersAvailable === true;
+    this._levelText();
+  }
+
+  _levelText() {
+    this.$('optStreamOut').textContent = `${this.$('optStream').value}%`;
+    this.$('optSpeakersOut').textContent = Number(this.$('optSpeakers').value) === 0 ? 'Silent' : `${this.$('optSpeakers').value}%`;
   }
 
   // The display picker. Called again when the Mac says its displays changed (one was unplugged or plugged in).

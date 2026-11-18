@@ -241,6 +241,15 @@
       </select>
     </label>
     <label class="check"><input type="checkbox" id="optAutoHide"> Hide the bar when I'm not using it</label>
+    <!-- Sound levels, set on the Mac (viewer.js): what is sent here, and the Mac's own speakers -->
+    <div class="levels" id="levelsWrap" role="group" aria-labelledby="soundHead" hidden>
+      <p class="menu-head" id="soundHead">Sound</p>
+      <label class="level" for="optStream"><span>Sound sent here</span>
+        <input type="range" id="optStream" min="0" max="150" step="5"><output id="optStreamOut" for="optStream"></output></label>
+      <label class="level" id="speakersWrap" for="optSpeakers"><span>Mac speakers</span>
+        <input type="range" id="optSpeakers" min="0" max="100" step="5"><output id="optSpeakersOut" for="optSpeakers"></output></label>
+      <p class="fine" id="speakersNote" hidden>Keeping the Mac's speakers quiet needs macOS 14.2 or later on the Mac.</p>
+    </div>
     <p class="menu-head" id="macHead">The Mac</p>
     <button type="button" id="optForceQuit" class="btn small" data-icon="warn" hidden>Force Quit an app…</button>
     <label class="check" id="touchpadWrap" hidden><input type="checkbox" id="optTouchpad"> Touchpad mode</label>

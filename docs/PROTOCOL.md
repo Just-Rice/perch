@@ -304,6 +304,12 @@ viewer's display map and edge flip use (without them it takes the displays to si
 
 ## Control channel: during a session
 
+viewer → Mac (owner only): `{t:"levels", speakers?, stream?}` — sound while connected: the Mac's own speakers (0–1;
+below 1 the Mac's sound is taken with a Core Audio tap that keeps it off the speakers, and Perch plays its own copy at
+that level) and what is sent (0–1.5, soft-limited). Saved as the `macSpeakers` / `streamVolume` settings; `ready` and
+`status` carry `levels: {speakers, stream, speakersAvailable}` (`speakersAvailable`: the Mac has the tap, macOS
+14.2+), and Macs that understand it list `levels` in the offer's `caps`.
+
 viewer → Mac: `{t:"quality", preset}` (`smooth | balanced | sharp | fast`; `fast` is 60 frames a second, offered by
 Macs with `fps60` in the offer's `caps`), `{t:"display", id}`, `{t:"keyframe"}`, `{t:"view", edge}` (the longest edge
 of the picture on the viewer's screen in device pixels, for Macs with `view` in `caps`: the Mac never sends a bigger
@@ -376,7 +382,7 @@ stdout (host → app). stderr is the host's log. Every frame is `[u32 big-endian
 
 | Type | Direction | Payload |
 |---|---|---|
-| `0x01` HELLO | app → host | JSON `{app, version, ipc: 1, macos, synthetic, permissions: {screen, accessibility}, displays, loginItem}` |
+| `0x01` HELLO | app → host | JSON `{app, version, ipc: 1, macos, synthetic, soundTap, permissions: {screen, accessibility}, displays, loginItem}` (`soundTap`: it can keep the Mac's sound off its speakers, macOS 14.2+) |
 | `0x02` VIDEO | app → host | `u8 flags` (bit 0 keyframe) · `u64 BE pts µs` · H.264 Annex-B access unit (SPS/PPS before every keyframe) |
 | `0x03` AUDIO | app → host | `u64 BE pts µs` · one Opus packet (20 ms, 48 kHz stereo) |
 | `0x04` EVENT | app → host | JSON event (below) |
@@ -395,7 +401,7 @@ whole display), `window-fit {window, ok, error?}`,
 login-item-on | login-item-off | check-updates | update | restart | quit`), `input-echo {ev}` (only with `--echo-input`),
 `log {level, message}`.
 
-Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?, profile?, maxQp?}` (`window`: show only
+Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?, profile?, maxQp?, speakers?, stream?}` (`window`: show only
 the part of the display that window covers, following it; `maxQp`: the coarsest H.264 quantiser the encoder may use,
 18–51, so on a slow link it drops frames instead of blurring; the Sharp preset sends it), `windows {}` (asks for a `windows` event), `window-fit {window, w, h}`
 (reshape it to `w:h` through Accessibility; never done in test runs), `clipboard-get {images?, auto?}` (answered with a `clipboard {ok, text, image?, mime?, auto?}` event; `image` is base64 PNG), `clipboard-set {text?, image?, paste?}` (answered with
@@ -408,7 +414,8 @@ at the Mac), `lock {}` (lock the screen; sent when a session ends and the owner 
 the Perch.app on disk is a different version from the one running, so the menu offers "Restart to Finish Updating"), `notify {title, body}`,
 `permissions {}` (asks for a `permissions` event), `request-permission {which}` (`screen | accessibility`), `reset-permission {which}` (forgets what macOS remembers
 about that permission for Perch, with `tccutil reset`, then asks again; answered with `permission-reset {which, ok}`),
-`relaunch {}` (Perch quits and opens again once the old process has gone; neither of these two runs in test runs),
+`audio-levels {speakers?, stream?}` (sound levels mid-session, as in `capture`; the first time speakers go below 1
+the app starts its sound tap, which then runs until capture stops), `relaunch {}` (Perch quits and opens again once the old process has gone; neither of these two runs in test runs),
 `open-url {url}`, `login-item {on}`, `keep-awake {on}`, `uninstall {}`, `quit {}`.
 
 `state` is one of `starting | ready | needs-setup | offline | paused | connected | error`.

@@ -28,6 +28,8 @@
 	<string>13.5</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>Perch sends this Mac’s sound to the device you connect from, and can keep the Mac’s own speakers quiet while it does.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 	<key>NSHumanReadableCopyright</key>

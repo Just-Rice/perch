@@ -393,3 +393,11 @@ pre.code { font-family: var(--mono); font-size: .85rem; line-height: 1.5; backgr
 
 /* Groups inside Settings */
 .settings-head { margin: 22px 0 2px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 1.02rem; }
+
+/* Sound while someone is connected: two sliders, each with its percentage */
+fieldset.levels { border: 0; margin: 18px 0 6px; padding: 14px 0 0; border-top: 1px solid var(--line); min-width: 0; }
+fieldset.levels legend { font-weight: 650; padding: 0; margin-bottom: 4px; }
+.level { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 220px) 3.5em; align-items: center; gap: 12px; padding: 8px 0; }
+.level input[type=range] { width: 100%; accent-color: var(--accent); }
+.level output { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 600; }
+@media (max-width: 600px) { .level { grid-template-columns: minmax(0, 1fr) 3.5em; } .level input[type=range] { grid-column: 1 / -1; grid-row: 2; } }

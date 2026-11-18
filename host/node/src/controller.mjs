@@ -195,6 +195,7 @@ export class Controller {
         transport: a.transport, path: a.path ?? null } : null,
       activity: s.config.log.slice(-ACTIVITY_SHOWN).reverse(),
       update: this.update,
+      soundTap: !!this.appInfo?.soundTap,
       restart: this.installed ? { version: this.installed.version, running: this.hv, sameSigner: this.installed.sameSigner,
         autoAfterMs: IDLE_BEFORE_AUTO_MS } : null,
       test: !!this.config.test,
@@ -219,7 +220,7 @@ export class Controller {
   handleHello(h) {
     this.appInfo = {
       app: String(h.app ?? ''), version: typeof h.version === 'string' ? h.version : null,
-      macos: String(h.macos ?? ''), synthetic: !!h.synthetic,
+      macos: String(h.macos ?? ''), synthetic: !!h.synthetic, soundTap: h.soundTap === true,
     };
     if (h.permissions) this.permissions = { screen: !!h.permissions.screen, accessibility: !!h.permissions.accessibility };
     this.displays = cleanDisplays(h.displays);
@@ -445,6 +446,7 @@ export class Controller {
       kbps: session.media?.bitrate.target ?? preset.kbps, audio: true,
       ...(session.window ? { window: session.window } : {}),
       ...(maxQp ? { maxQp } : {}),
+      speakers: this.store.settings.macSpeakers, stream: this.store.settings.streamVolume,
       // One picture goes to every viewer: High only when all of them agreed to it.
       profile: (this.lastProfile = this._captureProfile()),
     });
@@ -509,6 +511,7 @@ export class Controller {
       displays: this.displays.map(d => ({ ...d })),
       quality, audio: true, input: !!this.permissions.accessibility, locked: !!this.locked,
       ...(this.workerRelay.base ? { relay: this.workerRelay.base } : {}),
+      levels: this.levels(),
     };
   }
 
@@ -761,7 +764,22 @@ export class Controller {
   relayIceServers() { return this.relay.iceServers(); }
 
   // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
-  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus', 'clipboard', 'clipimg']; }
+  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus', 'clipboard', 'clipimg', 'levels']; }
+
+  // The two sound levels as viewers and the app see them; `speakers` is only offered where the app can tap the sound.
+  levels() {
+    const s = this.store.settings;
+    return { speakers: s.macSpeakers, stream: s.streamVolume, speakersAvailable: !!this.appInfo?.soundTap };
+  }
+
+  // The owner's viewer moved a sound slider: saved as the levels for next time too (Setup shows the same two).
+  async setLevels(session, { speakers, stream }) {
+    if (session !== this.active) return;
+    const patch = {};
+    if (Number.isFinite(speakers)) patch.macSpeakers = speakers;
+    if (Number.isFinite(stream)) patch.streamVolume = stream;
+    if (Object.keys(patch).length) await this.updateSettings(patch).catch(e => this.log.debug(`levels refused: ${e.message}`));
+  }
 
   async relaySet(keyId, apiToken) {
     const replacing = this.relay.configured;
@@ -847,6 +865,14 @@ export class Controller {
         case 'autoUpdate':
           if (typeof v !== 'boolean') throw new Error(`${k} must be true or false.`);
           break;
+        case 'macSpeakers': case 'streamVolume': {
+          const top = k === 'macSpeakers' ? 1 : 1.5;
+          if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > top) {
+            throw new Error(`${k === 'macSpeakers' ? 'The Mac speakers level' : 'The sent level'} must be from 0 to ${top * 100}%.`);
+          }
+          patch[k] = Math.round(v * 100) / 100;
+          break;
+        }
         case 'idleMinutes':
           // 0 is "Never" (Setup offers it). Tests may use a fraction of a minute so the idle timeout can be seen in
           // seconds.
@@ -889,6 +915,12 @@ export class Controller {
       this.app.command('session', { active: true, viewer: this.active.label, route: this.active.route, curtain: after.curtain });
     }
     if ('loginItem' in patch) this.app.command('login-item', { on: after.loginItem });
+    // Sound levels: straight to the app during a session, and to the owner's viewer so its sliders agree.
+    if (('macSpeakers' in patch && after.macSpeakers !== before.macSpeakers) ||
+        ('streamVolume' in patch && after.streamVolume !== before.streamVolume)) {
+      if (this.captureOn) this.app.command('audio-levels', { speakers: after.macSpeakers, stream: after.streamVolume });
+      this.active?.sendStatus({ levels: this.levels() });
+    }
     if ('autoUpdate' in patch && after.autoUpdate !== before.autoUpdate) {
       s.activity('settings', after.autoUpdate ? 'Automatic updates turned on (only while nobody is connected)'
         : 'Automatic updates turned off');

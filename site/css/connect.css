@@ -430,3 +430,11 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 /* Headings that split the More menu into groups */
 .menu .menu-head { margin: 6px 0 0; font-size: .74rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #9aa3b2; }
 .menu .menu-head:first-child { margin-top: 0; }
+
+/* Sound levels in the More menu: label, slider, percentage */
+.menu .levels { display: flex; flex-direction: column; gap: 4px; }
+.menu .levels[hidden] { display: none; }
+.menu .level { display: grid; grid-template-columns: minmax(0, 1fr) minmax(90px, 140px) 3.6em; align-items: center; gap: 10px; min-height: 40px; font-weight: 600; }
+.menu .level input[type=range] { width: 100%; accent-color: #2dd4bf; }
+.menu .level input[type=range]:disabled { opacity: .4; }
+.menu .level output { text-align: right; font-variant-numeric: tabular-nums; color: #9aa3b2; font-size: .9rem; }

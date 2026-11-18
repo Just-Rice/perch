@@ -91,6 +91,7 @@ export function startDemo(app) {
     t: 'ready', name: 'demo-mac-0000', hv: 'demo', display: { id: display.id, width: display.width, height: display.height },
     displays: DISPLAYS, quality: 'balanced', audio: params.get('sound') === 'blocked', input: params.get('viewonly') !== '1',
     locked: params.get('locked') === '1',
+    levels: { speakers: 1, stream: 1, speakersAvailable: true },
   };
   // Two pretend windows for "show one window"; choosing one makes the picture that window's size and shape.
   const WINDOWS = [
@@ -100,7 +101,7 @@ export function startDemo(app) {
   let shown = null;
   const session = {
     stream,
-    caps: ['window', 'textfocus', 'clipboard', 'clipimg'],
+    caps: ['window', 'textfocus', 'clipboard', 'clipimg', 'levels'],
     controlBacklog: () => 0,
     clipboard: 'Text copied on the demo Mac',
     onmessage: () => {},
@@ -114,6 +115,12 @@ export function startDemo(app) {
         shown = null;
         setSize(display);
         setTimeout(() => this.onmessage({ t: 'status', width: display.width, height: display.height, window: null }), 50);
+      }
+      if (m.t === 'levels') {
+        // As the Mac does: keep them, and say back what they are now.
+        if (Number.isFinite(m.speakers)) ready.levels.speakers = Math.min(1, Math.max(0, m.speakers));
+        if (Number.isFinite(m.stream)) ready.levels.stream = Math.min(1.5, Math.max(0, m.stream));
+        setTimeout(() => this.onmessage({ t: 'status', levels: { ...ready.levels } }), 30);
       }
       if (m.t === 'clip-get') setTimeout(() => this.onmessage({ t: 'clip', ok: true, text: this.clipboard }), 30);
       if (m.t === 'clip-part') (this.clipParts ??= []).push(m);

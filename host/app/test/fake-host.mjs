@@ -804,6 +804,32 @@ async function detailCapChecks() {
   await settled();
 }
 
+// Sound levels (Mac speakers, what is sent): taken with the capture command and on their own mid-session, without
+// stopping the capture or the sound. (The test tone has no speakers to keep quiet: the tap isn't used here.)
+async function soundLevelChecks() {
+  command('session', { active: true, viewer: 'Chrome on Pixel', route: 'passkey' });
+  let since = got.events.length;
+  command('capture', { on: true, maxEdge: 1280, fps: 30, kbps: 4000, audio: true, speakers: 0, stream: 1.5 });
+  await event('capture-started', { since, ms: 5000 });
+  let mark = got.audio.length;
+  await sleep(600);
+  check('sound levels: sound flows with levels in the capture command', got.audio.length - mark > 10, `${got.audio.length - mark} packets`);
+  since = got.events.length;
+  mark = got.audio.length;
+  command('audio-levels', { stream: 0 });
+  command('audio-levels', { speakers: 1, stream: 0.4 });
+  command('audio-levels', { speakers: 'loud' });
+  await sleep(800);
+  check('sound levels: changed mid-session, the capture and the sound carry on',
+    !got.events.slice(since).some(x => x.ev.e === 'capture-stopped' || x.ev.e === 'capture-error') && got.audio.length - mark > 20,
+    `${got.audio.length - mark} packets`);
+  since = got.events.length;
+  command('capture', { on: false });
+  await event('capture-stopped', { since });
+  command('session', { active: false });
+  await settled();
+}
+
 // 30 to 60 frames a second and back, on the running capture: no stop, sound keeps coming, frames at the new rate.
 async function fpsChangeChecks() {
   command('session', { active: true, viewer: 'Chrome on Pixel', route: 'passkey' });
@@ -1132,6 +1158,9 @@ async function main() {
   await section('special keys', () => systemKeyChecks());
   await section('H.264 profile', () => profileChecks());
   await section('detail cap', () => detailCapChecks());
+  // Synthetic only: speakers below 100% on the real screen would start a real sound tap, and macOS would ask for
+  // System Audio Recording in the middle of a test run.
+  if (h.synthetic === true) await section('sound levels', () => soundLevelChecks());
   if (h.synthetic === true) await section('frame rate', () => fpsChangeChecks());
   await section('clipboard', () => clipboardChecks());
   await section('windows', () => windowChecks(h));

@@ -502,6 +502,13 @@ export class Session {
         this._presetRates();
         this.hub.captureChanged(this);
         return;
+      case 'levels':
+        // The owner's sound sliders: the Mac's speakers (0–1) and what is sent here (0–1.5).
+        this.hub.setLevels?.(this, {
+          speakers: Number.isFinite(msg.speakers) ? Math.min(1, Math.max(0, msg.speakers)) : undefined,
+          stream: Number.isFinite(msg.stream) ? Math.min(1.5, Math.max(0, msg.stream)) : undefined,
+        });
+        return;
       case 'view': {
         // How big the picture is on the viewer's screen: no point sending more pixels than that.
         if (!Number.isFinite(msg.edge)) return;

@@ -53,11 +53,15 @@ final class AudioPipeline {
     private let encoder: OpusEncoder
     private let clock = MonotonicClock()
     var onPacket: ((UInt64, Data) -> Void)?
+    /// How loud what is sent is ("sent to this device", AudioLevels.stream).
+    var gain = GainStage()
 
     init() throws { encoder = try OpusEncoder(channels: 2, bitRate: 64_000) }
 
-    /// `pts` is the time of the first frame in `pcm` (interleaved stereo).
+    /// `pts` is the time of the first frame in `pcm` (interleaved stereo, 48 kHz).
     func feed(_ pcm: [Float], pts: UInt64) {
+        var pcm = pcm
+        gain.apply(&pcm)
         // Frames still waiting from the previous buffer come first in the next packet.
         var t = Double(pts) - Double(encoder.bufferedFrames) * 1_000_000 / Double(OpusEncoder.sampleRate)
         for packet in encoder.encode(pcm) {
@@ -101,6 +105,13 @@ final class CaptureSession: @unchecked Sendable {
     private var encoder: H264Encoder
     private var capturer: ScreenCapturer?
     private var audio: AudioPipeline?
+    /// The two sound levels, and, once the Mac's speakers are asked to be quieter than usual, the Core Audio tap that
+    /// takes the sound instead of ScreenCaptureKit (keeping it off the speakers) and Perch's own copy for them. Audio
+    /// queue only.
+    private var levels = AudioLevels.normal
+    private var tap: AnyObject?            // SystemAudioTap (macOS 14.2+)
+    private var monitor: SpeakerMonitor?
+    private var resampler: Resampler?
     private var videoTimers: [DispatchSourceTimer] = []
     private var toneTimer: DispatchSourceTimer?
     private var lastPixelBuffer: CVPixelBuffer?
@@ -284,7 +295,7 @@ final class CaptureSession: @unchecked Sendable {
             videoTimers = []
             lastPixelBuffer = nil
         }
-        audioQueue.sync { toneTimer?.cancel(); toneTimer = nil }
+        audioQueue.sync { toneTimer?.cancel(); toneTimer = nil; stopTap() }
         await capturer?.stop()
         capturer = nil
         videoQueue.sync { encoder.invalidate() }
@@ -359,7 +370,66 @@ final class CaptureSession: @unchecked Sendable {
 
     // MARK: audio queue
 
+    /// New sound levels (any thread). Speakers below full level start the tap, which then runs until capture stops.
+    func setLevels(_ new: AudioLevels) {
+        audioQueue.async { [self] in
+            levels = new
+            audio?.gain.target = Float(new.stream)
+            monitor?.level = new.speakers
+            if new.quietSpeakers, tap == nil, request.audio, !synthetic, SoundTap.available { startTap() }
+        }
+    }
+
+    private func startTap() {
+        guard #available(macOS 14.2, *) else { return }
+        // Perch's own copy for the speakers starts first: Core Audio then knows Perch as a process using sound, and
+        // the tap can leave it out.
+        let monitor = SpeakerMonitor()
+        do { try monitor.start(sampleRate: Double(OpusEncoder.sampleRate)) } catch { log("Mac speakers copy unavailable: \(error)") }
+        let t = SystemAudioTap()
+        do {
+            try t.start(muted: true)
+        } catch {
+            monitor.stop()
+            log("could not take the Mac's sound with a tap (\(error)); its speakers keep playing")
+            return
+        }
+        if !t.excludesPerch {
+            // Perch's copy would be tapped too and go round in circles: the speakers stay silent instead.
+            monitor.stop()
+            log("sound tap: Perch couldn't be left out, so the Mac's speakers stay silent")
+        } else {
+            monitor.level = levels.speakers
+            self.monitor = monitor
+        }
+        resampler = t.sampleRate == Double(OpusEncoder.sampleRate) ? nil : Resampler(from: t.sampleRate)
+        t.onPCM = { [weak self] pcm, pts in
+            guard let self else { return }
+            self.audioQueue.async { self.tapped(pcm, pts: pts) }
+        }
+        tap = t
+        log("sound: taken with a tap (\(Int(t.sampleRate)) Hz) and kept off the Mac's speakers; Mac speakers \(Int(levels.speakers * 100))%, sent \(Int(levels.stream * 100))%")
+    }
+
+    private func tapped(_ pcm: [Float], pts: UInt64) {
+        guard tap != nil else { return }
+        let at48 = resampler?.convert(pcm) ?? pcm
+        monitor?.push(at48)
+        audio?.feed(at48, pts: pts)
+    }
+
+    private func stopTap() {
+        if #available(macOS 14.2, *), let t = tap as? SystemAudioTap { t.onPCM = nil; t.stop() }
+        if tap != nil { log("sound: tap stopped; the Mac's speakers play as before") }
+        tap = nil
+        monitor?.stop()
+        monitor = nil
+        resampler = nil
+    }
+
     private func audioArrived(_ sb: CMSampleBuffer) {
+        // While the tap runs it is the sound (ScreenCaptureKit's copy would play twice).
+        if tap != nil { return }
         guard let pcm = ScreenCapturer.interleavedFloat32(from: sb) else { return }
         audio?.feed(pcm, pts: micros(CMSampleBufferGetPresentationTimeStamp(sb)) ?? hostMicros())
     }
@@ -405,6 +475,15 @@ public final class CaptureController: @unchecked Sendable {
     private var generation = 0
     private var current: CaptureSession?
     private var pendingKbps: Int?
+    /// The sound levels the host last asked for (lock); every session gets them.
+    private var levels = AudioLevels.normal
+    public var audioLevels: AudioLevels { lock.withLock { levels } }
+
+    /// New sound levels: "Mac speakers" and "sent to this device". Any thread.
+    public func setAudioLevels(_ new: AudioLevels) {
+        let cur = lock.withLock { () -> CaptureSession? in levels = new; return current }
+        cur?.setLevels(new)
+    }
     /// What the host last asked for, so capture can be restarted by itself when the system stops it.
     private var excludedWindows: [CGWindowID] = []
     private var lastRequest: CaptureRequest?
@@ -597,7 +676,8 @@ public final class CaptureController: @unchecked Sendable {
                 DispatchQueue.main.async { if let self, let s { self.failed(s, error) } }
             }
             try await s.start()
-            let kbps = lock.withLock { () -> Int? in current = s; startedAt = Date(); return pendingKbps }
+            let (kbps, sound) = lock.withLock { () -> (Int?, AudioLevels) in current = s; startedAt = Date(); return (pendingKbps, levels) }
+            s.setLevels(sound)
             if let kbps { s.setBitrate(kbps: kbps) }
             log("capture started: display \(display.id) at \(s.width)x\(s.height), \(request.fps) fps, \(request.kbps) kbit/s\(Self.capNote(request)), audio \(request.audio)")
             emitStarted(s)

@@ -174,6 +174,8 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
             "ipc": IPC.version,
             "macos": "\(v.majorVersion).\(v.minorVersion).\(v.patchVersion)",
             "synthetic": options.synthetic,
+            // The Mac's sound can be kept off its speakers while a viewer hears it (a Core Audio tap, macOS 14.2+).
+            "soundTap": SoundTap.available && !options.synthetic,
             "permissions": watch.permissions.json,
             "displays": watch.currentDisplays.map(\.json),
             "loginItem": LoginItem.current(bundled: bundled),
@@ -241,6 +243,10 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
             // Only an explicit `on: true` starts showing the screen; a malformed command must never switch it on.
             switch JSONValue.bool(cmd["on"]) {
             case true?:
+                // The sound levels come with it (and alone in `audio-levels` when they change mid-session).
+                if cmd["speakers"] != nil || cmd["stream"] != nil {
+                    capture.setAudioLevels(AudioLevels(command: cmd, base: capture.audioLevels))
+                }
                 let request = CaptureRequest(command: cmd)
                 // A window just chosen comes to the front, so what the viewer sees is what their clicks reach.
                 if let wid = request.window, wid != capture.windowID { raiseWindow(wid) }
@@ -248,6 +254,10 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
             case false?: capture.stop(reason: "requested")
             case nil: warn("capture without on")
             }
+        case "audio-levels":
+            let levels = AudioLevels(command: cmd, base: capture.audioLevels)
+            capture.setAudioLevels(levels)
+            Log.shared.info("sound levels: Mac speakers \(Int(levels.speakers * 100))%, sent \(Int(levels.stream * 100))%")
         case "clipboard-get":
             var e: [String: Any] = ["e": "clipboard", "ok": true, "text": clipboardText()]
             if JSONValue.bool(cmd["images"]) == true, let png = clipboardImage() {

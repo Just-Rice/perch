@@ -34,6 +34,19 @@ export function settings(ctx) {
   }
 
   const switches = [...document.querySelectorAll('input[data-setting]')];
+  // The two sound sliders: shown as percentages, saved when let go (a level of 0–1, or 0–1.5 for what is sent).
+  const sliders = [...document.querySelectorAll('input[type=range][data-level]')];
+  const showLevel = (input) => setText($(`${input.id}Out`), `${input.value}%`);
+  for (const input of sliders) {
+    input.addEventListener('input', () => showLevel(input));
+    input.addEventListener('change', () => {
+      const before = ctx.state?.settings?.[input.dataset.level];
+      save(input, input.dataset.level, Number(input.value) / 100, () => {
+        if (typeof before === 'number') input.value = String(Math.round(before * 100));
+        showLevel(input);
+      });
+    });
+  }
   for (const input of switches) {
     input.addEventListener('change', () => {
       const want = input.checked;
@@ -64,6 +77,22 @@ export function settings(ctx) {
     for (const input of switches) {
       if (!pending.has(input.dataset.setting)) input.checked = s[input.dataset.setting] === true;
     }
+    for (const input of sliders) {
+      const v = s[input.dataset.level];
+      // Not while it's being dragged or saved: a live update would snap it back.
+      if (typeof v === 'number' && !pending.has(input.dataset.level) && document.activeElement !== input) {
+        input.value = String(Math.round(v * 100));
+      }
+      showLevel(input);
+    }
+    // Keeping the Mac's speakers quiet needs the sound tap (macOS 14.2 and later).
+    const tap = st.soundTap === true;
+    $('setSpeakers').disabled = !tap;
+    setText($('soundHint'), tap
+      ? 'Below 100%, Perch keeps this Mac\'s own sound off its speakers while you\'re connected (0% is silent) and ' +
+        'plays it at this level instead. The first time, macOS asks to let Perch record this Mac\'s sound: allow it at ' +
+        'the Mac. The volume keys on the Mac still work as usual.'
+      : 'This Mac\'s speakers always play as usual while you\'re connected: keeping them quiet needs macOS 14.2 or later.');
     if (!pending.has('idleMinutes') && typeof s.idleMinutes === 'number') {
       const v = String(s.idleMinutes);
       // A value Perch allows but this list doesn't offer still shows correctly.

@@ -33,6 +33,7 @@ export class WorkerRelay {
   get configured() { return !!this.store.workerRelay; }
   get base() { return this.store.workerRelay?.url ?? null; }
   get backup() { return this.configured ? this.store.workerRelayBackup : null; }
+  get tunnel() { return this.configured ? this.store.workerRelayTunnel : null; }
 
   async _json(url, init = {}) {
     let res;
@@ -104,6 +105,41 @@ export class WorkerRelay {
     this._picked = null;
   }
 
+  // A relay on this Mac behind a Cloudflare Quick Tunnel (relay/node, QUICK_TUNNEL=1): `local` is its loopback address.
+  // Its public https://….trycloudflare.com address is new each time the tunnel starts, so it is asked for whenever an
+  // offer needs a backup, rather than saved.
+  async saveTunnel(local) {
+    if (!this.configured) throw new Error('Set up the main relay first.');
+    let u;
+    try { u = new URL(String(local).trim()); } catch {}
+    if (!u || u.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(u.hostname) || u.pathname !== '/' || u.search) {
+      throw new Error('That should be the relay’s address on this Mac, like http://127.0.0.1:8788');
+    }
+    const base = `http://${u.host}`;
+    const url = await this._tunnelUrl(base);
+    if (!url) throw new Error('That relay has no Quick Tunnel running yet. Start it with QUICK_TUNNEL=1 and try again.');
+    await this.check({ url, secret: this.store.workerRelay.secret });
+    this.store.setWorkerRelayTunnel(base);
+    this._picked = null;
+  }
+
+  removeTunnel() {
+    this.store.setWorkerRelayTunnel(null);
+    this._picked = null;
+  }
+
+  async _tunnelUrl(local = this.tunnel) {
+    if (!local) return null;
+    try {
+      const r = await this.fetchImpl(`${local}/v1/public`, { signal: AbortSignal.timeout(PICK_TIMEOUT_MS) });
+      const url = r.status === 200 ? (await r.json())?.url : null;
+      const base = relayBase(url);
+      return base && base === url && base !== this.base ? base : null;
+    } catch {
+      return null;
+    }
+  }
+
   async _up(url) {
     try {
       const r = await this.fetchImpl(`${url}/v1/check?auth=${await checkAuth(this.store.workerRelay.secret)}`,
@@ -114,22 +150,29 @@ export class WorkerRelay {
     }
   }
 
-  // Which relay this connection's offer names: the main one, unless it is down and the backup is up.
+  // Which relay this connection's offer names: the main one, unless it is down and a backup (the saved one, then the
+  // Quick Tunnel) is up.
   async pick() {
     const main = this.base;
     const backup = this.backup;
-    if (!backup) return main;
+    const tunnel = this.tunnel;
+    if (!backup && !tunnel) return main;
     const p = this._picked;
-    if (p && p.main === main && p.backup === backup && this.now() - p.at < PICK_FOR_MS) return p.url;
+    if (p && p.main === main && p.backup === backup && p.tunnel === tunnel && this.now() - p.at < PICK_FOR_MS) return p.url;
     let url = main;
-    if (!(await this._up(main)) && (await this._up(backup))) url = backup;
-    if (url !== p?.url) this.log?.info(`worker relay: offers now name ${url === main ? 'the main relay' : 'the backup relay'}`);
-    this._picked = { main, backup, url, at: this.now() };
+    if (!(await this._up(main))) {
+      for (const next of [backup, tunnel ? await this._tunnelUrl() : null]) {
+        if (next && await this._up(next)) { url = next; break; }
+      }
+    }
+    if (url !== p?.url) this.log?.info(`worker relay: offers now name ${url === main ? 'the main relay' : url}`);
+    this._picked = { main, backup, tunnel, url, at: this.now() };
     return url;
   }
 
   async remove() {
     this.store.setWorkerRelayBackup(null);
+    this.store.setWorkerRelayTunnel(null);
     this._picked = null;
     await this.store.setWorkerRelay(null);
     this.lastError = null;
@@ -142,6 +185,7 @@ export class WorkerRelay {
       url: this.base,
       setAt: this.store.config.workerRelay?.setAt ?? null,
       backup: this.backup,
+      tunnel: this.tunnel,
       working: this.configured ? (this.lastError ? false : this.lastOkAt ? true : null) : null,
       error: this.lastError,
     };

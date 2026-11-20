@@ -115,6 +115,51 @@ test('a backup relay with the same secret: offers name it only while the main re
   assert.equal(s.config.workerRelayBackup, null, 'removing the relay removes its backup');
 });
 
+test('a Quick Tunnel backup: its changing address is asked of the relay on this Mac when the main relay is down', async () => {
+  const s = await store();
+  const LOCAL = 'http://127.0.0.1:8788';
+  const main = fakeWorker();
+  const tunnelRelay = fakeWorker();
+  let publicUrl = null, mainDown = false, t = 0;
+  const fetchImpl = (url, opts) => {
+    if (url === `${LOCAL}/v1/public`) return { ok: true, status: 200, json: async () => ({ url: publicUrl }) };
+    if (publicUrl && url.startsWith(publicUrl)) return tunnelRelay.fetchImpl(url, opts);
+    if (url.includes('trycloudflare.com')) throw new Error('gone');
+    if (mainDown) throw new Error('offline');
+    return main.fetchImpl(url, opts);
+  };
+  const r = new WorkerRelay({ store: s, fetchImpl, now: () => t });
+  await r.save(BASE);
+  tunnelRelay.secret = main.secret;
+  await assert.rejects(r.saveTunnel('https://example.com'), /relay’s address on this Mac/);
+  await assert.rejects(r.saveTunnel(LOCAL), /no Quick Tunnel running yet/);
+  publicUrl = 'https://first-words.trycloudflare.com';
+  await r.saveTunnel(`${LOCAL}/`);
+  assert.equal(r.tunnel, LOCAL);
+  assert.equal(r.state().tunnel, LOCAL);
+
+  const sid = 'S'.repeat(22);
+  assert.equal((await r.prepare(sid, null)).base, BASE, 'main relay up: offers name it');
+  mainDown = true;
+  t += 31000;
+  assert.equal((await r.prepare(sid, null)).base, publicUrl, 'main relay down: the tunnel’s current address');
+  publicUrl = 'https://second-words.trycloudflare.com'; // the tunnel restarted with a new address
+  t += 31000;
+  const prep = await r.prepare(sid, null);
+  assert.equal(prep.base, 'https://second-words.trycloudflare.com');
+  assert.equal((await W.readOffer(prep.offerText, { sid })).url, 'https://second-words.trycloudflare.com');
+  publicUrl = null; // between tunnels
+  t += 31000;
+  assert.equal((await r.prepare(sid, null)).base, BASE, 'no tunnel address: the main relay, as before');
+
+  r.removeTunnel();
+  assert.equal(r.tunnel, null);
+  publicUrl = 'https://third-words.trycloudflare.com';
+  await r.saveTunnel(LOCAL);
+  await r.remove();
+  assert.equal(s.config.workerRelayTunnel, null, 'removing the relay removes the tunnel too');
+});
+
 test('the offer is signed with the Mac’s own certificate, so a viewer holding its pin accepts only it', async () => {
   const s = await store();
   const worker = fakeWorker();

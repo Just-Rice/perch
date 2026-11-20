@@ -836,6 +836,22 @@ export class Controller {
     return { ok: true };
   }
 
+  // A relay on this Mac behind a Cloudflare Quick Tunnel: its address changes, so it gets no sign-in site or broker
+  // (devices sign in at the main relay's site, and only the connection itself goes through the tunnel).
+  async workerRelayTunnelSet(local) {
+    await this.workerRelay.saveTunnel(local);
+    this.store.activity('settings', 'Quick Tunnel backup relay set up');
+    this._changed();
+    return { ok: true };
+  }
+
+  async workerRelayTunnelRemove() {
+    if (!this.workerRelay.tunnel) return;
+    this.workerRelay.removeTunnel();
+    this.store.activity('settings', 'Quick Tunnel backup relay removed');
+    this._changed();
+  }
+
   async workerRelayBackupRemove() {
     const before = this.workerRelay.backup;
     if (!before) return;

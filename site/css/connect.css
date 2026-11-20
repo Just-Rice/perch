@@ -213,6 +213,11 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .viewer.tb-right .handle span { margin: 0 6px 0 0; }
 .viewer.touch.tb-vertical .handle { width: 44px; }
 .viewer.tb-on .handle, .viewer.tb-pinned .handle { visibility: hidden; }
+/* With a mouse the very edge brings the bar back: no tab in the way of clicks meant for the Mac. */
+.viewer:not(.touch) .handle { display: none; }
+/* A bar at the bottom that comes and goes sits on top of the keys bar, not over it. */
+.viewer.tb-bottom:not(.tb-pinned):has(.keysbar:not([hidden])) .toolbar { bottom: calc(var(--kb-inset, 0px) + var(--keys-up, 0px)); }
+.viewer.tb-bottom:not(.tb-pinned):has(.keysbar:not([hidden])) .handle { bottom: calc(var(--kb-inset, 0px) + var(--keys-up, 0px)); }
 
 /* More menu */
 .menu {

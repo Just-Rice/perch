@@ -58,7 +58,7 @@ test('desktop: the viewer shows the test picture, with the toolbar', async () =>
   const tbBottom = await page.eval(`document.getElementById('toolbar').getBoundingClientRect().bottom`);
   const surfTop = await page.eval(`document.getElementById('surface').getBoundingClientRect().top`);
   assert.ok(Math.abs(tbBottom - surfTop) < 1.5, `picture starts below the bar (${tbBottom} vs ${surfTop})`);
-  // Chosen to hide itself, the toolbar tucks itself away, and comes back when the mouse goes near the top.
+  // Chosen to hide itself, the toolbar tucks itself away, and comes back when the mouse touches the very top.
   await page.eval(`window.__perch.viewer._showToolbar()`);
   await page.click('#tbMore');
   await page.click('#optAutoHide');
@@ -69,6 +69,9 @@ test('desktop: the viewer shows the test picture, with the toolbar', async () =>
   await page.waitFor(`!document.getElementById('viewer').classList.contains('tb-on')`, { timeoutMs: 8000, what: 'toolbar hidden' });
   await page.shot('viewer-demo-clean-desktop');
   await page.mouse('mouseMoved', 640, 10);
+  await sleep(150);
+  assert.equal(await page.eval(`document.getElementById('viewer').classList.contains('tb-on')`), false, 'near the top is not enough');
+  await page.mouse('mouseMoved', 640, 1);
   await page.waitFor(`document.getElementById('viewer').classList.contains('tb-on')`, { what: 'toolbar back' });
   await page.eval(`localStorage.removeItem('perch.prefs.v1')`); // the next tests start from the usual
   assert.deepEqual(page.problems(), []);
@@ -906,6 +909,35 @@ test('desktop: the toolbar on any edge, chosen keys, swipes, a hidden pointer an
   assert.notEqual(await page.eval(`getComputedStyle(document.getElementById('surface')).cursor`), 'none');
   assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}`), ['Escape↓', 'Escape↑']);
   await page.eval(`localStorage.removeItem('perch.prefs.v1')`); // the next tests start from the usual
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+// A bar at the bottom that hides itself: it comes back only when the mouse touches the very edge, with no tab in the
+// way of clicks, and with the keys bar showing it sits on top of the keys bar rather than over it.
+test('the bar at the bottom, hiding itself: back at the very edge only, and above the keys bar', async () => {
+  const page = await openPage(stack, demoUrl({ log: '0' }));
+  await ready(page);
+  const on = () => page.eval(`document.getElementById('viewer').classList.contains('tb-on')`);
+  await page.eval(`(() => { const v = window.__perch.viewer; v.prefs.set('tbEdge', 'bottom'); v.prefs.set('tbAutoHide', true);
+    document.getElementById('optEdge').value = 'bottom'; v._placeToolbar(); v._showToolbar(); })()`);
+  await page.click('#tbKeys');
+  await page.waitFor(`!document.getElementById('keysBar').hidden`, { what: 'the keys bar' });
+  await sleep(300);
+  const rect = id => page.eval(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return { top: b.top, bottom: b.bottom }; })()`);
+  const tb = await rect('toolbar'), keys = await rect('keysBar');
+  assert.ok(tb.bottom <= keys.top + 1, `the bar sits above the keys bar: ${JSON.stringify({ tb, keys })}`);
+  assert.equal(await page.eval(`getComputedStyle(document.getElementById('handle')).display`), 'none', 'no tab with a mouse');
+  await page.shot('viewer-bar-bottom-keys');
+  // Hidden: the mouse near (but not at) the bottom leaves it hidden; the very edge brings it back.
+  await page.eval(`window.__perch.viewer._hideToolbar(true)`);
+  assert.equal(await on(), false);
+  const H = await page.eval('innerHeight');
+  await page.mouse('mouseMoved', 640, H - 30);
+  await sleep(150);
+  assert.equal(await on(), false, '30px from the edge: still hidden');
+  await page.mouse('mouseMoved', 640, H - 1);
+  await page.waitFor(`document.getElementById('viewer').classList.contains('tb-on')`, { what: 'the bar back at the edge' });
   assert.deepEqual(page.problems(), []);
   await page.close();
 });

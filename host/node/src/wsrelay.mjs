@@ -18,6 +18,8 @@ const PEER_TIMEOUT_MS = 20000;       // from opening the relay WebSocket to the 
 const PING_EVERY_MS = 25000;
 const AUDIO_BATCH = 3;               // Opus packets per message: fewer messages, 40 ms more sound delay at most
 const KEYFRAME_MIN_GAP_MS = 500;
+const PICK_FOR_MS = 30000;           // how long one look at which relay is up is trusted
+const PICK_TIMEOUT_MS = 3000;        // per relay, when looking
 
 // --- the setting ---
 
@@ -30,6 +32,8 @@ export class WorkerRelay {
 
   get configured() { return !!this.store.workerRelay; }
   get base() { return this.store.workerRelay?.url ?? null; }
+  get backup() { return this.configured ? this.store.workerRelayBackup : null; }
+  get tunnel() { return this.configured ? this.store.workerRelayTunnel : null; }
 
   async _json(url, init = {}) {
     let res;
@@ -84,7 +88,92 @@ export class WorkerRelay {
       e => { this.lastError = e.message; this.log?.warn(`worker relay: ${e.message}`); });
   }
 
+  // A backup relay: another copy (relay/node) that already holds this Mac's secret (its RELAY_SECRET). Offers name it
+  // while the main relay can't be reached, say when it has used up its day on Cloudflare's free plan.
+  async saveBackup(url) {
+    if (!this.configured) throw new Error('Set up the main relay first.');
+    const base = relayBase(url, { allowLocal: this.allowLocal });
+    if (!base) throw new Error('That address doesn’t look right.');
+    if (base === this.base) throw new Error('That is the main relay.');
+    await this.check({ url: base, secret: this.store.workerRelay.secret });
+    this.store.setWorkerRelayBackup(base);
+    this._picked = null;
+  }
+
+  removeBackup() {
+    this.store.setWorkerRelayBackup(null);
+    this._picked = null;
+  }
+
+  // A relay on this Mac behind a Cloudflare Quick Tunnel (relay/node, QUICK_TUNNEL=1): `local` is its loopback address.
+  // Its public https://….trycloudflare.com address is new each time the tunnel starts, so it is asked for whenever an
+  // offer needs a backup, rather than saved.
+  async saveTunnel(local) {
+    if (!this.configured) throw new Error('Set up the main relay first.');
+    let u;
+    try { u = new URL(String(local).trim()); } catch {}
+    if (!u || u.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(u.hostname) || u.pathname !== '/' || u.search) {
+      throw new Error('That should be the relay’s address on this Mac, like http://127.0.0.1:8788');
+    }
+    const base = `http://${u.host}`;
+    const url = await this._tunnelUrl(base);
+    if (!url) throw new Error('That relay has no Quick Tunnel running yet. Start it with QUICK_TUNNEL=1 and try again.');
+    await this.check({ url, secret: this.store.workerRelay.secret });
+    this.store.setWorkerRelayTunnel(base);
+    this._picked = null;
+  }
+
+  removeTunnel() {
+    this.store.setWorkerRelayTunnel(null);
+    this._picked = null;
+  }
+
+  async _tunnelUrl(local = this.tunnel) {
+    if (!local) return null;
+    try {
+      const r = await this.fetchImpl(`${local}/v1/public`, { signal: AbortSignal.timeout(PICK_TIMEOUT_MS) });
+      const url = r.status === 200 ? (await r.json())?.url : null;
+      const base = relayBase(url);
+      return base && base === url && base !== this.base ? base : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async _up(url) {
+    try {
+      const r = await this.fetchImpl(`${url}/v1/check?auth=${await checkAuth(this.store.workerRelay.secret)}`,
+        { signal: AbortSignal.timeout(PICK_TIMEOUT_MS) });
+      return r.status === 200 && (await r.json())?.ok === true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Which relay this connection's offer names: the main one, unless it is down and a backup (the saved one, then the
+  // Quick Tunnel) is up.
+  async pick() {
+    const main = this.base;
+    const backup = this.backup;
+    const tunnel = this.tunnel;
+    if (!backup && !tunnel) return main;
+    const p = this._picked;
+    if (p && p.main === main && p.backup === backup && p.tunnel === tunnel && this.now() - p.at < PICK_FOR_MS) return p.url;
+    let url = main;
+    if (!(await this._up(main))) {
+      for (const next of [backup, tunnel ? await this._tunnelUrl() : null]) {
+        if (next && await this._up(next)) { url = next; break; }
+      }
+    }
+    if (url !== p?.url) this.log?.info(`worker relay: offers now name ${url === main ? 'the main relay' : url}`);
+    this._picked = { main, backup, tunnel, url, at: this.now() };
+    return url;
+  }
+
   async remove() {
+    this.store.setWorkerRelayBackup(null);
+    this.store.setWorkerRelayTunnel(null);
+    this._picked = null;
     await this.store.setWorkerRelay(null);
     this.lastError = null;
     this.lastOkAt = null;
@@ -95,6 +184,8 @@ export class WorkerRelay {
       set: this.configured,
       url: this.base,
       setAt: this.store.config.workerRelay?.setAt ?? null,
+      backup: this.backup,
+      tunnel: this.tunnel,
       working: this.configured ? (this.lastError ? false : this.lastOkAt ? true : null) : null,
       error: this.lastError,
     };
@@ -105,16 +196,17 @@ export class WorkerRelay {
   async prepare(sid, dtlsKeys) {
     const login = this.store.workerRelay;
     if (!login) return null;
+    const url = await this.pick();
     const room = toB64url(new Uint8Array(randomBytes(16)));
     const { privateKey, pub } = await newEcdh();
     let cert = null, sig = null;
     if (dtlsKeys?.certPem && dtlsKeys?.keyPem) {
       cert = new Uint8Array(new X509Certificate(dtlsKeys.certPem).raw);
-      sig = new Uint8Array(sign('sha256', await offerSignedBytes({ sid, url: login.url, room, eph: pub }),
+      sig = new Uint8Array(sign('sha256', await offerSignedBytes({ sid, url, room, eph: pub }),
         { key: dtlsKeys.keyPem, dsaEncoding: 'ieee-p1363' }));
     }
-    const offerText = makeOffer({ sid, url: login.url, room, eph: pub, cert, sig });
-    return { offerText, base: login.url, room, privateKey, secret: login.secret };
+    const offerText = makeOffer({ sid, url, room, eph: pub, cert, sig });
+    return { offerText, base: url, room, privateKey, secret: login.secret };
   }
 }
 

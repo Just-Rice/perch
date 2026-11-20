@@ -89,6 +89,8 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 }
 .zoom { position: absolute; inset: 0; transform-origin: 0 0; will-change: transform; }
 .zoom video { width: 100%; height: 100%; object-fit: contain; background: #000; display: block; pointer-events: none; }
+.shape-fill .zoom video { object-fit: cover; }
+.shape-stretch .zoom video { object-fit: fill; }
 .viewer.view-only .surface { cursor: not-allowed; }
 
 /* Toolbar: on any edge (viewer.js sets where along it). Either it stays put, with the picture beside it, or it tucks

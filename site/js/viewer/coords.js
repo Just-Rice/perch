@@ -1,24 +1,47 @@
 // Where a finger or the mouse is on the Mac's screen.
 //
-// The video fills its box with `object-fit: contain`, so a picture with a different shape from the window gets black
-// bars (letterboxing) and only the middle part is the Mac's screen. On top of that the viewer can zoom in locally
+// The picture's shape on this screen ("shape"): "fit" shows it whole with `object-fit: contain`, so a picture with a
+// different shape from the window gets black bars (letterboxing) and only the middle part is the Mac's screen; "fill"
+// covers the window (`object-fit: cover`) and slides to show the part that doesn't fit (`object-position`, the "pan",
+// 0..1 each way); "stretch" squeezes it to the window's shape (`object-fit: fill`). On top of that the viewer can zoom in locally
 // (pinch on a phone): the box is moved and scaled with a CSS transform `translate(x, y) scale(s)` whose origin is the
 // box's top-left corner. These pure functions undo both, turning a pointer position in page (client) pixels into
 // display coordinates from 0 to 1, origin top-left, as docs/PROTOCOL.md ("Input and pointer channels") asks for.
 
 export const IDENTITY = Object.freeze({ scale: 1, x: 0, y: 0 });
 export const MAX_ZOOM = 5;
-
-// The rectangle the picture occupies inside a box of `width × height` when shown with object-fit: contain.
-// Until the first frame arrives the picture size is unknown (0): treat it as filling the whole box.
-export function containRect(width, height, videoWidth, videoHeight) {
-  if (!(videoWidth > 0 && videoHeight > 0) || !(width > 0 && height > 0)) return { x: 0, y: 0, width, height };
-  const scale = Math.min(width / videoWidth, height / videoHeight);
-  const w = videoWidth * scale, h = videoHeight * scale;
-  return { x: (width - w) / 2, y: (height - h) / 2, width: w, height: h };
-}
+export const SHAPES = ['fit', 'fill', 'stretch'];
+export const CENTER = Object.freeze({ x: 0.5, y: 0.5 });
+export const FIT = Object.freeze({ shape: 'fit', pan: CENTER });
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// The rectangle the picture occupies inside a box of `width × height` for each shape (see above); with "fill" it can
+// be bigger than the box, starting left of or above it. Until the first frame arrives the picture size is unknown (0):
+// treat it as filling the whole box.
+export function pictureRect(width, height, videoWidth, videoHeight, shape = 'fit', pan = CENTER) {
+  if (!(videoWidth > 0 && videoHeight > 0) || !(width > 0 && height > 0) || shape === 'stretch') return { x: 0, y: 0, width, height };
+  const scale = (shape === 'fill' ? Math.max : Math.min)(width / videoWidth, height / videoHeight);
+  const w = videoWidth * scale, h = videoHeight * scale;
+  const px = shape === 'fill' ? clamp(pan?.x ?? 0.5, 0, 1) : 0.5, py = shape === 'fill' ? clamp(pan?.y ?? 0.5, 0, 1) : 0.5;
+  return { x: (width - w) * px + 0, y: (height - h) * py + 0, width: w, height: h }; // + 0: no -0
+}
+
+export const containRect = (width, height, videoWidth, videoHeight) => pictureRect(width, height, videoWidth, videoHeight);
+
+// "fill": where the picture should slide so the spot under the pointer is that same fraction of the Mac's screen as of
+// the window: the pointer at the window's edge is at the Mac's edge, and nothing is out of reach. Undoes the zoom.
+export function followPan(clientX, clientY, box, view = IDENTITY) {
+  if (!(box.width > 0 && box.height > 0)) return CENTER;
+  const lx = (clientX - box.left - view.x) / view.scale, ly = (clientY - box.top - view.y) / view.scale;
+  return { x: round(clamp(lx / box.width, 0, 1)), y: round(clamp(ly / box.height, 0, 1)) };
+}
+
+// How many page pixels one picture pixel takes up, for each shape (both ways the same, except when stretched).
+export function shownScale(width, height, videoWidth, videoHeight, shape = 'fit') {
+  const r = pictureRect(width, height, videoWidth, videoHeight, shape);
+  return videoWidth > 0 && videoHeight > 0 ? [r.width / videoWidth, r.height / videoHeight] : [1, 1];
+}
 
 // Page pixels → display coordinates. `box` is the untransformed box ({left, top, width, height}, what
 // getBoundingClientRect() gives for the element that holds the zoomed wrapper), `view` the local zoom and pan.
@@ -26,15 +49,17 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 // `edgePx`: within this many page pixels of the picture's edge counts as the edge itself. The page's pointer can't go
 // past the last row of pixels, which (with the Mac's screen shrunk to fit) is a little short of the Mac's last row, so
 // the Dock or a full-screen app's menu bar, which wait for the pointer at the very edge, would never come.
-export function toDisplay(clientX, clientY, box, videoWidth, videoHeight, view = IDENTITY, edgePx = 0) {
+// `layout`: the picture's shape and, for "fill", where it has slid to ({shape, pan}).
+export function toDisplay(clientX, clientY, box, videoWidth, videoHeight, view = IDENTITY, edgePx = 0, layout = FIT) {
   const localX = (clientX - box.left - view.x) / view.scale;
   const localY = (clientY - box.top - view.y) / view.scale;
-  const pic = containRect(box.width, box.height, videoWidth, videoHeight);
+  const pic = pictureRect(box.width, box.height, videoWidth, videoHeight, layout.shape, layout.pan);
   let nx = pic.width > 0 ? (localX - pic.x) / pic.width : 0;
   let ny = pic.height > 0 ? (localY - pic.y) / pic.height : 0;
   const inside = nx >= 0 && nx <= 1 && ny >= 0 && ny <= 1;
   if (edgePx > 0 && pic.width > 0 && pic.height > 0) {
-    const ex = edgePx / (pic.width * view.scale), ey = edgePx / (pic.height * view.scale);
+    // The edge the pointer can reach is the window's when the picture is bigger than it ("fill").
+    const ex = edgePx / (Math.min(pic.width, box.width) * view.scale), ey = edgePx / (Math.min(pic.height, box.height) * view.scale);
     if (nx < ex) nx = 0; else if (nx > 1 - ex) nx = 1;
     if (ny < ey) ny = 0; else if (ny > 1 - ey) ny = 1;
   }
@@ -42,8 +67,8 @@ export function toDisplay(clientX, clientY, box, videoWidth, videoHeight, view =
 }
 
 // Display coordinates → page pixels (the inverse, used to place things over the picture and in tests).
-export function fromDisplay(x, y, box, videoWidth, videoHeight, view = IDENTITY) {
-  const pic = containRect(box.width, box.height, videoWidth, videoHeight);
+export function fromDisplay(x, y, box, videoWidth, videoHeight, view = IDENTITY, layout = FIT) {
+  const pic = pictureRect(box.width, box.height, videoWidth, videoHeight, layout.shape, layout.pan);
   return {
     x: box.left + view.x + (pic.x + x * pic.width) * view.scale,
     y: box.top + view.y + (pic.y + y * pic.height) * view.scale,

@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startStack, openPage, DESKTOP, PHONE, PHONE_LANDSCAPE, UA, sleep } from './lib/browser.mjs';
-import { toDisplay } from '../../site/js/viewer/coords.js';
+import { toDisplay, followPan } from '../../site/js/viewer/coords.js';
 
 let stack;
 test.before(async () => { stack = await startStack({ broker: false }); });
@@ -940,4 +940,63 @@ test('the bar at the bottom, hiding itself: back at the very edge only, and abov
   await page.waitFor(`document.getElementById('viewer').classList.contains('tb-on')`, { what: 'the bar back at the edge' });
   assert.deepEqual(page.problems(), []);
   await page.close();
+});
+
+// The picture's shape: on a screen of another shape (here 4:3, the demo Mac is about 3:2), "fill" covers the window and
+// slides after the pointer so every edge of the Mac can still be reached; "stretch" squeezes it to the window.
+test('picture shape: whole, fill (slides after the pointer) and stretch, on a 4:3 screen and a phone', async () => {
+  const page = await openPage(stack, demoUrl(), { view: { width: 1024, height: 768, mobile: false } });
+  await ready(page);
+  await floatingBar(page);
+  const fit = () => page.eval(`getComputedStyle(document.getElementById('video')).objectFit`);
+  const choose = shape => page.eval(`(() => { const s = document.getElementById('optShape'); s.value = '${shape}'; s.dispatchEvent(new Event('change')); })()`);
+  const moveTo = async (x, y) => {
+    const n = await count(page);
+    await page.mouse('mouseMoved', x, y);
+    await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'm')`, { what: 'a pointer move' });
+    return (await messages(page, n)).filter(m => m.t === 'm').pop();
+  };
+  assert.equal(await fit(), 'contain', 'whole screen by default');
+
+  await choose('fill');
+  assert.equal(await fit(), 'cover');
+  assert.match(await page.text('#shapeHelp'), /off the sides/);
+  const g = await geometry(page);
+  const { left, top, width, height } = g.box;
+  // The window's edges are the Mac's edges, and the middle its middle; the picture slid to show each.
+  const l = await moveTo(left + 1, top + height / 2);
+  assert.deepEqual([l.x, l.y], [0, 0.5]);
+  assert.match(await page.eval(`document.getElementById('video').style.objectPosition`), /^0\.\d+% 50(\.00)?%$/);
+  const r = await moveTo(left + width - 1, top + height / 2);
+  assert.equal(r.x, 1);
+  const at = [left + width * 0.3, top + height * 0.2];
+  const m = await moveTo(...at);
+  const want = toDisplay(at[0], at[1], g.box, g.vw, g.vh, g.view, 0, { shape: 'fill', pan: followPan(at[0], at[1], g.box) });
+  assert.deepEqual([m.x, m.y], [want.x, want.y]);
+  assert.ok(Math.abs(m.x - 0.3) < 0.002 && Math.abs(m.y - 0.2) < 0.002, `fill: ${m.x}, ${m.y}`);
+  await page.shot('viewer-shape-fill-4x3');
+
+  await choose('stretch');
+  assert.equal(await fit(), 'fill');
+  assert.match(await page.text('#shapeHelp'), /squeezed by about \d+%/);
+  const s = await moveTo(left + width * 0.25, top + height * 0.75);
+  assert.ok(Math.abs(s.x - 0.25) < 0.002 && Math.abs(s.y - 0.75) < 0.002, `stretch: ${s.x}, ${s.y}`);
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).shape`), 'stretch', 'remembered');
+
+  // A phone held upright: "fill" crops the sides; two fingers drag the picture sideways instead of scrolling the Mac.
+  const phone = await openPage(stack, demoUrl(), { view: PHONE, ua: UA.iphone, name: 'phone' });
+  await ready(phone);
+  await phone.eval(`(() => { const s = document.getElementById('optShape'); s.value = 'fill'; s.dispatchEvent(new Event('change')); })()`);
+  assert.equal(await phone.eval(`getComputedStyle(document.getElementById('video')).objectFit`), 'cover');
+  const before = await phone.eval('window.__perch.viewer.pan.x');
+  const n = await count(phone);
+  await phone.touch('touchStart', [{ x: 150, y: 450, id: 0 }, { x: 240, y: 450, id: 1 }]);
+  for (let i = 1; i <= 6; i++) {
+    await phone.touch('touchMove', [{ x: 150 + 15 * i, y: 450, id: 0 }, { x: 240 + 15 * i, y: 450, id: 1 }]);
+    await sleep(20);
+  }
+  await phone.touch('touchEnd', []);
+  await sleep(200);
+  assert.ok(await phone.eval('window.__perch.viewer.pan.x') < before, 'dragged right: the left part comes into view');
+  assert.deepEqual((await messages(phone, n)).filter(m => m.t === 'w' || m.t === 'b'), [], 'no scrolling or clicks on the Mac');
 });

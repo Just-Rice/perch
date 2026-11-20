@@ -89,6 +89,7 @@ export class Viewer {
       onSwipe: dir => this._swipe(dir),
       swipesOn: () => this.inputAllowed && this.prefs.get('swipe') in SWIPE_ACTIONS && this.prefs.get('swipe') !== 'off',
       onEdge: (p, push, locked) => this._edge(p, push, locked),
+      mouseSpeed: () => this.prefs.get('mouseSpeed'),
     });
     this.keys = new KeyboardInput({
       surface: this.surface, softkbd: this.$('softkbd'), keysBar: this.$('keysBar'), session,
@@ -792,6 +793,11 @@ export class Viewer {
     const canCapture = !this.touchFirst && !this.guest && 'requestPointerLock' in this.surface;
     $('tbCapture').hidden = !canCapture;
     $('captureClickWrap').hidden = !canCapture;
+    $('mouseSpeedWrap').hidden = !canCapture;
+    const speed = $('optMouseSpeed'), speedText = () => { $('mouseSpeedValue').textContent = `${Number(speed.value).toFixed(2).replace(/0$/, '')}×`; };
+    speed.value = String(this.prefs.get('mouseSpeed'));
+    speedText();
+    on('optMouseSpeed', 'input', () => { this.prefs.set('mouseSpeed', Number(speed.value)); speedText(); });
     $('optCaptureClick').checked = !!this.prefs.get('captureOnClick');
     on('optCaptureClick', 'change', e => this.prefs.set('captureOnClick', e.target.checked));
     on('tbCapture', 'click', () => (this.pointer?.locked ? document.exitPointerLock() : this._capture()));

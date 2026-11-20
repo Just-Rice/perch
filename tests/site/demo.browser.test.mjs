@@ -116,6 +116,19 @@ test('desktop: capturing the mouse, as games do: the Mac\u2019s pointer moves by
   assert.deepEqual(moves.map(m => [r(m.x), r(m.y), r(m.dx), r(m.dy)]), [[0.6, 0.5, 0.1, 0], [0.6, 0, 0, -1]]);
   const clicks = sent.filter(m => m.t === 'b');
   assert.deepEqual(clicks.map(m => [r(m.x), r(m.y)]), [[0.6, 0], [0.6, 0]], 'clicks land where the Mac\u2019s pointer is, not under the hidden one');
+  // Too fast (or slow)? More has the captured mouse's speed: at half, the same movement goes half as far.
+  assert.equal(await page.eval(`document.getElementById('mouseSpeedWrap').hidden`), false);
+  await page.eval(`(() => { const s = document.getElementById('optMouseSpeed'); s.value = '0.5'; s.dispatchEvent(new Event('input')); })()`);
+  assert.equal(await page.text('#mouseSpeedValue'), '0.5×');
+  await page.eval(`window.__perch.viewer._toggleMenu(true)`);
+  await page.shot('viewer-mouse-speed-menu');
+  await page.eval(`window.__perch.viewer._toggleMenu(false)`);
+  const n2 = await count(page);
+  await move(shown[0] / 10, shown[1] / 10);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n2}).some(m => m.t === 'm')`, { what: 'a slower move' });
+  const slow = (await messages(page, n2)).find(m => m.t === 'm');
+  assert.deepEqual([r(slow.x), r(slow.y), r(slow.dx), r(slow.dy)], [0.65, 0.05, 0.05, 0.05]);
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).mouseSpeed`), 0.5, 'remembered');
   if (real) {
     await page.eval(`document.exitPointerLock()`);
   } else {

@@ -10,6 +10,9 @@ import { SwipeDetector } from './shortcuts.js';
 // The last 2 page pixels at each side of the picture are the Mac's very edge (see coords.js).
 const EDGE_PX = 2;
 
+// A captured mouse's speed, chosen in More: from a fifth as fast to twice as fast as the page's own pointer.
+export const MIN_SPEED = 0.2, MAX_SPEED = 2;
+
 // Touchpad mode: the Mac's pointer moves this many times as far as the finger, across the picture.
 const TOUCHPAD_SPEED = 1.6;
 
@@ -24,8 +27,9 @@ export class PointerInput {
   // captured mouse tried to go past the picture's edge. It may answer a new position for a captured mouse (where it
   // comes in on the display beyond). Called with null when the pointer leaves the picture.
   constructor({ surface, video, session, view, size, enabled = () => true, onActivity = () => {}, touchpad = () => false,
-    onSwipe = () => {}, swipesOn = () => false, onEdge = () => null }) {
-    Object.assign(this, { surface, video, session, view, size, enabled, onActivity, touchpad, onSwipe, swipesOn, onEdge });
+    onSwipe = () => {}, swipesOn = () => false, onEdge = () => null, mouseSpeed = () => 1 }) {
+    // mouseSpeed(): how far a captured mouse moves the Mac's pointer, 1 = as far as on this screen.
+    Object.assign(this, { surface, video, session, view, size, enabled, onActivity, touchpad, onSwipe, swipesOn, onEdge, mouseSpeed });
     this.swipe = new SwipeDetector();
     this.clicks = new ClickCounter();
     this.wheel = new WheelAccumulator();
@@ -122,7 +126,8 @@ export class PointerInput {
     if (this.locked) {
       const [sw, sh] = this.shownSize();
       if (!(sw > 0 && sh > 0) || (!e.movementX && !e.movementY)) return;
-      const dx = e.movementX / sw, dy = e.movementY / sh;
+      const k = Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number(this.mouseSpeed()) || 1));
+      const dx = e.movementX * k / sw, dy = e.movementY * k / sh;
       const clamp = v => Math.min(1, Math.max(0, v));
       const rx = this.last.x + dx, ry = this.last.y + dy;
       this.last = { x: clamp(rx), y: clamp(ry) };

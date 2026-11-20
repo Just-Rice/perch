@@ -42,7 +42,8 @@ export function relayBase(url, { allowLocal = false } = {}) {
   try { u = new URL(String(url ?? '').trim()); } catch { return null; }
   if (u.username || u.password || u.search || u.hash || (u.pathname !== '/' && u.pathname !== '')) return null;
   const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
-  if (u.protocol === 'https:' && /^([a-z0-9-]+\.)+workers\.dev$/.test(u.hostname) && !u.port) return `https://${u.hostname}`;
+  // A Cloudflare Worker (relay/), or the Node.js relay (relay/node) on the owner's own computer behind a zrok share.
+  if (u.protocol === 'https:' && /^([a-z0-9-]+\.)+(workers\.dev|zrok\.io)$/.test(u.hostname) && !u.port) return `https://${u.hostname}`;
   if (allowLocal && local && (u.protocol === 'http:' || u.protocol === 'https:')) return `${u.protocol}//${u.host}`;
   return null;
 }

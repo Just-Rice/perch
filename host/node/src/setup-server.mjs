@@ -80,6 +80,8 @@ const ACTIONS = {
   relayRemove: [],
   workerRelaySet: [['url', 'string']],
   workerRelayRemove: [],
+  workerRelayBackupSet: [['url', 'string']],
+  workerRelayBackupRemove: [],
   updateSettings: [['patch', 'object']],
   disconnect: [],
   requestPermission: [['which', 'string']],

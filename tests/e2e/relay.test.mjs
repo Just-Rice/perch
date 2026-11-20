@@ -24,7 +24,10 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const WRANGLER = join(ROOT, 'relay/node_modules/.bin/wrangler');
 // PERCH_E2E_RELAY=https://<a fresh, unclaimed deploy>.workers.dev runs these against a relay on Cloudflare itself.
 const DEPLOYED = process.env.PERCH_E2E_RELAY || null;
-const skip = DEPLOYED || existsSync(WRANGLER) ? false : 'relay/node_modules is missing: run `npm ci` in relay/ first';
+// PERCH_E2E_RELAY_NODE=1 runs them against the plain Node.js relay (relay/node) instead of `wrangler dev`.
+const NODE_RELAY = !!process.env.PERCH_E2E_RELAY_NODE;
+const skip = DEPLOYED || (NODE_RELAY ? existsSync(join(ROOT, 'relay/node/node_modules/ws')) : existsSync(WRANGLER)) ? false
+  : `${NODE_RELAY ? 'relay/node' : 'relay'}/node_modules is missing: run \`npm ci\` there first`;
 
 let stack, app, relay, relayUrl;
 
@@ -40,7 +43,10 @@ function freePort() {
 async function startRelay() {
   const port = await freePort();
   const state = mkdtempSync(join(tmpdir(), 'perch-relay-'));
-  const proc = spawn(WRANGLER, ['dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', state, '--log-level', 'warn'],
+  const proc = NODE_RELAY
+    ? spawn(process.execPath, [join(ROOT, 'relay/node/server.mjs')], { stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', RELAY_DATA: state, RELAY_SECRET: '' } })
+    : spawn(WRANGLER, ['dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', state, '--log-level', 'warn'],
     { cwd: join(ROOT, 'relay'), stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
   let output = '';
   proc.stdout.on('data', d => { output += d; });

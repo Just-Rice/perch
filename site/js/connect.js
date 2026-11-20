@@ -8,8 +8,21 @@
 //   - a sandboxed frame without allow-same-origin has the opaque origin 'null' and is refused too.
 // The rest of the page (js/ui/app.js) is only loaded once the check passes.
 
+// Perch may also run inside a launcher made with Google Sites' "Embed code" (e.g. one that opens Perch in an
+// about:blank tab). Those embeds are served from the addresses below, which every Google Site shares, so this trusts
+// any Google Site. Only Chrome-based browsers list the frames' origins (location.ancestorOrigins); elsewhere such a
+// launcher is still refused. Passkeys don't work there (the Mac refuses cross-origin passkeys); the backup password does.
+const TRUSTED_FRAMERS = [/^https:\/\/sites\.google\.com$/, /^https:\/\/[a-z0-9-]+\.googleusercontent\.com$/];
+
+function trustedFramers() {
+  const list = location.ancestorOrigins;
+  if (!list || list.length === 0) return false;
+  return Array.from(list).every(o => o === window.origin || TRUSTED_FRAMERS.some(re => re.test(o)));
+}
+
 function allowedHere() {
   if (window.origin === 'null') return false;
+  if (window !== window.top && trustedFramers()) return true;
   try {
     let w = window;
     while (w !== w.top) {

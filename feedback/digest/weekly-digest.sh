@@ -82,8 +82,14 @@ EOF
 SETTINGS="$("$NODE" "$WORK/settings.mjs" "$NODE" "$HERE/guard-recipient.mjs")"
 PERCH_DIGEST_TO="$TO" PERCH_DIGEST_TOOL="$TOOL" "$CLAUDE" -p "$INSTRUCTIONS" --tools "ToolSearch" \
   --allowedTools "ToolSearch" "$TOOL" --settings "$SETTINGS" --output-format stream-json --verbose \
-  < "$WORK/data.txt" > "$WORK/run.jsonl" 2> "$WORK/run.err" || true
-cat > "$WORK/check.mjs" <<'EOF'
+  < "$WORK/data.txt" > "$WORK/run.jsonl" 2> "$WORK/run.err" &
+pid=$!
+# A connector waiting on a sign-in can hang forever: give up after 15 minutes.
+( sleep 900; kill "$pid" 2>/dev/null ) &
+watchdog=$!
+wait "$pid" || true
+{ kill "$watchdog" && wait "$watchdog"; } 2>/dev/null || true
+cat > "$WORK/check.cjs" <<'EOF'
 // Did the one allowed send happen and succeed? Prints what happened; exits 0 only then.
 const fs = require('fs');
 const [file, tool] = process.argv.slice(2);
@@ -99,7 +105,7 @@ for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
 console.log(`sends ok: ${ok}, failed: ${failed}; Claude said: ${last}`);
 process.exit(ok >= 1 ? 0 : 1);
 EOF
-if "$NODE" "$WORK/check.mjs" "$WORK/run.jsonl" "$TOOL"; then
+if "$NODE" "$WORK/check.cjs" "$WORK/run.jsonl" "$TOOL"; then
   echo "perch digest: sent"
 else
   echo "perch digest: NOT sent"; tail -5 "$WORK/run.err" >&2; exit 1

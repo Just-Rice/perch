@@ -202,3 +202,21 @@ input.code { font-family: var(--mono); font-size: 1.5rem; letter-spacing: .35em;
 .doc-body p.lead { font-size: 1.12rem; color: var(--muted); margin: 0 0 20px; }
 .doc-body .doc-cards { margin: 24px 0 8px; }
 @media (max-width: 860px) { .doc-body .doc-cards { grid-template-columns: 1fr; } }
+
+/* The feedback page */
+form.feedback textarea, form.feedback input[type=text] { width: 100%; }
+form.feedback textarea {
+  min-height: 160px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface);
+  color: var(--text); font: inherit; line-height: 1.5; resize: vertical;
+}
+form.feedback .kinds { border: 0; margin: 0 0 4px; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; }
+form.feedback .kinds legend { font-weight: 600; padding: 0; margin-bottom: 6px; }
+form.feedback label.kind { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-weight: 500; }
+form.feedback label.kind input { accent-color: var(--accent); }
+form.feedback .count { text-align: right; margin: 4px 0 0; font-variant-numeric: tabular-nums; }
+form.feedback .hp { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+form.feedback .turnstile { margin: 14px 0 0; min-height: 0; }
+form.feedback .actions { margin-top: 16px; }
+form.feedback .btn.small { min-height: 32px; padding: .2em .7em; font-size: .9rem; }
+.small { font-size: .9rem; }
+.muted { color: var(--muted); }

@@ -11,6 +11,11 @@ export const RP_ID = 'just-rice.github.io';
 export const SITE_URL = 'https://just-rice.github.io/perch/';
 export const CONNECT_URL = 'https://just-rice.github.io/perch/connect.html';
 
+// The feedback page (feedback.html) sends to the owner's feedback box (feedback/, a Cloudflare Worker), protected by
+// Cloudflare Turnstile. The site key is public by design; an empty one means the box isn't open yet.
+export const FEEDBACK_URL = 'https://perch-feedback.justrice.workers.dev/v1/feedback';
+export const TURNSTILE_SITE_KEY = '';
+
 // Free public MQTT-over-WebSocket brokers from four separate operators, all used at once. They only carry sealed
 // rendezvous messages, which stay under 32 KB (the smallest limit seen on public brokers is about 48 KB). Node's
 // built-in WebSocket can't talk to brokers that offer HTTP/2 WebSockets, so only add brokers tested from Node too.

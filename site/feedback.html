@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The feedback form: Perch's own script, Cloudflare's "not a robot" check (Turnstile), and the feedback box. Nothing
+     else, and the connect page doesn't load any of this: it only links here. Localhost entries are for tests. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src https://perch-feedback.justrice.workers.dev http://127.0.0.1:* http://localhost:*; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Perch: send feedback</title>
+<meta name="description" content="Tell the people who make Perch what to add, what broke, or anything else. Read only by them.">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/perch.css">
+</head>
+<body class="doc">
+<canvas class="cipher" id="cipher" aria-hidden="true"></canvas>
+<div class="wrap">
+  <header class="site">
+    <a class="brand" href="./">
+      <img src="img/icon.svg" alt="" width="30" height="30">
+      Perch <span class="badge">BETA</span>
+    </a>
+    <nav class="site" aria-label="Main">
+      <a href="./">About Perch</a>
+      <a href="connect.html">Connect</a>
+    </nav>
+  </header>
+</div>
+
+<main class="narrow doc-body">
+  <h1>Send feedback</h1>
+  <p class="lead">An idea, something that broke, or anything else: it goes straight to the people who make Perch, and
+    nobody else can read it.</p>
+
+  <form id="feedbackForm" class="panel feedback" novalidate>
+    <fieldset class="kinds">
+      <legend>What is it?</legend>
+      <label class="kind"><input type="radio" name="kind" value="idea" checked> An idea</label>
+      <label class="kind"><input type="radio" name="kind" value="bug"> Something broke</label>
+      <label class="kind"><input type="radio" name="kind" value="other"> Something else</label>
+    </fieldset>
+
+    <label for="fbMessage">Your message</label>
+    <textarea id="fbMessage" rows="7" maxlength="4000" required aria-describedby="fbCount"
+      placeholder="What would make Perch better for you? If something broke: what were you doing, and what happened?"></textarea>
+    <p class="small muted count" id="fbCount" aria-live="polite">0 / 4000</p>
+
+    <label for="fbContact">How to reach you <span class="muted">(optional)</span></label>
+    <input type="text" id="fbContact" maxlength="200" autocomplete="email" spellcheck="false"
+      placeholder="An email address, if you'd like an answer">
+
+    <!-- Left empty by people (it's hidden); anything typed here means a bot. -->
+    <div class="hp" aria-hidden="true">
+      <label for="fbWebsite">Website</label>
+      <input type="text" id="fbWebsite" tabindex="-1" autocomplete="off">
+    </div>
+
+    <p class="small muted" id="fbContext" hidden></p>
+    <div id="fbTurnstile" class="turnstile"></div>
+    <div class="actions">
+      <button type="submit" class="btn primary" id="fbSend">Send</button>
+    </div>
+    <p class="msg ok" id="fbDone" role="status" hidden>Thanks: it's been sent.</p>
+    <p class="msg bad" id="fbError" role="alert" hidden></p>
+  </form>
+
+  <p class="small muted">What's kept: your message, how to reach you if you give it, what kind of feedback it is, and
+    (when you came from Perch itself) Perch's version and the kind of computer it was controlling. Not your IP
+    address, browser or anything else. Cloudflare checks you're not a robot (it sees your IP address to do that). Kept
+    for a year at most. See <a href="privacy.html#feedback">Privacy</a>.</p>
+</main>
+
+<footer class="site">
+  <div class="wrap links">
+    <span>Perch is free and open source (Apache 2.0).</span>
+    <a href="./">Home</a>
+    <a href="connect.html">Connect</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="https://github.com/Just-Rice/perch">Source code</a>
+  </div>
+</footer>
+<script type="module" src="js/feedback.js"></script>
+</body>
+</html>

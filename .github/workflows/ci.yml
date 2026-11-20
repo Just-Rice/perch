@@ -28,6 +28,9 @@ jobs:
       - name: Website tests
         run: node --test --test-concurrency=1 --test-timeout=180000 $(ls tests/site/*.test.mjs | grep -v browser)
 
+      - name: Feedback box tests
+        run: node --test --test-concurrency=1 tests/feedback/*.test.mjs
+
       - name: Build the app and run its self-test
         run: |
           swift build -c release --package-path host/app

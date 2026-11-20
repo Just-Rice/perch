@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Perch's weekly digest (feedback/digest/weekly-digest.sh): Mondays at 9:00 this Mac's time. Copied to
+     ~/Library/LaunchAgents by install.sh in this folder, with the two addresses filled in. A Monday missed while the
+     Mac slept runs when it wakes. -->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.rishirao.perch-digest</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>__SCRIPT__</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PERCH_DIGEST_TO</key>
+    <string>__TO__</string>
+    <key>PERCH_DIGEST_TOOL</key>
+    <string>__TOOL__</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:__HOME__/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>LANG</key>
+    <string>en_US.UTF-8</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/perch-digest.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/perch-digest.log</string>
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>

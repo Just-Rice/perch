@@ -1,0 +1,15 @@
+{
+  "name": "perch-feedback",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Perch's feedback box: stores what people send from the website's feedback page, readable only by the owner.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.160.1"
+  }
+}

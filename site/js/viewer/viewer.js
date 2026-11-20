@@ -892,6 +892,9 @@ export class Viewer {
       on(id, 'change', () => { this.levelsDragged = performance.now(); sendLevels(true); });
     }
 
+    // Feedback: a new tab, so the session carries on; it says which Perch it came from (the person can leave that out).
+    $('optFeedback').href = `feedback.html#from=viewer${this.hi?.hv || this.ready?.hv ? `&v=${encodeURIComponent(this.hi?.hv || this.ready.hv)}` : ''}&os=${encodeURIComponent(this.ready?.os ?? 'mac')}`;
+
     // Talking through the Mac, where the Mac, the browser and the connection all can.
     this.micOn = false;
     $('optMic').hidden = this.guest || !this.session.canMic;

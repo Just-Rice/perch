@@ -449,3 +449,4 @@ input:focus-visible { outline: 3px solid var(--accent); outline-offset: 1px; }
 .menu .level input[type=range] { width: 100%; accent-color: #2dd4bf; }
 .menu .level input[type=range]:disabled { opacity: .4; }
 .menu .level output { text-align: right; font-variant-numeric: tabular-nums; color: #9aa3b2; font-size: .9rem; }
+.menu a.btn { text-decoration: none; }

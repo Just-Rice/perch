@@ -1,0 +1,25 @@
+# Perch's feedback box (feedback/README.md): a Worker in the owner's own Cloudflare account, separate from the relay.
+name = "perch-feedback"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+workers_dev = true
+
+# Where feedback is kept: `wrangler d1 create perch-feedback`, then put its id here and load schema.sql.
+[[d1_databases]]
+binding = "DB"
+database_name = "perch-feedback"
+database_id = "631c4c8b-4f60-4d08-854f-e2ad591a25e2"
+
+# At most a few sends a minute from one address. The limiter only counts; nothing about the address is kept.
+[[ratelimits]]
+name = "LIMITER"
+namespace_id = "7301"
+simple = { limit = 3, period = 60 }
+
+# Daily: delete entries older than a year.
+[triggers]
+crons = ["17 4 * * *"]
+
+# Request logs off: nothing about senders is kept, not even in logs.
+[observability]
+enabled = false

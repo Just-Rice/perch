@@ -99,6 +99,8 @@ export function about(ctx) {
     render(st) {
       if (!st) return;
       setText($('aboutVersion'), st.version ?? '');
+      // Feedback says which Perch it came from (the person can leave that out on the page).
+      $('feedbackLink').href = `https://just-rice.github.io/perch/feedback.html#from=setup${st.version ? `&v=${encodeURIComponent(st.version)}` : ''}&os=mac`;
       const servers = Array.isArray(st.rendezvous) ? st.rendezvous : [];
       setText($('aboutOnline'), servers.length === 0 ? '—'
         : servers.some(r => r.connected) ? 'Connected' : 'Not connected. Perch keeps trying.');

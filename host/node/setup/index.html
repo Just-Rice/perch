@@ -429,6 +429,9 @@ npx wrangler deploy</pre></li>
           <button type="submit" class="btn primary" id="workerRelaySaveBtn">Check and save</button>
         </div>
         <p class="small muted">Perch keeps the relay's secret in this Mac's Keychain.</p>
+        <p class="small muted">Renamed your workers.dev subdomain? Paste the relay's new address here and press
+          <b>Check and save</b>: this Mac's own relay is recognised at its new address. Devices paired on the old
+          address need pairing again on the new one (a passkey belongs to one address).</p>
       </form>
       <p class="msg ok" id="workerRelayOk" role="status" hidden></p>
       <p class="msg bad" id="workerRelayError" role="alert" hidden></p>

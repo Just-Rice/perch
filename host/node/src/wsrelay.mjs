@@ -60,7 +60,11 @@ export class WorkerRelay {
       });
       if (claim.status !== 200) throw new Error('The relay wouldn’t accept this Mac as its owner. Try again in a minute.');
     } else if (!secret) {
-      throw new Error('That relay already belongs to another Mac. Deploy a fresh copy (with a new name) for this one.');
+      // Claimed, at an address this Mac hasn't saved. It may still be this Mac's own relay under a new address (the
+      // owner renamed their workers.dev subdomain, November 2026): this Mac's secret is recognised there only if so.
+      // The check sends an HMAC of the secret, never the secret itself.
+      if (known?.secret && await this._recognises(base, known.secret)) secret = known.secret;
+      else throw new Error('That relay already belongs to another Mac. Deploy a fresh copy (with a new name) for this one.');
     }
     await this.check({ url: base, secret });
     await this.store.setWorkerRelay({ url: base, secret });
@@ -75,6 +79,10 @@ export class WorkerRelay {
       throw new Error('The relay didn’t recognise this Mac. Remove it here, deploy a fresh copy and set it up again.');
     }
     return true;
+  }
+
+  async _recognises(url, secret) {
+    try { return await this.check({ url, secret }); } catch { return false; }
   }
 
   // At startup: is the saved relay still there? (Only for the status shown in Setup; offers are made either way.)

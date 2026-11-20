@@ -57,6 +57,22 @@ test('saving a relay claims it, keeps its secret out of config.json, and works a
   assert.equal(r.state().set, false);
 });
 
+test('the same relay under a new address (a renamed workers.dev subdomain) is recognised by this Mac\'s secret', async () => {
+  const s = await store();
+  const worker = fakeWorker();
+  const r = new WorkerRelay({ store: s, fetchImpl: worker.fetchImpl });
+  await r.save(BASE);
+  const secret = worker.secret;
+  const renamed = 'https://perch-relay.someone-else-now.workers.dev';
+  await r.save(renamed); // the same Worker (and its claim) answering at the new name
+  assert.deepEqual(s.workerRelay, { url: renamed, secret }, 'the new address, the same secret');
+  assert.equal(worker.calls.filter(c => c.url.includes('/v1/claim')).length, 1, 'never claimed again');
+  // A different relay, owned by another Mac, at a new address: still refused.
+  const other = new WorkerRelay({ store: s, fetchImpl: fakeWorker({ claimedBy: 'cd'.repeat(32) }).fetchImpl });
+  await assert.rejects(other.save('https://perch-relay.stranger.workers.dev'), /already belongs to another Mac/);
+  assert.equal(s.workerRelay.url, renamed, 'nothing changed by the refusal');
+});
+
 test('a relay owned by another Mac, a wrong address or an outage is refused with a plain message', async () => {
   const s = await store();
   const taken = new WorkerRelay({ store: s, fetchImpl: fakeWorker({ claimedBy: 'cd'.repeat(32) }).fetchImpl });

@@ -244,6 +244,13 @@ export class Store {
     this.save();
   }
 
+  // A second relay holding the same secret (relay/node behind a tunnel), used while the first can't be reached.
+  get workerRelayBackup() { return this.config.workerRelayBackup ?? null; }
+  setWorkerRelayBackup(url) {
+    this.config.workerRelayBackup = url ?? null;
+    this.save();
+  }
+
   // --- devices ---
   get devices() { return this.config.devices; }
   findDevice(id) { return this.config.devices.find(d => d.id === id) ?? null; }

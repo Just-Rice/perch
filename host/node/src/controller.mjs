@@ -817,6 +817,32 @@ export class Controller {
   _useRelayBroker(previous = null) {
     if (previous) this.rendezvous.removeBroker?.(relayBroker(previous));
     if (this.workerRelay.base) this.rendezvous.addBroker?.(relayBroker(this.workerRelay.base));
+    if (this.workerRelay.backup) this.rendezvous.addBroker?.(relayBroker(this.workerRelay.backup));
+  }
+
+  // A backup relay (relay/node behind a tunnel, holding the main relay's secret): its own site and broker too.
+  async workerRelayBackupSet(url) {
+    const before = this.workerRelay.backup;
+    await this.workerRelay.saveBackup(url);
+    const base = this.workerRelay.backup;
+    if (before && before !== base) this.rendezvous.removeBroker?.(relayBroker(before));
+    this._useRelayBroker();
+    if (!this.auth.siteFor(base)) {
+      this.store.addSite({ origin: base, url: `${base}/connect` });
+      this.store.activity('settings', `Sign-ins are now accepted from ${base} (this Mac's backup relay)`);
+    }
+    this.store.activity('settings', 'Backup relay set up');
+    this._changed();
+    return { ok: true };
+  }
+
+  async workerRelayBackupRemove() {
+    const before = this.workerRelay.backup;
+    if (!before) return;
+    this.workerRelay.removeBackup();
+    this.rendezvous.removeBroker?.(relayBroker(before));
+    this.store.activity('settings', 'Backup relay removed');
+    this._changed();
   }
 
   async workerRelaySet(url) {
@@ -839,6 +865,8 @@ export class Controller {
   async workerRelayRemove() {
     if (this.workerRelay.configured) this.store.activity('settings', 'Worker relay removed');
     const previous = this.workerRelay.base;
+    const backup = this.workerRelay.backup;
+    if (backup) this.rendezvous.removeBroker?.(relayBroker(backup));
     await this.workerRelay.remove();
     this._useRelayBroker(previous);
     this._changed();
@@ -984,6 +1012,7 @@ export class Controller {
   // Forget everything: new id, name and keys, so every passkey and link made before stops working.
   async reset() {
     const relayBefore = this.workerRelay.base;
+    const backupBefore = this.workerRelay.backup;
     this._endSessions(() => true, 'removed');
     this.auth.cancelPairing();
     await this.guestStop();
@@ -995,6 +1024,7 @@ export class Controller {
     await ensureDtlsIdentity(this.store);
     this.relay.forget();
     this.workerRelay.lastError = this.workerRelay.lastOkAt = null; // Start over removed its secret with the rest
+    if (backupBefore) this.rendezvous.removeBroker?.(relayBroker(backupBefore));
     this._useRelayBroker(relayBefore);
     await this.signaling.setHost(this.store.hostId, this.store.sigKey);
     await this._applyListening();

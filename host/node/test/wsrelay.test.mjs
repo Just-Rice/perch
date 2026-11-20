@@ -69,6 +69,52 @@ test('a relay owned by another Mac, a wrong address or an outage is refused with
   assert.equal(s.workerRelay, null, 'nothing saved');
 });
 
+test('a backup relay with the same secret: offers name it only while the main relay is down', async () => {
+  const s = await store();
+  const BACKUP = 'https://perchrelay.shares.zrok.io';
+  const main = fakeWorker();
+  const backup = fakeWorker();
+  let mainDown = false, t = 0;
+  const fetchImpl = (url, opts) => {
+    if (url.startsWith(BACKUP)) return backup.fetchImpl(url, opts);
+    if (mainDown) throw new Error('offline');
+    return main.fetchImpl(url, opts);
+  };
+  const r = new WorkerRelay({ store: s, fetchImpl, now: () => t });
+  await assert.rejects(r.saveBackup(BACKUP), /main relay first/);
+  await r.save(BASE);
+  await assert.rejects(r.saveBackup(BACKUP), /didn’t recognise this Mac/, 'the backup must already hold the secret');
+  backup.secret = main.secret;
+  await assert.rejects(r.saveBackup(BASE), /That is the main relay/);
+  await r.saveBackup(`${BACKUP}/`);
+  assert.equal(r.backup, BACKUP);
+  assert.equal(s.config.workerRelayBackup, BACKUP);
+  assert.ok(!JSON.stringify(s.config).includes(main.secret), 'still no secret in config.json');
+  assert.equal(r.state().backup, BACKUP);
+
+  const sid = 'S'.repeat(22);
+  assert.equal((await r.prepare(sid, null)).base, BASE, 'main relay up: offers name it');
+  mainDown = true;
+  assert.equal((await r.prepare(sid, null)).base, BASE, 'one look is trusted for a while');
+  t += 31000;
+  const prep = await r.prepare(sid, null);
+  assert.equal(prep.base, BACKUP, 'main relay down: offers name the backup');
+  assert.equal((await W.readOffer(prep.offerText, { sid })).url, BACKUP);
+  backup.secret = 'ef'.repeat(32);
+  t += 31000;
+  assert.equal((await r.prepare(sid, null)).base, BASE, 'neither up: the main relay, as before');
+  backup.secret = main.secret;
+  mainDown = false;
+  t += 31000;
+  assert.equal((await r.prepare(sid, null)).base, BASE, 'main relay back: offers name it again');
+
+  r.removeBackup();
+  assert.equal(r.backup, null);
+  await r.saveBackup(BACKUP);
+  await r.remove();
+  assert.equal(s.config.workerRelayBackup, null, 'removing the relay removes its backup');
+});
+
 test('the offer is signed with the Mac’s own certificate, so a viewer holding its pin accepts only it', async () => {
   const s = await store();
   const worker = fakeWorker();

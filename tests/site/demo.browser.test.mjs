@@ -1000,3 +1000,134 @@ test('picture shape: whole, fill (slides after the pointer) and stretch, on a 4:
   assert.ok(await phone.eval('window.__perch.viewer.pan.x') < before, 'dragged right: the left part comes into view');
   assert.deepEqual((await messages(phone, n)).filter(m => m.t === 'w' || m.t === 'b'), [], 'no scrolling or clicks on the Mac');
 });
+
+// App mode: the Mac's apps in a grid (icons as they scroll into view), opening one on a phone (the page becomes a
+// link to it, with its name and icon, for the home screen), turning the phone, its windows, and leaving.
+const NOTES = 'com.example.demo.Notes';
+test('app mode on a phone: choose an app, turn the phone, switch its windows, leave it', async () => {
+  const page = await openPage(stack, demoUrl({ log: '0' }), { view: PHONE, ua: UA.iphone, name: 'apps-phone' });
+  // From the usual settings, whatever earlier tests chose (where the bar sits changes where the menu is).
+  await page.eval(`localStorage.removeItem('perch.prefs.v1')`);
+  await page.goto(demoUrl({ log: '0' }));
+  await ready(page);
+  const tapOn = async sel => {
+    await page.eval(`document.querySelector('${sel}').scrollIntoView({ block: 'center' })`);
+    await page.tap(...Object.values(await page.center(sel)).slice(0, 2));
+  };
+  const bar = async () => {
+    if (await page.eval(`document.getElementById('viewer').classList.contains('tb-on')`)) return;
+    await page.tap(...Object.values(await page.center('#handle')).slice(0, 2));
+    await page.waitFor(`document.getElementById('viewer').classList.contains('tb-on')`, { what: 'toolbar back' });
+    await sleep(300);
+  };
+  await bar();
+  await page.tap(...Object.values(await page.center('#tbMore')).slice(0, 2));
+  assert.equal(await page.eval(`document.getElementById('optApps').hidden`), false, 'offered: the Mac can');
+  await tapOn('#optApps');
+  await page.waitFor(`document.querySelectorAll('#appsGrid .app-tile').length === 12`, { what: 'the apps' });
+  await page.waitFor(`[...document.querySelectorAll('#appsGrid .app-icon')].slice(0, 6).every(i => i.src.startsWith('data:image/png'))`,
+    { what: 'icons for the apps in view' });
+  const asked = (await messages(page)).filter(m => m.t === 'app-icons');
+  assert.ok(asked.length >= 1 && asked.every(m => m.size === 96 && m.ids.length <= 60), JSON.stringify(asked));
+  assert.equal(await page.eval(`document.querySelector('#appsGrid [data-id="${NOTES}"]').classList.contains('running')`), true);
+  await page.shot('apps-sheet-phone');
+  // Search narrows it down.
+  await page.eval(`(() => { const s = document.getElementById('appsSearch'); s.value = 'note'; s.dispatchEvent(new Event('input')); })()`);
+  assert.equal(await page.eval(`document.querySelectorAll('#appsGrid .app-tile').length`), 1);
+  let n = await count(page);
+  await page.tap(...Object.values(await page.center(`#appsGrid .app-tile`)).slice(0, 2));
+  await page.waitFor(`document.getElementById('viewer').classList.contains('app-mode')`, { what: 'app mode' });
+  const open = (await messages(page, n)).find(m => m.t === 'app');
+  assert.deepEqual(open, { channel: 'control', t: 'app', id: NOTES, w: 390, h: 844, hide: false });
+  assert.equal(await page.eval(`document.getElementById('appsSheet').hidden`), true);
+  assert.equal(await page.text('#tbName'), 'Notes');
+  assert.equal(await page.eval(`document.getElementById('tbHide').hidden`), true, 'the bar tucks itself away anyway');
+  // The page is now a link to Notes: its address, name and home-screen icon.
+  assert.equal(await page.eval(`new URLSearchParams(location.search).get('app')`), NOTES);
+  assert.equal(await page.eval(`new URLSearchParams(location.search).get('name')`), 'Notes');
+  assert.equal(await page.eval(`new URLSearchParams(location.search).get('demo')`), '1', 'the rest of the address kept');
+  assert.equal(await page.eval('document.title'), 'Notes');
+  await page.waitFor(`document.querySelector('link[rel="apple-touch-icon"]')?.href.startsWith('data:image/jpeg;base64,')`, { what: 'home-screen icon' });
+  assert.equal(await page.eval(`document.querySelector('meta[name="apple-mobile-web-app-title"]').content`), 'Notes');
+  assert.match(await page.text('#banners'), /Notes on your Home Screen: tap Share, then Add to Home Screen/);
+  assert.deepEqual(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).appTips`), [NOTES], 'said once for each app');
+  // The picture is the stage: this phone's shape.
+  await page.waitFor(`Math.abs(document.getElementById('video').videoWidth / document.getElementById('video').videoHeight - 390 / 844) < 0.02`,
+    { what: 'a phone-shaped picture' });
+  await page.shot('app-mode-phone');
+
+  // Turning the phone reshapes the app; the keyboard coming up doesn't.
+  n = await count(page);
+  await page.setView({ view: PHONE_LANDSCAPE });
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'app' && m.w === 844 && m.h === 390)`, { what: 'the app turned' });
+  await page.waitFor(`document.getElementById('video').videoWidth > document.getElementById('video').videoHeight`, { what: 'a wide picture' });
+  await page.shot('app-mode-phone-landscape');
+  await page.setView({ view: PHONE });
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'app' && m.w === 390)`, { what: 'upright again' });
+
+  // Its two windows, to bring either to the front.
+  await sleep(500);
+  await bar();
+  await page.tap(...Object.values(await page.center('#tbMore')).slice(0, 2));
+  await page.waitFor(`!document.getElementById('windowWrap').hidden`, { what: 'the window picker (two windows)' });
+  assert.equal(await page.eval(`document.querySelector('#windowWrap span').textContent`), 'Window');
+  assert.deepEqual(await page.eval(`[...document.getElementById('optWindow').options].map(o => o.textContent)`), ['Shopping list', 'Ideas']);
+  assert.equal(await page.eval(`document.getElementById('optWhole').hidden`), false);
+  n = await count(page);
+  await page.eval(`(() => { const s = document.getElementById('optWindow'); s.value = '22'; s.dispatchEvent(new Event('change')); })()`);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'app-raise'), [{ channel: 'control', t: 'app-raise', id: 22 }]);
+
+  // The whole Mac again: plain Perch, by address, name and icon.
+  await bar();
+  n = await count(page);
+  await page.tap(...Object.values(await page.center('#tbWhole')).slice(0, 2));
+  await page.waitFor(`!document.getElementById('viewer').classList.contains('app-mode')`, { what: 'app mode left' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'app'), [{ channel: 'control', t: 'app', id: null }]);
+  assert.equal(await page.eval(`new URLSearchParams(location.search).has('app')`), false);
+  assert.equal(await page.eval('document.title'), 'Perch: connect to your Mac');
+  assert.equal(await page.eval(`document.querySelector('link[rel="apple-touch-icon"]')`), null);
+  assert.equal(await page.text('#tbName'), 'demo-mac-0000');
+  await page.waitFor(`document.getElementById('video').videoWidth / document.getElementById('video').videoHeight > 1.4`, { what: 'the whole display' });
+  assert.deepEqual(page.problems(), []);
+});
+
+test('a link to an app opens it straight away; one the Mac doesn\'t have is refused', async () => {
+  const page = await openPage(stack, demoUrl({ app: NOTES, name: 'Notes' }), { name: 'app-link' });
+  await ready(page);
+  await page.waitFor(`document.getElementById('viewer').classList.contains('app-mode')`, { what: 'app mode from the link' });
+  assert.equal(await page.eval('document.title'), 'Notes');
+  assert.equal(await page.eval(`document.getElementById('tbWhole').hidden`), false);
+  assert.equal(await page.eval(`document.getElementById('banners').textContent.includes('Home Screen')`), false, 'no home-screen tip on a computer');
+  // On a computer too the bar keeps out of the app's way.
+  await page.eval(`document.getElementById('surface').focus()`);
+  await page.mouse('mouseMoved', 640, 500);
+  await page.waitFor(`!document.getElementById('viewer').classList.contains('tb-on')`, { timeoutMs: 8000, what: 'the bar tucked away' });
+  assert.equal(await page.eval(`document.getElementById('surface').getBoundingClientRect().top`), 0);
+  await page.shot('app-mode-desktop');
+  await page.close();
+
+  const bad = await openPage(stack, demoUrl({ app: 'com.example.not.there', name: 'Nope' }), { name: 'app-link-bad' });
+  await ready(bad);
+  await bad.waitFor(`document.getElementById('banners').textContent.includes("Nope isn't one of the apps on your Mac")`, { what: 'refused' });
+  assert.equal(await bad.eval(`document.getElementById('viewer').classList.contains('app-mode')`), false);
+  assert.deepEqual(bad.problems(), []);
+});
+
+test('opened from a link to an app, the start page offers that app', async () => {
+  const url = `${stack.base}connect.html?test=1&device=passkey&app=${NOTES}&name=${encodeURIComponent('Notes')}`;
+  const page = await openPage(stack, url, { view: PHONE, ua: UA.iphone, name: 'app-launch' });
+  await page.waitFor(`!document.getElementById('s-home').hidden`, { what: 'the start page' });
+  assert.equal(await page.text('#h-home'), 'Open Notes');
+  assert.equal(await page.eval(`document.getElementById('launchBlock').hidden`), false);
+  assert.equal(await page.text('#btnLaunch'), 'Open Notes');
+  assert.equal(await page.eval(`document.getElementById('btnDiscover').hidden`), true);
+  assert.equal(await page.eval('document.title'), 'Notes');
+  await page.shot('app-launch-phone');
+  await page.tap(...Object.values(await page.center('#launchAll')).slice(0, 2));
+  await page.waitFor(`document.getElementById('launchBlock').hidden`, { what: 'plain Perch' });
+  assert.equal(await page.text('#h-home'), 'Connect to your Mac');
+  assert.equal(await page.eval(`new URLSearchParams(location.search).has('app')`), false);
+  assert.equal(await page.eval(`document.getElementById('btnDiscover').hidden`), false);
+  assert.deepEqual(page.problems(), []);
+});
+

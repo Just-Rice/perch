@@ -1,7 +1,7 @@
 // The connect page: home screen, the three ways in (known Mac, passkey discovery, backup, pairing link), and handing
 // a signed-in connection to the viewer. Loaded by js/connect.js only after its frame check passed.
 import { pageEnv } from './env.js';
-import { MacStore, lastUsedText } from './macs.js';
+import { MacStore, lastUsedText, safeStorage } from './macs.js';
 import { Prefs } from './prefs.js';
 import { deviceLabel, isAppleDevice, isTouchFirst, passkeyFriendly, platformAuthenticatorAvailable } from './device.js';
 import { parsePairHash, parseGuestHash, parseUserHandle } from './pairlink.js';
@@ -43,6 +43,9 @@ export function start() {
     log: env.test || env.demo ? (...a) => console.debug('[perch]', ...a) : () => {},
   };
   app.prefs = new Prefs({ apple: app.apple });
+  // A link to one app (app mode; a home-screen icon made from it): connect.html?app=<bundle id>&name=<name>.
+  app.launch = parseLaunch(env.params);
+  app.baseTitle = document.title;
   // Passkey or backup sign-in, by device. Tests on this computer can say which (?device=chromebook|passkey).
   const forced = env.test ? env.params.get('device') : null;
   app.passkeyFriendly = forced === 'chromebook' ? Promise.resolve(false) : forced === 'passkey' ? Promise.resolve(true)
@@ -102,6 +105,12 @@ async function ownRelayBroker(env) {
 function wireHome(app) {
   const { env } = app;
   $('btnDiscover').addEventListener('click', () => discover(app));
+  $('btnLaunch').addEventListener('click', () => discover(app));
+  $('launchAll').addEventListener('click', e => {
+    e.preventDefault();
+    forgetLaunch(app);
+    showHome(app);
+  });
   $('btnBackup').addEventListener('click', () => showBackup(app));
   $('btnBlank').addEventListener('click', () => {
     // A local test copy keeps its test switches (local brokers) in the new tab; the real site has none to keep.
@@ -136,8 +145,74 @@ function showHome(app, { status } = {}) {
   $('btnDiscover').textContent = list.length ? 'Sign in with another passkey' : 'Sign in with a passkey';
   fillIcons($('s-home'));
   $('homeLead').hidden = list.length > 0;
+  // A link to one app: open it with a passkey, straight away (the Macs below open it too).
+  const l = app.launch;
+  $('launchBlock').hidden = !l;
+  $('btnDiscover').hidden = !!l;
+  $('h-home').textContent = l ? `Open ${l.name}` : 'Connect to your Mac';
+  if (l) {
+    $('homeLead').hidden = true;
+    $('launchLead').textContent = `Perch opens ${l.name} on your Mac, shaped to fit this screen.`;
+    $('btnLaunch').lastChild.textContent = `Open ${l.name}`;
+    document.title = l.name;
+    const iconUrl = launchIcons().get(l.id);
+    $('launchIcon').hidden = !iconUrl;
+    if (iconUrl) {
+      $('launchIcon').src = iconUrl;
+      setTouchIcon(iconUrl);
+    }
+  }
   app.ui.showError('homeStatus', status || '');
   app.ui.show('home');
+}
+
+// --- links to one app ---
+
+const APP_ID_RE = /^[A-Za-z0-9._-]{1,200}$/;
+
+export function parseLaunch(params) {
+  const id = params.get('app');
+  if (!id || !APP_ID_RE.test(id)) return null;
+  const name = String(params.get('name') ?? '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80);
+  return { id, name: name || id.split('.').pop() || id };
+}
+
+// Back to plain Perch: no app in the address or the page's name.
+function forgetLaunch(app) {
+  app.launch = null;
+  try {
+    const u = new URL(location.href);
+    u.searchParams.delete('app');
+    u.searchParams.delete('name');
+    history.replaceState(history.state, '', `${u.pathname}${u.search}`);
+  } catch {}
+  document.title = app.baseTitle;
+  setTouchIcon(null);
+}
+
+// The home-screen icons of apps opened here, so a link to an app shows its icon before connecting (a few, newest
+// last). They are the Mac's app icons and nothing else.
+const ICONS_KEY = 'perch.appicons.v1';
+const MAX_ICONS = 8;
+function launchIcons() {
+  try {
+    const raw = JSON.parse(safeStorage().getItem(ICONS_KEY) || '[]');
+    return new Map((Array.isArray(raw) ? raw : []).filter(e => Array.isArray(e) && APP_ID_RE.test(e[0]) &&
+      typeof e[1] === 'string' && /^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]{1,64000}$/.test(e[1])));
+  } catch { return new Map(); }
+}
+function keepLaunchIcon(id, url) {
+  const icons = launchIcons();
+  icons.delete(id);
+  icons.set(id, url);
+  try { safeStorage().setItem(ICONS_KEY, JSON.stringify([...icons].slice(-MAX_ICONS))); } catch {}
+}
+
+function setTouchIcon(url) {
+  let l = document.head.querySelector('link[rel="apple-touch-icon"]');
+  if (!url) { l?.remove(); return; }
+  if (!l) { l = document.createElement('link'); l.rel = 'apple-touch-icon'; document.head.append(l); }
+  l.href = url;
 }
 
 function macItem(app, mac) {
@@ -412,6 +487,10 @@ function startViewer(app, conn, hi, ready, again) {
     },
     onReconnect: () => retry(app, again),
     onHome: () => showHome(app),
+    // The app being shown (app mode): opened again after a reconnect; leaving it here is plain Perch again.
+    launch: again.route === 'guest' ? null : app.launch,
+    onAppChange: a => { app.launch = a; if (!a) document.title = app.baseTitle; },
+    onAppIcon: (id, url) => keepLaunchIcon(id, url),
   });
   app.viewer = viewer;
   conn.onclose = (err) => {

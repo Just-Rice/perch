@@ -304,6 +304,39 @@ test('"Sign in with a passkey" on a browser that doesn\'t remember the Mac asks 
   }
 });
 
+// (The start page's "Open Test Notes" is one-tap sign-in, as in the test above. Here the remembered Mac is used
+// instead: by this point the fresh codes have moved the host's clock past one-tap's 3-minute window.)
+test('a link to one app (a home-screen icon): the passkey and the code open that app on its own', async () => {
+  const notes = 'io.github.just-rice.perch.test-notes';
+  const url = `${stack.base}connect.html?${testParams()}&app=${notes}&name=${encodeURIComponent('Test Notes')}`;
+  const page = await openPage(stack, url, { name: 'app-link' });
+  await page.waitScreen('home');
+  assert.equal(await page.text('#h-home'), 'Open Test Notes');
+  assert.equal(await page.eval(`document.getElementById('launchBlock').hidden`), false);
+  let since = app.commands.length;
+  await page.click('#macList .mac-go');
+  await enterCode(page);
+  await assertPlaying(page);
+  const open = await app.waitForCommand(c => c.c === 'capture' && c.on && c.app, { since });
+  assert.equal(open.app.id, notes);
+  assert.ok(open.app.aspect > 1, 'shaped like this (wide) window');
+  await page.waitFor(`document.getElementById('viewer').classList.contains('app-mode')`, { what: 'app mode' });
+  assert.equal(await page.text('#tbName'), 'Test Notes');
+  assert.equal(await page.eval('document.title'), 'Test Notes');
+  // Its home-screen icon, kept so the start page can show it next time.
+  await page.waitFor(`document.querySelector('link[rel="apple-touch-icon"]')?.href.startsWith('data:image/jpeg;base64,')`, { what: 'the home-screen icon' });
+  await page.waitFor(`JSON.parse(localStorage.getItem('perch.appicons.v1') || '[]').some(e => e[0] === '${notes}')`, { what: 'the icon kept' });
+  await assertInputReachesMac(page);
+  // The whole Mac again.
+  since = app.commands.length;
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbWhole');
+  const whole = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.equal('app' in whole, false);
+  assert.equal(await page.eval(`new URLSearchParams(location.search).has('app')`), false);
+  assert.deepEqual(page.problems(), []);
+});
+
 test('a guest link: the page watches with no sign-in, shows it is view only, and can control nothing', async () => {
   const { link } = await app.call('guestStart', 30);
   assert.match(link, /connect\.html#guest=[A-Za-z0-9_-]+$/);

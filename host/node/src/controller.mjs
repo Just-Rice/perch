@@ -8,7 +8,7 @@ import { QUALITY, DEFAULT_QUALITY, PAIR_TTL_MS, AUTH_TIMEOUT_MS, APP_ORIGIN } fr
 import { newMacName as makeMacName, suggestPassword } from './names.mjs';
 import { normalizeMacName, CUSTOM_MAC_NAME_RE } from '../../../site/js/shared/rendezvous.js';
 import { HostPeer, ensureDtlsIdentity } from './rtc.mjs';
-import { Session } from './session.mjs';
+import { Session, APP_ID_RE, APP_ICON_CHARS } from './session.mjs';
 import { Relay } from './relay.mjs';
 import { WorkerRelay, WsPeer } from './wsrelay.mjs';
 import { roomUrl, roomAuth, relayBroker } from '../../../site/js/shared/wsrelay.js';
@@ -65,6 +65,21 @@ function cleanWindows(list) {
     width: Number.isFinite(w.width) ? w.width : 0,
     height: Number.isFinite(w.height) ? w.height : 0,
   }));
+}
+
+// The Mac's apps for app mode, trimmed to what a viewer's grid needs.
+function cleanApps(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter(a => a && typeof a.id === 'string' && APP_ID_RE.test(a.id)).slice(0, 400).map(a => ({
+    id: a.id, name: typeof a.name === 'string' && a.name ? a.name.slice(0, 80) : a.id, running: a.running === true,
+  }));
+}
+
+function cleanIcon(ev) {
+  if (typeof ev?.id !== 'string' || !APP_ID_RE.test(ev.id) || (ev.size !== 96 && ev.size !== 180)) return null;
+  if (ev.mime !== 'image/png' && ev.mime !== 'image/jpeg') return null;
+  if (typeof ev.data !== 'string' || !ev.data || ev.data.length > APP_ICON_CHARS || !/^[A-Za-z0-9+/]*={0,2}$/.test(ev.data)) return null;
+  return { id: ev.id, size: ev.size, mime: ev.mime, data: ev.data };
 }
 
 export class Controller {
@@ -257,9 +272,47 @@ export class Controller {
         this.capture = {
           display: ev.display, width: ev.width | 0, height: ev.height | 0, fps: ev.fps | 0,
           window: Number.isInteger(ev.window) && ev.window > 0 ? ev.window : null,
+          app: typeof ev.app === 'string' && APP_ID_RE.test(ev.app) ? ev.app : null,
         };
         this.active?.sendStatus();
         break;
+      case 'apps':
+        // The answer to a viewer's "which apps are there?": only for the owner's own viewer, if still here.
+        if (this.appsAsker && this.appsAsker === this.active) this.appsAsker.sendApps(cleanApps(ev.list));
+        this.appsAsker = null;
+        break;
+      case 'app-icon': {
+        const icon = cleanIcon(ev);
+        if (icon && this.iconAsker && this.iconAsker === this.active) this.iconAsker.sendAppIcon(icon);
+        break;
+      }
+      case 'app-mode': {
+        // App mode began, or couldn't (then the whole display again).
+        const s = this.leader;
+        if (!s?.app || s.app.id !== ev.id) break;
+        if (ev.ok !== true) {
+          s.app = null;
+          this._sendCapture(s);
+        }
+        if (s === this.active) {
+          s.sendApp({ ok: ev.ok === true, id: ev.id,
+            ...(typeof ev.name === 'string' ? { name: ev.name.slice(0, 80) } : {}),
+            ...(typeof ev.error === 'string' ? { error: ev.error.slice(0, 40) } : {}) });
+        }
+        if (ev.ok === true) this.store.activity('session', `App mode: ${typeof ev.name === 'string' ? ev.name.slice(0, 80) : ev.id}`);
+        s.sendStatus();
+        break;
+      }
+      case 'app-gone': {
+        // The app in app mode quit: the whole display again.
+        const s = this.leader;
+        if (!s?.app || s.app.id !== ev.id) break;
+        s.app = null;
+        this._sendCapture(s);
+        if (s === this.active) s.sendApp({ ok: false, id: ev.id, error: 'quit' });
+        s.sendStatus();
+        break;
+      }
       case 'windows':
         // The answer to a viewer's "which windows are there?": only for the owner's own viewer, if still here.
         if (this.windowAsker && this.windowAsker === this.active) this.windowAsker.sendWindows(cleanWindows(ev.list));
@@ -444,7 +497,7 @@ export class Controller {
       // preset's starting value, which would undo what bitrate control has learned).
       maxEdge: session.captureEdge?.() ?? preset.maxEdge, fps: session.captureFps?.() ?? preset.fps,
       kbps: session.media?.bitrate.target ?? preset.kbps, audio: true,
-      ...(session.window ? { window: session.window } : {}),
+      ...(session.window ? { window: session.window } : session.app ? { app: { ...session.app } } : {}),
       ...(maxQp ? { maxQp } : {}),
       speakers: this.store.settings.macSpeakers, stream: this.store.settings.streamVolume,
       // One picture goes to every viewer: High only when all of them agreed to it.
@@ -460,7 +513,24 @@ export class Controller {
   listWindows(session) {
     if (session !== this.active) return;
     this.windowAsker = session;
-    this.app.command('windows', {});
+    // In app mode, only that app's windows.
+    this.app.command('windows', session.app ? { app: session.app.id } : {});
+  }
+
+  listApps(session) {
+    if (session !== this.active) return;
+    this.appsAsker = session;
+    this.app.command('apps', {});
+  }
+
+  appIcons(session, ids, size) {
+    if (session !== this.active) return;
+    this.iconAsker = session;
+    this.app.command('app-icons', { ids, size });
+  }
+
+  appRaise(session, id) {
+    if (session === this.active && session.app) this.app.command('app-raise', { id });
   }
 
   clipGet(session, images = false) {
@@ -587,6 +657,7 @@ export class Controller {
       for (const g of this.guests) {
         g.display = session.display;
         g.window = session.window ?? null;
+        g.app = session.app ? { ...session.app } : null;
       }
       this.app.command('session', { active: true, viewer: 'A guest (view only)', route: 'guest', curtain: false });
       this._sendCapture(this.leader);
@@ -764,7 +835,7 @@ export class Controller {
   relayIceServers() { return this.relay.iceServers(); }
 
   // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
-  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus', 'clipboard', 'clipimg', 'levels']; }
+  get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus', 'clipboard', 'clipimg', 'levels', 'apps']; }
 
   // The two sound levels as viewers and the app see them; `speakers` is only offered where the app can tap the sound.
   levels() {

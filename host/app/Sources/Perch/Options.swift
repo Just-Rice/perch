@@ -39,7 +39,8 @@ struct Options {
       --node <path>           Node.js to run the host with (else $PERCH_NODE, the bundled one, Homebrew's)
       --host <path>           host script (else Contents/Resources/host/perch-host.mjs)
       --exit-with-host        on quit, exit with the host process's exit status
-      --allow-system-changes  let a test run change the login item and move the app to the Trash on uninstall
+      --allow-system-changes  let a test run change the login item, move the app to the Trash on uninstall, and
+                              open apps and move their windows in app mode
       --selftest              run the built-in checks and exit
       --render-menu-icons <d> write the menu bar icons to <d> as PNGs and exit
       --unregister-login-item stop Perch starting at login and exit (used by the uninstaller)

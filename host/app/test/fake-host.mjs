@@ -963,6 +963,115 @@ async function windowChecks(h) {
   await settled();
 }
 
+// App mode: the list of apps, their icons, the stage (a part of the display shaped like the viewer's screen) with the
+// app's window moved onto it, turning, leaving (the window goes back), and apps that can't be opened. In synthetic
+// mode there are two pretend apps: Test Notes owns the pretend window, Test Draw has none. A real test run never
+// opens or moves anything.
+const TEST_NOTES = 'io.github.just-rice.perch.test-notes', TEST_DRAW = 'io.github.just-rice.perch.test-draw';
+async function appChecks(h) {
+  const cap = (extra = {}) => command('capture', { on: true, maxEdge: 1920, fps: 30, kbps: 2500, audio: false, ...extra });
+  let since = got.events.length;
+  command('apps');
+  const list = (await event('apps', { since, ms: 10000 })).list;
+  check('apps: a list of {id, name, running}', Array.isArray(list) && list.length > 0 && list.every(a =>
+    typeof a.id === 'string' && a.id && typeof a.name === 'string' && typeof a.running === 'boolean'), `${list?.length} apps`);
+  if (h.synthetic !== true) {
+    command('session', { active: true, viewer: 'Chrome on Pixel', route: 'passkey' });
+    since = got.events.length;
+    cap({ app: { id: list[0].id, aspect: 0.5 } });
+    const no = await event('app-mode', { since });
+    const st = await event('capture-started', { since });
+    check('app mode: never in a test run on a real Mac (nothing opened or moved)', no.ok === false && no.error === 'test-run' && st.app === undefined, JSON.stringify([no, st]));
+    since = got.events.length;
+    command('capture', { on: false });
+    await event('capture-stopped', { since });
+    command('session', { active: false });
+    return settled();
+  }
+  check('apps: the two pretend apps, by name', deepEqual(list, [
+    { id: TEST_DRAW, name: 'Test Draw', running: false }, { id: TEST_NOTES, name: 'Test Notes', running: true }]), JSON.stringify(list));
+  since = got.events.length;
+  command('app-icons', { ids: [TEST_NOTES, 'com.example.not-listed'], size: 96 });
+  const small = await event('app-icon', { since, ms: 5000 });
+  const png = Buffer.from(small.data, 'base64');
+  check('app-icons: a 96-pixel PNG', small.id === TEST_NOTES && small.size === 96 && small.mime === 'image/png' &&
+    png.subarray(1, 4).toString() === 'PNG' && png.readUInt32BE(16) === 96 && png.readUInt32BE(20) === 96, JSON.stringify({ ...small, data: small.data?.length }));
+  since = got.events.length;
+  command('app-icons', { ids: [TEST_NOTES], size: 180 });
+  const tile = await event('app-icon', { since, ms: 5000 });
+  const jpg = Buffer.from(tile.data, 'base64');
+  check('app-icons: the home-screen tile is a JPEG', tile.size === 180 && tile.mime === 'image/jpeg' && jpg[0] === 0xff && jpg[1] === 0xd8 && tile.data.length <= 48000);
+  await settled();
+  check('app-icons: nothing for an app that isn\'t listed', !got.events.slice(since).some(e => e.e === 'app-icon' && e.id !== TEST_NOTES));
+
+  since = got.events.length;
+  command('windows');
+  const before = (await event('windows', { since })).list?.[0];
+  command('session', { active: true, viewer: 'Safari on iPhone', route: 'passkey' });
+  since = got.events.length;
+  cap({ app: { id: TEST_NOTES, aspect: 390 / 844 } });
+  const ok = await event('app-mode', { since });
+  check('app mode: Test Notes opens', ok.ok === true && ok.id === TEST_NOTES && ok.name === 'Test Notes', JSON.stringify(ok));
+  let st = await event('capture-started', { since, where: e => e.app === TEST_NOTES });
+  // The pretend display is 1920x1080 points with nothing taken by a menu bar or Dock: the stage is 499x1080.
+  check('app mode: the picture is the stage, upright like the phone and as tall as the display',
+    st.height === 1920 && Math.abs(st.width / st.height - 499 / 1080) < 0.01, JSON.stringify(st));
+  since = got.events.length;
+  command('windows', { app: TEST_NOTES });
+  let wins = (await event('windows', { since })).list;
+  check('app mode: the app\'s window fills the stage', wins?.length === 1 && wins[0].width === 499 && wins[0].height === 1080, JSON.stringify(wins));
+  since = got.events.length;
+  command('windows', { app: TEST_DRAW });
+  check('windows of one app: only its own', deepEqual((await event('windows', { since })).list, []));
+  let out = await echo({ t: 'm', x: 0.5, y: 0.5 });
+  check('app mode: input lands on the stage', out[0]?.y === 540 && out[0]?.x >= 249 && out[0]?.x <= 250, JSON.stringify(out));
+
+  // The phone turns: the stage and the window turn with it.
+  since = got.events.length;
+  cap({ app: { id: TEST_NOTES, aspect: 844 / 390 } });
+  st = await event('capture-started', { since, where: e => e.app === TEST_NOTES && e.width > e.height });
+  check('app mode: turned on its side, the stage is wide (1920x887 points)', st.width === 1920 && Math.abs(st.width / st.height - 1920 / 887) < 0.01, JSON.stringify(st));
+  await settled();
+  since = got.events.length;
+  command('windows', { app: TEST_NOTES });
+  wins = (await event('windows', { since })).list;
+  check('app mode: the window takes the new stage', wins?.[0]?.width === 1920 && wins?.[0]?.height === 887, JSON.stringify(wins));
+  check('app mode: asked for again, no second "opened"', !got.events.slice(since).some(e => e.e === 'app-mode'));
+
+  // Leaving: the whole display again, and the window back where it was, at its old size.
+  since = got.events.length;
+  cap();
+  st = await event('capture-started', { since });
+  check('leaving app mode: the whole display', st.app === undefined && st.width === 1920 && st.height === 1080, JSON.stringify(st));
+  await settled();
+  since = got.events.length;
+  command('windows');
+  const after = (await event('windows', { since })).list?.[0];
+  check('leaving app mode: the window is back as it was', after?.width === before?.width && after?.height === before?.height, JSON.stringify([before, after]));
+
+  // An app that isn't listed: refused, whole display. An app with no windows: still its stage.
+  since = got.events.length;
+  cap({ app: { id: 'com.example.not-listed', aspect: 1 } });
+  const no = await event('app-mode', { since });
+  st = await event('capture-started', { since });
+  check('app mode: an app that isn\'t listed is refused', no.ok === false && no.error === 'not-found' && st.app === undefined && st.width === 1920, JSON.stringify([no, st]));
+  since = got.events.length;
+  cap({ app: { id: TEST_DRAW, aspect: 1 } });
+  check('app mode: Test Draw opens', (await event('app-mode', { since })).ok === true);
+  st = await event('capture-started', { since, where: e => e.app === TEST_DRAW });
+  check('app mode: a square stage, as tall as the display (1080 points, 1920 pixels sent)', st.width === 1920 && st.height === 1920, JSON.stringify(st));
+  // Capture stopping ends app mode too.
+  since = got.events.length;
+  command('capture', { on: false });
+  await event('capture-stopped', { since });
+  command('session', { active: false });
+  await settled();
+  since = got.events.length;
+  command('windows');
+  const last = (await event('windows', { since })).list?.[0];
+  check('an app with no windows moves nothing', last?.width === before?.width && last?.height === before?.height, JSON.stringify(last));
+}
+
 async function commandChecks(h) {
   // permissions on request.
   let since = got.events.length;
@@ -1164,6 +1273,7 @@ async function main() {
   if (h.synthetic === true) await section('frame rate', () => fpsChangeChecks());
   await section('clipboard', () => clipboardChecks());
   await section('windows', () => windowChecks(h));
+  await section('app mode', () => appChecks(h));
   await section('microphone', () => micChecks(h));
   logChecks();
   await finish();

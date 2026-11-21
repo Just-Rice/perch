@@ -36,6 +36,8 @@ public enum Windows {
     static var synthetic: WindowInfo {
         WindowInfo(id: 7, pid: 0, app: "Test App", title: "Test Window", bounds: lock.withLock { syntheticBounds })
     }
+    /// App mode moves the pretend window as it would a real one.
+    static func setSynthetic(_ r: CGRect) { lock.withLock { syntheticBounds = r } }
 
     /// Ordinary windows on screen, front to back, without Perch's own.
     public static func list(synthetic: Bool) -> [WindowInfo] {
@@ -113,7 +115,7 @@ public enum Windows {
         return byTitle
     }
 
-    private static func frame(of el: AXUIElement) -> CGRect? {
+    static func frame(of el: AXUIElement) -> CGRect? {
         var p: CFTypeRef?, s: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &p) == .success,
               AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &s) == .success,

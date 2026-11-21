@@ -544,6 +544,19 @@ public final class CaptureController: @unchecked Sendable {
         }
     }
 
+    /// App mode's picture changed (a window that won't shrink to the stage): show this part of the display (its own
+    /// points) instead, if that app is still the one being shown. Main thread.
+    public func setRegion(_ r: CGRect, forApp id: String) {
+        let state = lock.withLock { () -> (CaptureRequest, Int)? in
+            guard var req = lastRequest, req.app?.id == id, req.region != r else { return nil }
+            req.region = r
+            lastRequest = req
+            return (req, generation)
+        }
+        guard let (request, gen) = state else { return }
+        enqueue { [self] in await start(request, generation: gen) }
+    }
+
     /// Stops capture. `notify` false is for when there is no host left to tell. Main thread.
     public func stop(reason: String, notify: Bool = true) {
         let gen = nextGeneration()
@@ -600,9 +613,11 @@ public final class CaptureController: @unchecked Sendable {
             log("display \(wanted) is not connected; capturing display \(display.id) instead")
         }
         // One window: the part of its display it covers right now. A window that is gone (closed, minimised, on
-        // another desktop) means the whole display again, and the host is told.
+        // another desktop) means the whole display again, and the host is told. App mode: its stage.
         var region: CGRect?
-        if let wid = request.window {
+        if request.window == nil, let r = request.region {
+            region = Windows.region(of: r.offsetBy(dx: display.bounds.minX, dy: display.bounds.minY), on: display.bounds)
+        } else if let wid = request.window {
             if let w = Windows.find(wid, synthetic: synthetic) {
                 let middle = CGPoint(x: w.bounds.midX, y: w.bounds.midY)
                 if !display.bounds.contains(middle),
@@ -626,7 +641,7 @@ public final class CaptureController: @unchecked Sendable {
                 log("detail cap now \(request.maxQP.map { "QP \($0)" } ?? "off")")
             }
             cur.keyframe()
-            emitStarted(cur)
+            emitStarted(cur, request)
             return
         }
         if let cur = lock.withLock({ current }), cur.display.id == display.id,
@@ -636,8 +651,8 @@ public final class CaptureController: @unchecked Sendable {
             do {
                 try await cur.resize(width: size.width, height: size.height, kbps: request.kbps, region: region, windowID: request.window,
                                      fps: request.fps, maxQP: request.maxQP)
-                log("capture changed to \(size.width)x\(size.height) at \(request.fps) fps, \(request.kbps) kbit/s\(Self.capNote(request))\(region == nil ? "" : ", one window")")
-                emitStarted(cur)
+                log("capture changed to \(size.width)x\(size.height) at \(request.fps) fps, \(request.kbps) kbit/s\(Self.capNote(request))\(region == nil ? "" : request.app != nil ? ", app mode" : ", one window")")
+                emitStarted(cur, request)
                 return
             } catch {
                 log("could not resize capture (\(error)); restarting it")
@@ -672,8 +687,8 @@ public final class CaptureController: @unchecked Sendable {
             s.setLevels(sound)
             s.setTapFed(tapped)
             if let kbps { s.setBitrate(kbps: kbps) }
-            log("capture started: display \(display.id) at \(s.width)x\(s.height), \(request.fps) fps, \(request.kbps) kbit/s\(Self.capNote(request)), audio \(request.audio)")
-            emitStarted(s)
+            log("capture started: display \(display.id) at \(s.width)x\(s.height), \(request.fps) fps, \(request.kbps) kbit/s\(Self.capNote(request)), audio \(request.audio)\(request.app == nil ? "" : ", app mode")")
+            emitStarted(s, request)
         } catch {
             await session?.stop()
             log("capture failed to start: \(error)")
@@ -714,10 +729,11 @@ public final class CaptureController: @unchecked Sendable {
         }
     }
 
-    private func emitStarted(_ s: CaptureSession) {
+    private func emitStarted(_ s: CaptureSession, _ request: CaptureRequest) {
         var e: [String: Any] = ["e": "capture-started", "display": Int(s.display.id), "width": s.width, "height": s.height,
                                 "fps": s.request.fps]
         if let w = s.windowID { e["window"] = Int(w) }
+        if let a = request.app, s.region != nil { e["app"] = a.id }
         e["profile"] = s.profileName
         onEvent?(e)
     }

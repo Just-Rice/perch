@@ -29,8 +29,12 @@ const CLIP_BACKLOG = 2 * 1024 * 1024;    // pieces wait while this much is still
 const PASTE_WAIT_MS = 400;               // after ⌘V, how long the browser's paste event gets before the Mac pastes its own
 
 export class Viewer {
-  constructor({ root, session, hi, ready, prefs, env, apple, touchFirst, log = () => {}, onLeave, onReconnect, onHome }) {
-    Object.assign(this, { root, session, hi, ready, prefs, env, apple, touchFirst, log, onLeave, onReconnect, onHome });
+  // launch: {id, name} of an app to open in app mode as soon as the viewer starts (a link to one app).
+  // onAppChange({id, name} | null): app mode began or ended. onAppIcon(id, dataUrl): its home-screen icon arrived.
+  constructor({ root, session, hi, ready, prefs, env, apple, touchFirst, log = () => {}, onLeave, onReconnect, onHome,
+    launch = null, onAppChange = () => {}, onAppIcon = () => {} }) {
+    Object.assign(this, { root, session, hi, ready, prefs, env, apple, touchFirst, log, onLeave, onReconnect, onHome,
+      launch, onAppChange, onAppIcon });
     this.$ = id => document.getElementById(id);
     this.view = IDENTITY;
     this.timers = [];
@@ -133,13 +137,15 @@ export class Viewer {
       this._on(vv, 'scroll', fit);
       fit();
     }
-    this._on(window, 'resize', () => { this.setView(this.view); this._reportView(); });
+    this._on(window, 'resize', () => { this.setView(this.view); this._reportView(); this._appRefit(); });
     this._on(this.video, 'resize', () => { this._reportView(); this._shapeUi(); }); // the picture's own size or shape changed
     this._reportView();
     this._on(document, 'fullscreenchange', () => this._fullscreenChanged());
     this._on(document, 'webkitfullscreenchange', () => this._fullscreenChanged());
     this.surface.focus({ preventScroll: true });
     this._showToolbar();
+    // Opened from a link to one app: that app, straight away.
+    if (this.launch && !this.guest) this._openApp(this.launch.id, this.launch.name);
   }
 
   // The session ended (the Mac said bye, the network went): freeze the picture and say what happened.
@@ -188,13 +194,18 @@ export class Viewer {
     if (this.video) { this.video.pause(); this.video.srcObject = null; }
     this.setView(IDENTITY);
     this.banners?.clear();
-    for (const id of ['ended', 'moreMenu', 'keysBar', 'keysEditor', 'soundPrompt', 'clipSheet']) this.$(id).hidden = true;
+    clearTimeout(this.appFitTimer);
+    clearTimeout(this.appTipTimer);
+    clearTimeout(this.iconTimer);
+    this.iconObserver?.disconnect();
+    for (const id of ['ended', 'moreMenu', 'keysBar', 'keysEditor', 'soundPrompt', 'clipSheet', 'appsSheet']) this.$(id).hidden = true;
+    if (this.baseTitle) document.title = this.baseTitle;
     clearTimeout(this.clipNoteTimer);
     this.clipWaiter = null;
     this.$('tbKeys').setAttribute('aria-pressed', 'false');
     this._inviteKeyboard(null);
     // The browser says the mouse is let go only after these listeners are gone: don't leave the pointer hidden.
-    this.root.classList.remove('tb-on', 'zoomed', 'captured', 'touchpad', 'tb-pinned', 'tb-vertical', 'nocursor', ...EDGES.map(e => `tb-${e}`),
+    this.root.classList.remove('tb-on', 'zoomed', 'captured', 'touchpad', 'tb-pinned', 'tb-vertical', 'nocursor', 'app-mode', ...EDGES.map(e => `tb-${e}`),
       ...SHAPES.map(s => `shape-${s}`));
     this.root.hidden = true;
     document.body.classList.remove('viewing');
@@ -234,6 +245,12 @@ export class Viewer {
       this._textFocus(m.editable === true, m.secure === true);
     } else if (m.t === 'windows') {
       this._setWindows(Array.isArray(m.list) ? m.list : []);
+    } else if (m.t === 'apps') {
+      this._setApps(Array.isArray(m.list) ? m.list : []);
+    } else if (m.t === 'app-icon') {
+      this._appIcon(m);
+    } else if (m.t === 'app') {
+      this._appAnswer(m);
     } else if (m.t === 'mic') {
       // The Mac couldn't play the microphone (its sound output went away), or stopped it.
       if (m.on === false && this.micOn) {
@@ -302,7 +319,9 @@ export class Viewer {
     if (Array.isArray(st.displays)) this._setDisplays(st.displays, st.display);
     if (st.levels && typeof st.levels === 'object') this._showLevels(st.levels);
     // Which window is being shown, if any. Just after choosing one here the Mac's older notes still say otherwise.
-    if ('window' in st && performance.now() >= (this.windowChosenAt ?? -Infinity) + 1500) this._showWindow(st.window ?? null);
+    if ('window' in st && !this.app && performance.now() >= (this.windowChosenAt ?? -Infinity) + 1500) this._showWindow(st.window ?? null);
+    // Which app, in app mode. The same: a choice made here a moment ago wins over older notes.
+    if ('app' in st && performance.now() >= (this.appChosenAt ?? -Infinity) + 2500) this._statusApp(st.app ?? null);
   }
 
   // --- clipboard text ---
@@ -583,6 +602,19 @@ export class Viewer {
   // The windows on the Mac right now, asked for each time the menu opens.
   _setWindows(list) {
     const sel = this.$('optWindow');
+    if (this.app) {
+      // App mode: only that app's windows, and choosing one brings it to the front. Offered once there are two.
+      const own = list.filter(w => Number.isInteger(w?.id));
+      sel.replaceChildren(...own.map(w => {
+        const o = document.createElement('option');
+        o.value = String(w.id);
+        o.textContent = (String(w.title ?? '').trim() || this.app.name).slice(0, 60);
+        return o;
+      }));
+      this.$('windowWrap').hidden = own.length < 2;
+      return;
+    }
+    this.$('windowWrap').hidden = !this.canWindow;
     const whole = document.createElement('option');
     whole.value = '';
     whole.textContent = 'The whole screen';
@@ -615,6 +647,11 @@ export class Viewer {
   _chooseWindow(value) {
     const id = value === '' ? null : Number(value);
     if (id !== null && !Number.isInteger(id)) return;
+    if (this.app) {
+      if (id !== null) this.session.send({ t: 'app-raise', id });
+      this._toggleMenu(false);
+      return;
+    }
     this.windowChosenAt = performance.now();
     this._showWindow(id);
     this.session.send({ t: 'window', id });
@@ -626,6 +663,296 @@ export class Viewer {
     if (this.windowId == null || !(box.width > 0 && box.height > 0)) return;
     this.session.send({ t: 'fit', w: Math.round(box.width), h: Math.round(box.height) });
     this._toggleMenu(false);
+  }
+
+  // --- app mode: one of the Mac's apps on its own, shaped like this screen (docs/PROTOCOL.md, "app mode") ---
+
+  _wireApps() {
+    const $ = this.$;
+    this.appIcons = new Map();   // `${id}|${size}` -> data: URL
+    this.iconsAsked = new Set();
+    this.iconQueue = new Set();
+    this.appsList = null;
+    this.app = null;             // {id, name} while in app mode
+    this.appWanted = null;       // asked for, not yet confirmed
+    this.baseTitle = document.title;
+    this.canApps = !this.guest && !!this.session.caps?.includes('apps');
+    $('optApps').hidden = !this.canApps;
+    $('tbWhole').hidden = $('optWhole').hidden = true;
+    this._on($('optApps'), 'click', () => this._openAppsSheet());
+    this._on($('appsClose'), 'click', () => this._closeAppsSheet());
+    this._on($('appsSheet'), 'keydown', e => { if (e.key === 'Escape') { e.preventDefault(); this._closeAppsSheet(); } });
+    this._on($('appsSheet'), 'click', e => { if (e.target === $('appsSheet')) this._closeAppsSheet(); });
+    this._on($('appsSearch'), 'input', () => this._renderApps());
+    this._on($('appsSearch'), 'keydown', e => {
+      // Enter opens the only match.
+      if (e.key !== 'Enter') return;
+      const only = $('appsGrid').querySelectorAll('.app-tile');
+      if (only.length === 1) { e.preventDefault(); only[0].click(); }
+    });
+    $('optAppHide').checked = !!this.prefs.get('appHide');
+    this._on($('optAppHide'), 'change', e => {
+      this.prefs.set('appHide', e.target.checked);
+      if (this.app) this._sendApp(this.app.id);
+    });
+    this._on($('tbWhole'), 'click', () => this._leaveApp());
+    this._on($('optWhole'), 'click', () => this._leaveApp());
+  }
+
+  // The shape the app should take: this whole viewer (in app mode the bar sits over the picture, not beside it).
+  _appBox() {
+    const box = this.root.getBoundingClientRect();
+    return box.width > 0 && box.height > 0 ? { w: Math.round(box.width), h: Math.round(box.height) } : null;
+  }
+
+  _sendApp(id) {
+    const box = this._appBox();
+    if (!box) return false;
+    this.lastAppShape = box.w / box.h;
+    this.session.send({ t: 'app', id, w: box.w, h: box.h, hide: !!this.prefs.get('appHide') });
+    return true;
+  }
+
+  _openApp(id, name) {
+    if (this.guest || this.over) return;
+    if (!this.canApps) {
+      this.banners.show('app', { kind: 'warn', icon: 'warn', title: "The Perch on this Mac can't open apps on their own yet.",
+        body: 'Update Perch on the Mac (Setup › About), then try again.', dismissible: true });
+      return;
+    }
+    if (!this.inputAllowed) return this._appAnswer({ ok: false, id, error: 'view-only' });
+    this.appWanted = { id, name };
+    this.appChosenAt = performance.now();
+    if (!this._sendApp(id)) return;
+    this.banners.show('app', { kind: 'info', icon: 'apps', title: `Opening ${name}\u2026` });
+  }
+
+  _leaveApp() {
+    if (!this.app && !this.appWanted) return;
+    this._toggleMenu(false);
+    this.appChosenAt = performance.now();
+    this.session.send({ t: 'app', id: null });
+    this._appOff();
+    this.surface.focus({ preventScroll: true });
+  }
+
+  // The device turned (or the window changed shape): the app takes the new shape. Not while a phone's keyboard is
+  // up, which only shortens the page for a moment.
+  _appRefit() {
+    if (!this.app && !this.appWanted) return;
+    clearTimeout(this.appFitTimer);
+    this.appFitTimer = setTimeout(() => {
+      const a = this.app ?? this.appWanted;
+      if (!a || this.over || this.keys?.softKeyboardOpen) return;
+      const box = this._appBox();
+      if (!box || (this.lastAppShape && Math.abs(box.w / box.h / this.lastAppShape - 1) < 0.03)) return;
+      this._sendApp(a.id);
+    }, 450);
+  }
+
+  // The Mac's answer: app mode began, or it couldn't (or the app quit).
+  _appAnswer(m) {
+    if (typeof m.id !== 'string') return;
+    const known = this.appWanted?.id === m.id ? this.appWanted : this.app?.id === m.id ? this.app : null;
+    const name = (typeof m.name === 'string' && m.name) || known?.name || this.appsList?.find(a => a.id === m.id)?.name || 'The app';
+    if (m.ok === true) {
+      this.banners.hide('app');
+      if (known) this._appOn(m.id, name);
+      return;
+    }
+    if (known) this._appOff();
+    const words = {
+      'not-found': [`${name} isn't one of the apps on your Mac.`, 'It may have been moved or deleted. Choose another in More › Open an app.'],
+      'launch-failed': [`Your Mac couldn't open ${name}.`, 'Try opening it at the Mac, or choose another app.'],
+      'view-only': ["Your Mac hasn't let Perch control it yet.", 'Apps open on their own once Perch is turned on in System Settings › Privacy & Security › Accessibility on the Mac.'],
+      quit: [`${name} quit on your Mac.`, 'This is the whole Mac again.'],
+      'test-run': ['Apps aren\u2019t opened in test runs.', ''],
+    }[m.error] ?? [`${name} couldn't be opened.`, ''];
+    this.banners.show('app', { kind: m.error === 'quit' ? 'info' : 'warn', icon: m.error === 'quit' ? 'info' : 'warn',
+      title: words[0], body: words[1], dismissible: true });
+  }
+
+  // The Mac's notes say which app it is showing.
+  _statusApp(id) {
+    if (id === (this.app?.id ?? null)) return;
+    if (id === null) {
+      if (this.app) this._appOff();
+      return;
+    }
+    const name = this.appWanted?.id === id ? this.appWanted.name : this.appsList?.find(a => a.id === id)?.name ?? id;
+    this._appOn(id, name);
+  }
+
+  _appOn(id, name) {
+    const same = this.app?.id === id;
+    this.app = { id, name };
+    if (this.appWanted?.id === id) this.appWanted = null;
+    if (same) {
+      if (this.$('tbName').textContent !== name) { this.$('tbName').textContent = name; if (!this.guest) this._appShortcut(this.app); }
+      return;
+    }
+    const $ = this.$;
+    this.root.classList.add('app-mode');
+    $('tbName').textContent = name;
+    // A guest watches whatever the owner chose: the app's name, and nothing to change it with.
+    if (this.guest) return;
+    $('tbWhole').hidden = $('optWhole').hidden = false;
+    $('tbHide').hidden = true; // the bar always tucks itself away in app mode
+    $('optWhole').lastChild.textContent = `Leave ${name}: the whole Mac`;
+    $('optFit').hidden = true;
+    $('windowWrap').hidden = true; // until the app has two windows to choose between
+    $('windowWrap').querySelector('span').textContent = 'Window';
+    this.windowId = null;
+    this.setView(IDENTITY);
+    this._placeToolbar();
+    this._showToolbar();
+    this._appShortcut(this.app);
+    this.onAppChange({ id, name });
+    // On a phone or tablet the page can go on the home screen as this app: say how, the first time for each app.
+    const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    const tips = this.prefs.get('appTips') ?? [];
+    if (this.touchFirst && !standalone && !tips.includes(id)) {
+      this.prefs.set('appTips', [...tips, id].slice(-40));
+      this.banners.show('apptip', { kind: 'info', icon: 'apps', title: `${name} on your Home Screen:`,
+        body: this.apple ? 'tap Share, then Add to Home Screen.' : 'open the browser\u2019s menu, then Add to Home screen.',
+        dismissible: true });
+      clearTimeout(this.appTipTimer);
+      this.appTipTimer = setTimeout(() => this.banners.hide('apptip'), 12000);
+    }
+  }
+
+  _appOff() {
+    const was = this.app;
+    this.app = null;
+    this.appWanted = null;
+    this.banners.hide('apptip');
+    if (!was) return;
+    const $ = this.$;
+    this.root.classList.remove('app-mode');
+    $('tbName').textContent = this.ready.name || this.hi.name || 'your Mac';
+    if (this.guest) return;
+    $('tbWhole').hidden = $('optWhole').hidden = true;
+    $('tbHide').hidden = false;
+    $('windowWrap').querySelector('span').textContent = 'Show';
+    $('windowWrap').hidden = !this.canWindow;
+    this._setWindows([]);
+    this.setView(IDENTITY);
+    this._placeToolbar();
+    this._appShortcut(null);
+    this.onAppChange(null);
+  }
+
+  // The page as a link to the app: its address, name and icons, so adding it to a home screen (or bookmarking it)
+  // gives one that opens this app. Without an app, plain Perch again.
+  _appShortcut(app) {
+    try {
+      const u = new URL(location.href);
+      if (app) { u.searchParams.set('app', app.id); u.searchParams.set('name', app.name); } else { u.searchParams.delete('app'); u.searchParams.delete('name'); }
+      history.replaceState(history.state, '', `${u.pathname}${u.search}`);
+    } catch { /* a page without history (about:blank copies): the name and icon still change */ }
+    document.title = app ? app.name : this.baseTitle;
+    setHeadMeta('apple-mobile-web-app-title', app ? app.name : null);
+    setHeadMeta('apple-mobile-web-app-capable', app ? 'yes' : null);
+    setHeadMeta('mobile-web-app-capable', app ? 'yes' : null);
+    if (!app) {
+      setHeadLink('apple-touch-icon', null);
+      setHeadLink('icon', 'img/icon.svg', 'image/svg+xml');
+      return;
+    }
+    const tile = this.appIcons.get(`${app.id}|180`), small = this.appIcons.get(`${app.id}|96`);
+    if (tile) setHeadLink('apple-touch-icon', tile); else this.session.send({ t: 'app-icons', ids: [app.id], size: 180 });
+    if (small) setHeadLink('icon', small, 'image/png'); else this._wantIcon(app.id);
+  }
+
+  _openAppsSheet() {
+    const $ = this.$;
+    this._toggleMenu(false);
+    $('appsSheet').hidden = false;
+    $('appsStatus').textContent = this.appsList ? '' : 'Asking your Mac which apps it has\u2026';
+    this.session.send({ t: 'apps' });
+    this._renderApps();
+    // A keyboard is at hand on a computer: straight into the search. A phone's would cover the apps.
+    if (this.touchFirst) $('appsTitle').focus(); else $('appsSearch').focus();
+  }
+
+  _closeAppsSheet() {
+    this.$('appsSheet').hidden = true;
+    this.iconObserver?.disconnect();
+    this.surface.focus({ preventScroll: true });
+  }
+
+  _setApps(list) {
+    this.appsList = list.filter(a => typeof a?.id === 'string' && a.id && typeof a.name === 'string').slice(0, 400)
+      .map(a => ({ id: a.id, name: a.name.slice(0, 80) || a.id, running: a.running === true }));
+    if (!this.$('appsSheet').hidden) this._renderApps();
+  }
+
+  _renderApps() {
+    const $ = this.$;
+    const grid = $('appsGrid');
+    const q = $('appsSearch').value.trim().toLowerCase();
+    const list = (this.appsList ?? []).filter(a => !q || a.name.toLowerCase().includes(q));
+    this.iconObserver?.disconnect();
+    this.iconObserver = 'IntersectionObserver' in window ? new IntersectionObserver(entries => {
+      for (const e of entries) if (e.isIntersecting) this._wantIcon(e.target.dataset.id);
+    }, { root: grid, rootMargin: '160px 0px' }) : null;
+    grid.replaceChildren(...list.map(a => {
+      const li = document.createElement('li');
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `app-tile${a.running ? ' running' : ''}`;
+      b.dataset.id = a.id;
+      b.setAttribute('aria-label', `${a.name}${a.running ? ' (open on the Mac)' : ''}`);
+      b.title = a.name;
+      const img = document.createElement('img');
+      img.className = 'app-icon';
+      img.alt = '';
+      img.width = img.height = 52;
+      img.decoding = 'async';
+      const url = this.appIcons.get(`${a.id}|96`);
+      if (url) img.src = url;
+      const n = document.createElement('span');
+      n.className = 'app-name';
+      n.textContent = a.name;
+      b.append(img, n);
+      b.addEventListener('click', () => { this._closeAppsSheet(); this._openApp(a.id, a.name); }); // replaced with the grid
+      li.append(b);
+      if (this.iconObserver) this.iconObserver.observe(b); else this._wantIcon(a.id);
+      return li;
+    }));
+    if (!this.appsList) return;
+    $('appsStatus').textContent = list.length ? '' : q ? `No app's name has \u201c${$('appsSearch').value.trim()}\u201d in it.`
+      : 'Your Mac didn\u2019t list any apps.';
+  }
+
+  // Icons are asked for as their tiles scroll into view, a few dozen at a time.
+  _wantIcon(id) {
+    if (!id || this.iconsAsked.has(id) || this.appIcons.has(`${id}|96`)) return;
+    this.iconQueue.add(id);
+    clearTimeout(this.iconTimer);
+    this.iconTimer = setTimeout(() => {
+      const ids = [...this.iconQueue].filter(i => !this.iconsAsked.has(i)).slice(0, 60);
+      this.iconQueue.clear();
+      if (!ids.length || this.over) return;
+      for (const i of ids) this.iconsAsked.add(i);
+      this.session.send({ t: 'app-icons', ids, size: 96 });
+    }, 60);
+  }
+
+  _appIcon(m) {
+    if (typeof m.id !== 'string' || (m.size !== 96 && m.size !== 180) || !['image/png', 'image/jpeg'].includes(m.mime) ||
+        typeof m.data !== 'string' || !m.data || m.data.length > 48000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(m.data)) return;
+    const url = `data:${m.mime};base64,${m.data}`;
+    this.appIcons.set(`${m.id}|${m.size}`, url);
+    if (m.size === 96) {
+      for (const b of this.$('appsGrid').querySelectorAll('.app-tile')) {
+        if (b.dataset.id === m.id) b.querySelector('img').src = url;
+      }
+      if (this.app?.id === m.id) setHeadLink('icon', url, 'image/png');
+    } else if (this.app?.id === m.id) {
+      setHeadLink('apple-touch-icon', url);
+      this.onAppIcon(m.id, url);
+    }
   }
 
   // --- regular checks ---
@@ -905,13 +1232,15 @@ export class Viewer {
       this.session.send({ t: 'mic', on: false });
     };
     // One window at a time, on Macs that offer it.
-    const canWindow = !this.guest && !!this.session.caps?.includes('window');
+    const canWindow = this.canWindow = !this.guest && !!this.session.caps?.includes('window');
     $('windowWrap').hidden = !canWindow;
     $('optFit').hidden = true;
     this.windowId = null;
     this._setWindows([]);
     on('optWindow', 'change', e => this._chooseWindow(e.target.value));
     on('optFit', 'click', () => this._fitWindow());
+    // App mode, on Macs that offer it: one app on its own, shaped like this screen.
+    this._wireApps();
     on('optKeyframe', 'click', () => { this.session.send({ t: 'keyframe' }); this._toggleMenu(false); });
     on('tbBye', 'click', () => this.onLeave());
 
@@ -1135,7 +1464,7 @@ export class Viewer {
     if (show) {
       this._toggleDisplayMap(false);
       this._showToolbar();
-      if (!this.$('windowWrap').hidden) this.session.send({ t: 'windows' });
+      if (this.canWindow) this.session.send({ t: 'windows' });
     }
   }
 
@@ -1293,6 +1622,8 @@ export class Viewer {
   // Unless chosen otherwise, the bar stays put with a mouse and hides itself on touch screens (small, and a tap on
   // the handle is easy there).
   _autoHide() {
+    // App mode: the app has the whole screen, and the bar comes back from its tab or the edge.
+    if (this.app) return true;
     const v = this.prefs.get('tbAutoHide');
     return typeof v === 'boolean' ? v : !!this.touchFirst;
   }
@@ -1720,4 +2051,21 @@ function blobToBase64(blob) {
     r.onerror = () => reject(r.error);
     r.readAsDataURL(blob);
   });
+}
+
+// One <meta name=…> in the page's head: set, or (content null) removed.
+function setHeadMeta(name, content) {
+  let m = document.head.querySelector(`meta[name="${name}"]`);
+  if (content == null) { m?.remove(); return; }
+  if (!m) { m = document.createElement('meta'); m.name = name; document.head.append(m); }
+  m.content = content;
+}
+
+// One <link rel=…> in the page's head: pointed elsewhere, or (href null) removed.
+function setHeadLink(rel, href, type) {
+  let l = document.head.querySelector(`link[rel="${rel}"]`);
+  if (href == null) { l?.remove(); return; }
+  if (!l) { l = document.createElement('link'); l.rel = rel; document.head.append(l); }
+  if (type) l.type = type; else l.removeAttribute('type');
+  l.href = href;
 }

@@ -29,6 +29,7 @@ const PATHS = {
   zoom: 'M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM21 21l-5-5M8 11h6',
   blank: 'M5 3h10l4 4v14H5zM15 3v4h4',
   tab: 'M3 7h18v13H3zM3 7l3-4h6l2 4',
+  apps: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
 };
 
 const NS = 'http://www.w3.org/2000/svg';

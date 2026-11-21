@@ -16,6 +16,8 @@ export function defaultPrefs({ apple = false } = {}) {
     clipSync: true, // what's copied on the Mac lands on this device's clipboard by itself
     mouseSpeed: 1, // a captured mouse: how far it moves the Mac's pointer (0.2 to 2, 1 = as on this screen)
     shape: 'fit', // the picture on this screen: 'fit' (whole, bars where the shapes differ), 'fill' or 'stretch'
+    appHide: false, // app mode: hide the app on the Mac when leaving it
+    appTips: [],    // app mode: the apps whose "put it on your home screen" tip has been shown
   };
 }
 
@@ -36,7 +38,7 @@ export class Prefs {
         if (Number.isFinite(saved.volume)) this.values.volume = Math.min(1, Math.max(0, saved.volume));
         if (typeof saved.muted === 'boolean') this.values.muted = saved.muted;
         if (typeof saved.stats === 'boolean') this.values.stats = saved.stats;
-        for (const k of ['captureOnClick', 'hideCursor', 'tbAutoHide', 'clipSync', 'tbHideNoted']) if (typeof saved[k] === 'boolean') this.values[k] = saved[k];
+        for (const k of ['captureOnClick', 'hideCursor', 'tbAutoHide', 'clipSync', 'tbHideNoted', 'appHide']) if (typeof saved[k] === 'boolean') this.values[k] = saved[k];
         if (['top', 'bottom', 'left', 'right'].includes(saved.tbEdge)) this.values.tbEdge = saved.tbEdge;
         if (Number.isFinite(saved.tbPos)) this.values.tbPos = Math.min(1, Math.max(0, saved.tbPos));
         if (Array.isArray(saved.keysBar)) this.values.keysBar = saved.keysBar.slice(0, 80);
@@ -44,6 +46,7 @@ export class Prefs {
         if (typeof saved.swipe === 'string') this.values.swipe = saved.swipe;
         if (Number.isFinite(saved.mouseSpeed)) this.values.mouseSpeed = Math.min(2, Math.max(0.2, saved.mouseSpeed));
         if (['fit', 'fill', 'stretch'].includes(saved.shape)) this.values.shape = saved.shape;
+        if (Array.isArray(saved.appTips)) this.values.appTips = saved.appTips.filter(id => typeof id === 'string' && id.length <= 200).slice(-40);
       }
     } catch { /* keep the defaults */ }
   }

@@ -26,6 +26,11 @@ export const CLIP_PART_CHARS = 48 * 1024;
 const MAX_CLIP_B64 = Math.ceil(MAX_CLIP_IMAGE / 3) * 4;
 const CLIP_PART_RATE = { rate: 400, burst: 600 }; // pieces of an image only; everything else has CONTROL_RATE
 const B64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+// App mode (docs/PROTOCOL.md): apps are named by bundle identifier.
+export const APP_ID_RE = /^[A-Za-z0-9._-]{1,200}$/;
+export const MAX_APP_ICONS = 60;
+export const APP_ICON_CHARS = 48000;
+const APP_ICON_RATE = { rate: 1, burst: 12 }; // icon requests (each up to 60 icons): a grid scrolled through
 export const STATUS_EVERY_MS = 2000;
 export const MAX_CODE_TRIES = 3;
 export const BYE_REASONS = ['signed-in-elsewhere', 'paused', 'quit', 'idle', 'removed', 'disconnected'];
@@ -63,6 +68,8 @@ export class Session {
     this.inputRate = new RateLimiter(INPUT_RATE);
     this.pointerRate = new RateLimiter(POINTER_RATE);
     this.micRate = new RateLimiter({ rate: 120, burst: 120 });
+    this.appIconRate = new RateLimiter(APP_ICON_RATE);
+    this.app = null;            // app mode: {id, aspect, hide}, or null
     this.stats = { inputDroppedBeforeSignIn: 0, inputForwarded: 0, inputRejected: 0 };
     this.timers = new Set();
     this.subs = [];
@@ -559,13 +566,56 @@ export class Session {
         return;
       }
       case 'window': {
-        // Show one window (the picture follows it), or null for the whole display again.
+        // Show one window (the picture follows it), or null for the whole display again. Either leaves app mode.
         const id = msg.id === null ? null : (Number.isInteger(msg.id) && msg.id > 0 && msg.id <= 0xffffffff ? msg.id : undefined);
-        if (id === undefined || id === (this.window ?? null)) return;
+        if (id === undefined || (id === (this.window ?? null) && !this.app)) return;
         this.window = id;
+        this.app = null;
         this.hub.captureChanged(this);
         return;
       }
+      case 'apps': {
+        // Which apps could be opened in app mode. The answer comes back as {t:'apps', list}.
+        const now = this.now();
+        if (now - (this.appsAskedAt ?? -Infinity) < 1000) return;
+        this.appsAskedAt = now;
+        this.hub.listApps?.(this);
+        return;
+      }
+      case 'app-icons': {
+        // Icons for the app grid (96) or a home-screen icon (180), each answered with its own {t:'app-icon'}.
+        const ids = Array.isArray(msg.ids) ? [...new Set(msg.ids.filter(id => typeof id === 'string' && APP_ID_RE.test(id)))] : [];
+        if (!ids.length || ids.length > MAX_APP_ICONS || !this.appIconRate.take()) return;
+        this.hub.appIcons?.(this, ids, msg.size === 180 ? 180 : 96);
+        return;
+      }
+      case 'app': {
+        // App mode for one app, shaped w:h like the viewer's screen; id null leaves it.
+        if (msg.id === null) {
+          if (!this.app) return;
+          this.app = null;
+          this.hub.captureChanged(this);
+          this.sendStatus();
+          return;
+        }
+        if (typeof msg.id !== 'string' || !APP_ID_RE.test(msg.id)) return;
+        if (!(msg.w >= 1 && msg.w <= 20000 && msg.h >= 1 && msg.h <= 20000)) return;
+        // Starting apps and moving their windows is control of the Mac: not while it is view only.
+        if (!this.hub.permissions?.accessibility) return this._send({ t: 'app', ok: false, id: msg.id, error: 'view-only' });
+        const aspect = Math.round(Math.min(4, Math.max(0.25, msg.w / msg.h)) * 10000) / 10000;
+        const next = { id: msg.id, aspect, hide: msg.hide === true };
+        const a = this.app;
+        if (a && a.id === next.id && a.aspect === next.aspect && a.hide === next.hide) return;
+        this.app = next;
+        this.window = null;
+        this.hub.captureChanged(this);
+        return;
+      }
+      case 'app-raise':
+        // One of the windows of the app being shown, to the front.
+        if (!this.app || !Number.isInteger(msg.id) || msg.id <= 0 || msg.id > 0xffffffff) return;
+        this.hub.appRaise?.(this, msg.id);
+        return;
       case 'clip-get': {
         // The Mac's clipboard text, for the viewer to copy. Answered with {t:'clip', ok, text}.
         const now = this.now();
@@ -649,11 +699,15 @@ export class Session {
     this._send({
       t: 'status', locked: !!this.hub.locked, link: this.media.bitrate.link, kbps: s.kbps, fps: s.fps,
       width: cap.width ?? 0, height: cap.height ?? 0, input: !this.guest && !!this.hub.permissions.accessibility,
-      window: cap.window ?? null, ...extra,
+      window: cap.window ?? null, app: cap.app ?? null, ...extra,
     });
   }
 
   sendWindows(list) { if (this.state === 'ready' && !this.guest) this._send({ t: 'windows', list }); }
+  sendApps(list) { if (this.state === 'ready' && !this.guest) this._send({ t: 'apps', list }); }
+  sendAppIcon(icon) { if (this.state === 'ready' && !this.guest) this._send({ t: 'app-icon', ...icon }); }
+  // App mode began ({ok: true, name}) or couldn't, or the app quit (error 'quit').
+  sendApp(m) { if (this.state === 'ready' && !this.guest) this._send({ t: 'app', ...m }); }
   // The Mac's clipboard: text, and a PNG (base64) sent ahead in clip-part pieces. auto: copied on the Mac just now.
   sendClip(text, ok = true, { image = null, auto = false } = {}) {
     if (this.state !== 'ready' || this.guest) return;

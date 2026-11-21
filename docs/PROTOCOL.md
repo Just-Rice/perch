@@ -330,6 +330,40 @@ viewer sees is always what their clicks reach. Pointer positions stay 0..1 acros
 to the front when chosen. When it closes, is minimised or leaves the desktop, the Mac goes back to the whole display
 (`status.window` becomes `null`). Choosing another display forgets the window.
 
+For Macs with `apps` in `caps` (never for guests): **app mode**, one Mac app shaped like the viewer's screen.
+
+- `{t:"apps"}` asks which apps there are; answered `{t:"apps", list: [{id, name, running}]}`, sorted by name, `id`
+  being the bundle identifier. Listed: the apps in `/Applications`, `/Applications/Utilities`, `/System/Applications`,
+  `/System/Applications/Utilities` and `~/Applications` (and one folder down in each), plus Finder; never one that
+  runs without windows of its own (menu bar extras, helpers), nor Perch itself.
+- `{t:"app-icons", ids, size}` (at most 60 ids from that list; `size` 96 or 180) asks for their icons. Each comes back
+  on its own as `{t:"app-icon", id, size, mime, data}` (base64, at most 48,000 characters). 96 is the icon as it is
+  (PNG, transparent around it); 180 is the icon filling a white square, its margin cut off (JPEG), as a phone's home
+  screen wants it.
+- `{t:"app", id, w, h, hide?}` opens app mode for one of the listed apps. The Mac starts it if it isn't running (or
+  asks it for a window if it has none) and brings it to the front, and the picture becomes the **stage**: the
+  top-left part of the display being shown, of the shape `w:h`, as large as fits above the Dock, starting at the top
+  of the display so the strip of menu bar above the app (its menus) is in the picture. Each of the app's windows is
+  moved onto the stage as it appears: ordinary windows fill it (the part below the menu bar); dialogs and panels go in
+  its middle, made smaller if they don't fit. A window moved off the stage goes back onto it a moment later. A window
+  that can't be made as small as the stage keeps its smallest size and the picture grows to show all of it (the
+  viewer then shows it as any picture of another shape). Answered `{t:"app", ok, id, name?, error?}` (`error`:
+  `not-found` for an app that isn't listed, `launch-failed`, `view-only` when the Mac hasn't allowed Perch to control
+  it, `test-run`, and later `quit` when the app quits while shown); `status.app` is the id of the app being shown, or
+  `null`. The same message with the same `id` and
+  another `w:h` (the device turned) reshapes the stage and moves the windows again. `{t:"app", id: null}` leaves app
+  mode: every window Perch moved goes back to where it was, at its old size; if `hide` was true the app is then hidden;
+  and the picture is the whole display again. Leaving happens too when the session ends, when the app quits
+  (`status.app` becomes `null`) and when Perch quits. Choosing another display moves the stage there; choosing one
+  window (`window`) leaves app mode.
+- While in app mode, `{t:"windows"}` lists only that app's windows, and `{t:"app-raise", id}` brings one of them to
+  the front.
+
+The viewer keeps a link to an app (`connect.html?app=<id>&name=<name>`, the address while in app mode): after signing
+in from it, the viewer asks for app mode for that app straight away. While in app mode the page is named after the
+app and its `apple-touch-icon` is the app's 180 icon, so adding the page to a phone's home screen gives an icon that
+opens that app.
+
 For Macs with `clipboard` in `caps` (never for guests): `{t:"clip-set", text, paste?}` puts the text (at most 30,000
 UTF-16 units) on the Mac's clipboard and, with `paste: true`, presses ⌘V there; answered `{t:"clip-set", ok}`.
 `{t:"clip-get"}` asks for the Mac's clipboard text (cut to 30,000 units); answered `{t:"clip", ok, text}`.
@@ -353,9 +387,9 @@ Setup (`settings.micOutput`, a device UID, or `""` for the Mac's current output)
 from the Mac means it could not play it (the output is gone) and the viewer should stop sending. What Perch plays is
 left out of the sound it sends, so the viewer doesn't hear themselves.
 
-Mac → viewer: `{t:"pong", n, ts}`, `{t:"status", locked, link: "good"|"slow", kbps, fps, width, height, input, window}`
-(`window`: the id of the one window being shown, or `null`; plus `displays` and `display` when the Mac's displays
-change),
+Mac → viewer: `{t:"pong", n, ts}`, `{t:"status", locked, link: "good"|"slow", kbps, fps, width, height, input, window, app}`
+(`window`: the id of the one window being shown, or `null`; `app`: the app being shown in app mode, or `null`; plus
+`displays` and `display` when the Mac's displays change),
 `{t:"error", code, message}` (codes: `no-screen-permission`, `capture-failed`), `{t:"bye", reason}`
 (`signed-in-elsewhere | paused | quit | idle | removed | disconnected`).
 
@@ -396,19 +430,25 @@ stdout (host → app). stderr is the host's log. Every frame is `[u32 big-endian
 | `0x12` MIC | host → app | `u16 BE sequence number` · one Opus packet of the viewer's microphone |
 
 Events (`e`): `clipboard-changed {}` (while a viewer is connected, something other than Perch changed the clipboard), `text-focus {editable, secure}` (a moment after each left click: whether the focused element now takes
-typing, from Accessibility; test runs pretend the top half of the screen is a text box), `permissions {screen, accessibility}`, `displays {displays}`, `capture-started {display, width, height, fps, window?}`,
+typing, from Accessibility; test runs pretend the top half of the screen is a text box), `permissions {screen, accessibility}`, `displays {displays}`, `capture-started {display, width, height, fps, window?, app?}`,
 `audio-outputs {list: [{uid, name, main}]}` (after HELLO and whenever the Mac's sound outputs change),
 `mic {on, ok, error?}`, `mic-level {packets, frames, late, rms}` (test runs only, which decode but never play),
 `windows {list}`, `window-gone {window}` (the window being shown left the screen; the app is already showing the
-whole display), `window-fit {window, ok, error?}`,
+whole display), `window-fit {window, ok, error?}`, `apps {list}`, `app-icon {id, size, mime, data}`,
+`app-mode {id, ok, name?, error?}` (app mode began, or couldn't), `app-gone {id}` (the app in app mode quit; the
+app has put back its windows),
 `capture-stopped {reason}`, `capture-error {code, message}`, `lock {locked}`, `login-item {on, status, error?}`,
 `menu {action}` (`pause | resume | disconnect | backup-on | backup-off | keep-awake-on | keep-awake-off |
 login-item-on | login-item-off | check-updates | update | restart | quit`), `input-echo {ev}` (only with `--echo-input`),
 `log {level, message}`.
 
 Commands (`c`): `capture {on, display?, maxEdge, fps, kbps, audio, window?, profile?, maxQp?, speakers?, stream?}` (`window`: show only
-the part of the display that window covers, following it; `maxQp`: the coarsest H.264 quantiser the encoder may use,
-18–51, so on a slow link it drops frames instead of blurring; the Sharp preset sends it), `windows {}` (asks for a `windows` event), `window-fit {window, w, h}`
+the part of the display that window covers, following it; `app: {id, aspect, hide}`: app mode for that app, `aspect`
+being width ÷ height; the app leaves app mode, putting the windows back, at the first `capture` without it or when
+capture stops; `maxQp`: the coarsest H.264 quantiser the encoder may use,
+18–51, so on a slow link it drops frames instead of blurring; the Sharp preset sends it), `windows {app?}` (asks for a `windows` event; with `app`, only that app's windows), `apps {}` (asks for an `apps`
+event), `app-icons {ids, size}` (an `app-icon` event for each), `app-raise {id}` (one of the windows of the app in app
+mode to the front), `window-fit {window, w, h}`
 (reshape it to `w:h` through Accessibility; never done in test runs), `clipboard-get {images?, auto?}` (answered with a `clipboard {ok, text, image?, mime?, auto?}` event; `image` is base64 PNG), `clipboard-set {text?, image?, paste?}` (answered with
 `clipboard-set {ok}`; test runs use a pretend clipboard), `mic {on, device?}` (start or stop playing
 MIC frames; only during a session), `keyframe {}`, `bitrate {kbps}`,

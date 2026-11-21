@@ -24,6 +24,14 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
     private var lastHostStatus: Int32?
 
     private let curtain = Curtain()
+    /// App mode: one app on a stage shaped like the viewer's screen.
+    private lazy var appMode: AppMode = {
+        let a = AppMode(synthetic: options.synthetic, allowChanges: systemChangesAllowed)
+        a.onEvent = { [weak self] e in self?.sendEvent(e) }
+        a.onPicture = { [weak self] id, r in self?.capture.setRegion(r, forApp: id) }
+        a.log = { Log.shared.info($0) }
+        return a
+    }()
     /// Plays the viewer's microphone. Made on first use: only the real app ever makes a sound.
     private lazy var mic: MicPlayer = {
         let m = MicPlayer(dryRun: !systemChangesAllowed)
@@ -197,6 +205,7 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         linkLock.withLock { link = nil }
         lastHostStatus = status
         // Everything the host had switched on goes with it; a new host starts from a clean slate and resends.
+        appMode.leave()
         capture.stop(reason: "host-exited", notify: false)
         endSession()
         power.setKeepAwake(false)
@@ -247,11 +256,18 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
                 if cmd["speakers"] != nil || cmd["stream"] != nil {
                     capture.setAudioLevels(AudioLevels(command: cmd, base: capture.audioLevels))
                 }
-                let request = CaptureRequest(command: cmd)
+                var request = CaptureRequest(command: cmd)
+                // App mode: the stage, on the display being shown. Without it (or when it can't be), the whole display.
+                if let display = Displays.find(request.displayID, synthetic: options.synthetic) {
+                    request.region = appMode.want(request.app, display: display)
+                    if request.region == nil { request.app = nil } else { request.displayID = display.id }
+                }
                 // A window just chosen comes to the front, so what the viewer sees is what their clicks reach.
                 if let wid = request.window, wid != capture.windowID { raiseWindow(wid) }
                 capture.capture(request)
-            case false?: capture.stop(reason: "requested")
+            case false?:
+                appMode.leave()
+                capture.stop(reason: "requested")
             case nil: warn("capture without on")
             }
         case "audio-levels":
@@ -281,7 +297,33 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         case "mic":
             setMic(JSONValue.bool(cmd["on"]) == true, device: JSONValue.string(cmd["device"]))
         case "windows":
-            sendEvent(["e": "windows", "list": Windows.list(synthetic: options.synthetic).map(\.json)])
+            // In app mode, only that app's windows.
+            let app = JSONValue.string(cmd["app"])
+            sendEvent(["e": "windows", "list": windows(of: app).map(\.json)])
+        case "apps":
+            let synthetic = options.synthetic
+            windowQueue.async { [weak self] in
+                let running = AppCatalog.running(synthetic: synthetic)
+                let list = AppCatalog.list(synthetic: synthetic).map { $0.json(running: running.contains($0.id)) }
+                self?.sendEvent(["e": "apps", "list": list])
+            }
+        case "app-icons":
+            let ids = (cmd["ids"] as? [Any])?.compactMap { $0 as? String }.prefix(60) ?? []
+            let size = JSONValue.int(cmd["size"]) == 180 ? 180 : 96
+            let synthetic = options.synthetic
+            iconQueue.async { [weak self] in
+                for id in ids {
+                    guard let app = AppCatalog.find(id, synthetic: synthetic),
+                          let icon = AppCatalog.icon(app, size: size, synthetic: synthetic) else { continue }
+                    self?.sendEvent(["e": "app-icon", "id": id, "size": size, "mime": icon.mime, "data": icon.data])
+                }
+            }
+        case "app-raise":
+            // One of the windows of the app in app mode, to the front.
+            if let wid = JSONValue.int(cmd["id"]), wid > 0, let app = appMode.appID,
+               windows(of: app).contains(where: { $0.id == UInt32(wid) }) {
+                raiseWindow(UInt32(wid))
+            }
         case "window-fit":
             if let wid = JSONValue.int(cmd["window"]), let w = JSONValue.number(cmd["w"]), let h = JSONValue.number(cmd["h"]),
                wid > 0, w > 0, h > 0 {
@@ -491,6 +533,16 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
 
     // Accessibility calls wait on the other app, so they stay off the main thread.
     private let windowQueue = DispatchQueue(label: "perch.windows", qos: .userInitiated)
+    private let iconQueue = DispatchQueue(label: "perch.icons", qos: .utility)
+
+    /// The windows on screen, or only those of one app (its bundle id). The pretend window is Test Notes'.
+    private func windows(of app: String?) -> [WindowInfo] {
+        let all = Windows.list(synthetic: options.synthetic)
+        guard let app else { return all }
+        if options.synthetic { return app == AppCatalog.testNotes ? all : [] }
+        let pids = Set(NSRunningApplication.runningApplications(withBundleIdentifier: app).map(\.processIdentifier))
+        return all.filter { pids.contains($0.pid) }
+    }
 
     private func raiseWindow(_ id: UInt32) {
         let synthetic = options.synthetic
@@ -638,6 +690,8 @@ final class AppController: NSObject, NSApplicationDelegate, @unchecked Sendable 
         menu?.remove()
         input.releaseAll(wait: true)
         power.releaseAll()
+        // Every window app mode moved goes back before Perch goes.
+        appMode.leaveNow(timeout: 2)
         capture.stop(reason: "quit", notify: false)
         let finish: (Int32?) -> Void = { [weak self] status in
             guard let self else { exit(0) }

@@ -44,6 +44,15 @@
     <!-- Home -->
     <section id="s-home" class="screen" aria-labelledby="h-home" hidden>
       <h1 id="h-home" tabindex="-1">Connect to your Mac</h1>
+      <!-- Opened from a link to one app (a home-screen icon): that app, straight away (app.js). -->
+      <div id="launchBlock" class="launch" hidden>
+        <img id="launchIcon" class="launch-icon" alt="" width="72" height="72" hidden>
+        <p class="lead" id="launchLead">Opens on your Mac, shaped to fit this screen.</p>
+        <div class="stack">
+          <button type="button" id="btnLaunch" class="btn primary big" data-icon="key">Open</button>
+        </div>
+        <p class="fine"><a id="launchAll" href="connect.html">Open all of Perch instead</a></p>
+      </div>
       <div id="macsBlock" hidden>
         <h2 class="label" id="macsLabel">Your Macs</h2>
         <ul id="macList" class="macs" aria-labelledby="macsLabel"></ul>
@@ -190,6 +199,7 @@
       <span id="dot" class="dot good" role="img" aria-label="Good connection"></span>
       <span id="tbName" class="tb-name">your Mac</span>
     </span>
+    <button type="button" id="tbWhole" class="tb-btn" data-icon="mac" title="The whole Mac" aria-label="Leave the app and show the whole Mac" hidden></button>
     <label class="tb-select">
       <span class="sr-only">Picture quality</span>
       <select id="tbQuality" title="Picture quality">
@@ -253,6 +263,8 @@
       <p class="fine" id="speakersNote" hidden>Keeping the Mac's speakers quiet needs macOS 14.2 or later on the Mac.</p>
     </div>
     <p class="menu-head" id="macHead">The Mac</p>
+    <button type="button" id="optApps" class="btn small" data-icon="apps" hidden>Open an app…</button>
+    <button type="button" id="optWhole" class="btn small" data-icon="mac" hidden>Leave the app: the whole Mac</button>
     <button type="button" id="optForceQuit" class="btn small" data-icon="warn" hidden>Force Quit an app…</button>
     <label class="check" id="touchpadWrap" hidden><input type="checkbox" id="optTouchpad"> Touchpad mode</label>
     <p class="fine" id="touchpadHelp" hidden>Your finger moves the Mac's pointer like a laptop's touchpad; tap to click
@@ -341,6 +353,23 @@
     <span class="kbd-fab-label" id="kbdFabLabel" aria-live="polite"></span>
     <textarea id="softkbd" class="softkbd" aria-label="Type on your Mac" autocapitalize="off" autocomplete="off"
       autocorrect="off" spellcheck="false" enterkeyhint="enter" rows="1"></textarea>
+  </div>
+
+  <!-- App mode: choose one of the Mac's apps to have on its own, shaped like this screen (viewer.js). -->
+  <div id="appsSheet" class="ended apps-sheet" role="dialog" aria-modal="true" aria-labelledby="appsTitle" hidden>
+    <div class="ended-card apps-card">
+      <div class="apps-head">
+        <h2 id="appsTitle" tabindex="-1">Open an app</h2>
+        <button type="button" id="appsClose" class="btn small quiet">Close</button>
+      </div>
+      <p class="fine" id="appsHelp">It opens on your Mac in a window shaped like this screen, and only that app is shown
+        here. Its windows go back where they were when you leave it.</p>
+      <input type="search" id="appsSearch" class="apps-search" placeholder="Search" aria-label="Search the Mac's apps"
+        autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="search">
+      <p id="appsStatus" class="fine" role="status"></p>
+      <ul id="appsGrid" class="apps-grid" aria-labelledby="appsTitle"></ul>
+      <label class="check"><input type="checkbox" id="optAppHide"> Hide the app on the Mac when I leave it</label>
+    </div>
   </div>
 
   <!-- Text to or from the Mac's clipboard, when the browser won't read or write this device's clipboard itself. -->

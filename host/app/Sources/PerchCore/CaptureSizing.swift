@@ -1,5 +1,6 @@
 // What size to capture and encode at, and the sane ranges for the host's capture settings.
 import Foundation
+import CoreGraphics
 
 public struct CaptureRequest: Equatable {
     public var displayID: UInt32?
@@ -13,6 +14,11 @@ public struct CaptureRequest: Equatable {
     public var high: Bool = false
     /// The coarsest quantiser the encoder may use (detail first: it drops frames instead), or nil for no limit.
     public var maxQP: Int?
+    /// App mode: this app, on a stage shaped like the viewer's screen (docs/PROTOCOL.md, "app mode").
+    public var app: AppTarget?
+    /// Show only this part of the display (its own points, top-left origin): app mode's stage. Not part of the
+    /// command; the app fills it in.
+    public var region: CGRect?
 
     public init(displayID: UInt32? = nil, maxEdge: Int = 1920, fps: Int = 30, kbps: Int = 5000, audio: Bool = true,
                 window: UInt32? = nil) {
@@ -30,7 +36,38 @@ public struct CaptureRequest: Equatable {
         window = JSONValue.number(c["window"]).flatMap { $0 >= 1 && $0 <= Double(UInt32.max) ? UInt32($0) : nil }
         high = JSONValue.string(c["profile"]) == "high"
         maxQP = JSONValue.int(c["maxQp"]).map(CaptureSizing.clampQP)
+        app = AppTarget(json: c["app"])
+        // One window or one app, never both: a window wins (the host never sends both).
+        if window != nil { app = nil }
     }
+}
+
+/// What app mode asks for: which app (its bundle id), the viewer's shape (width ÷ height) and whether to hide the app
+/// when app mode ends.
+public struct AppTarget: Equatable {
+    public var id: String
+    public var aspect: Double
+    public var hide: Bool
+
+    public init(id: String, aspect: Double, hide: Bool = false) {
+        self.id = id; self.aspect = AppTarget.clampAspect(aspect); self.hide = hide
+    }
+
+    public init?(json: Any?) {
+        guard let o = JSONValue.object(json), let id = JSONValue.string(o["id"]), AppTarget.validID(id),
+              let a = JSONValue.number(o["aspect"]), a > 0 else { return nil }
+        self.init(id: id, aspect: a, hide: JSONValue.bool(o["hide"]) == true)
+    }
+
+    /// Bundle identifiers: letters, digits, dots, hyphens (and underscores, which some old apps have).
+    public static func validID(_ s: String) -> Bool {
+        !s.isEmpty && s.utf8.count <= 200 && s.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) && $0.isASCII || $0 == "." || $0 == "-" || $0 == "_"
+        }
+    }
+
+    /// From a tall phone (1:4) to a wide one on its side (4:1).
+    public static func clampAspect(_ a: Double) -> Double { a.isFinite ? min(max(a, 0.25), 4) : 1 }
 }
 
 public enum CaptureSizing {

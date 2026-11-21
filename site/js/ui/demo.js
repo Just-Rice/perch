@@ -38,7 +38,7 @@ export function startDemo(app) {
     ctx.fillRect(w * 0.08, h * 0.12, w * 0.5, h * 0.55);
     ctx.fillStyle = '#141820';
     ctx.font = `600 ${Math.round(h / 16)}px system-ui, sans-serif`;
-    ctx.fillText('Perch demo', w * 0.11, h * 0.24);
+    ctx.fillText(appShown ? appShown.name : 'Perch demo', w * 0.11, h * 0.24);
     ctx.font = `${Math.round(h / 28)}px system-ui, sans-serif`;
     ctx.fillText(`${display.name} · ${display.width} × ${display.height}`, w * 0.11, h * 0.32);
     ctx.fillText(new Date().toLocaleTimeString(), w * 0.11, h * 0.39);
@@ -99,9 +99,33 @@ export function startDemo(app) {
     { id: 12, app: 'Safari', title: 'Perch', width: 1200, height: 800 },
   ];
   let shown = null;
+  // Pretend apps for app mode. Notes has two windows; asking for anything else is refused, as the Mac would.
+  const APPS = ['Calculator', 'Calendar', 'Finder', 'Mail', 'Maps', 'Messages', 'Music', 'Notes', 'Photos', 'Safari',
+    'System Settings', 'TextEdit'].map((name, i) => ({ id: `com.example.demo.${name.replace(/ /g, '')}`, name, running: i % 3 === 0 || name === 'Notes' }));
+  const APP_WINDOWS = [{ id: 21, app: 'Notes', title: 'Shopping list', width: 499, height: 982 }, { id: 22, app: 'Notes', title: 'Ideas', width: 499, height: 982 }];
+  let appShown = null; // the pretend app in app mode
+  const appIcon = (a, size) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const g = c.getContext('2d');
+    const hue = (APPS.indexOf(a) * 47) % 360;
+    if (size === 180) { g.fillStyle = '#fff'; g.fillRect(0, 0, size, size); }
+    g.fillStyle = `hsl(${hue} 65% 55%)`;
+    const m = size === 180 ? 0 : size * 0.1, r = size * 0.22;
+    g.beginPath();
+    g.roundRect(m, m, size - 2 * m, size - 2 * m, r);
+    g.fill();
+    g.fillStyle = '#fff';
+    g.font = `700 ${Math.round(size * 0.45)}px system-ui, sans-serif`;
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+    g.fillText(a.name[0], size / 2, size / 2 + size * 0.03);
+    const mime = size === 180 ? 'image/jpeg' : 'image/png';
+    return { mime, data: c.toDataURL(mime, 0.86).split(',')[1] };
+  };
   const session = {
     stream,
-    caps: ['window', 'textfocus', 'clipboard', 'clipimg', 'levels'],
+    caps: ['window', 'textfocus', 'clipboard', 'clipimg', 'levels', 'apps'],
     controlBacklog: () => 0,
     clipboard: 'Text copied on the demo Mac',
     onmessage: () => {},
@@ -132,8 +156,35 @@ export function startDemo(app) {
         this.clipParts = [];
         setTimeout(() => this.onmessage({ t: 'clip-set', ok }), 30);
       }
-      if (m.t === 'windows') setTimeout(() => this.onmessage({ t: 'windows', list: WINDOWS }), 20);
+      if (m.t === 'windows') setTimeout(() => this.onmessage({ t: 'windows', list: appShown ? (appShown.name === 'Notes' ? APP_WINDOWS : []) : WINDOWS }), 20);
+      if (m.t === 'apps') setTimeout(() => this.onmessage({ t: 'apps', list: APPS }), 40);
+      if (m.t === 'app-icons') {
+        for (const id of m.ids ?? []) {
+          const a = APPS.find(x => x.id === id);
+          if (a) setTimeout(() => this.onmessage({ t: 'app-icon', id, size: m.size, ...appIcon(a, m.size) }), 30);
+        }
+      }
+      if (m.t === 'app') {
+        const a = m.id === null ? null : APPS.find(x => x.id === m.id);
+        if (m.id !== null && !a) {
+          setTimeout(() => this.onmessage({ t: 'app', ok: false, id: m.id, error: 'not-found' }), 40);
+        } else {
+          // As the Mac does: the stage takes this screen's shape, as large as the display allows.
+          const opened = a && appShown?.id !== a.id;
+          appShown = a;
+          shown = null;
+          if (a) {
+            const k = Math.min(display.width / m.w, display.height / m.h);
+            setSize({ width: Math.round(m.w * k) * 2, height: Math.round(m.h * k) * 2 });
+          } else setSize(display);
+          setTimeout(() => {
+            this.onmessage({ t: 'status', width: canvas.width, height: canvas.height, window: null, app: appShown?.id ?? null });
+            if (opened) this.onmessage({ t: 'app', ok: true, id: a.id, name: a.name });
+          }, 60);
+        }
+      }
       if (m.t === 'window') {
+        appShown = null;
         shown = WINDOWS.find(w => w.id === m.id) ?? null;
         setSize(shown ? { width: shown.width * 2, height: shown.height * 2 } : display);
         setTimeout(() => this.onmessage({ t: 'status', width: canvas.width, height: canvas.height, window: shown?.id ?? null }), 50);
@@ -166,6 +217,8 @@ export function startDemo(app) {
     onLeave: () => viewer.ended({ title: 'Disconnected', body: 'This was the demo. Reload the page to start it again.' }, { canReconnect: false }),
     onReconnect: () => location.reload(),
     onHome: () => location.reload(),
+    // connect.html?demo=1&app=<id>&name=<name>: opens that pretend app straight away, as a link to an app does.
+    launch: app.launch, onAppChange: a => { app.launch = a; },
   });
   app.viewer = viewer;
   app.demoSession = session;

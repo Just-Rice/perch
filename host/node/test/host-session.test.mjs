@@ -14,7 +14,7 @@ import { join } from 'node:path';
 import * as opaque from '@serenity-kit/opaque';
 import { startBroker } from '../../../tests/e2e/broker.mjs';
 import { fromB64url, randomBytes } from '../../../site/js/shared/bytes.js';
-import { startHost, TEST_ORIGIN, TEST_RP_ID, TEST_SITE } from './fake-app.mjs';
+import { startHost, TEST_ORIGIN, TEST_RP_ID, TEST_SITE, TEST_NOTES, TEST_DRAW } from './fake-app.mjs';
 import { SoftViewer, Refused, parsePairLink } from './soft-viewer.mjs';
 import { CLIP_PART_CHARS, Session } from '../src/session.mjs';
 import { ResolutionGovernor } from '../src/media.mjs';
@@ -688,6 +688,115 @@ test('one window: the list, choosing it, reshaping it, and going back to the who
   v.send({ t: 'display', id: 2 });
   const other = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
   assert.deepEqual([other.display, 'window' in other], [2, false]);
+});
+
+test('app mode: the apps and their icons, opening one, turning, its windows, and leaving', async (t) => {
+  const ctx = await pairedHost(t);
+  const { app } = ctx;
+  const { v, end } = await passkey(t, ctx);
+  assert.equal(end.t, 'ready');
+  assert.ok(v.firstReply.caps.includes('apps'));
+
+  v.send({ t: 'apps' });
+  assert.deepEqual((await v.next(['apps'])).list, [
+    { id: TEST_DRAW, name: 'Test Draw', running: false }, { id: TEST_NOTES, name: 'Test Notes', running: true }]);
+  let since = app.commands.length;
+  v.send({ t: 'app-icons', ids: [TEST_NOTES, 'not an id!', TEST_NOTES], size: 96 });
+  const ask = await app.waitForCommand(c => c.c === 'app-icons', { since });
+  assert.deepEqual([ask.ids, ask.size], [[TEST_NOTES], 96], 'junk and repeats dropped');
+  const icon = await v.next(['app-icon']);
+  assert.deepEqual([icon.id, icon.size, icon.mime, typeof icon.data], [TEST_NOTES, 96, 'image/png', 'string']);
+  // Too many at once, or junk sizes: nothing (or the small size).
+  since = app.commands.length;
+  v.send({ t: 'app-icons', ids: Array.from({ length: 61 }, (_, i) => `a.b${i}`) });
+  v.send({ t: 'app-icons', ids: [TEST_DRAW], size: 9999 });
+  assert.equal((await app.waitForCommand(c => c.c === 'app-icons', { since })).size, 96);
+
+  // Junk is ignored; a phone-shaped app mode for Test Notes is asked of the app.
+  since = app.commands.length;
+  v.send({ t: 'app', id: 'not an id!', w: 390, h: 844 });
+  v.send({ t: 'app', id: TEST_NOTES });
+  v.send({ t: 'app', id: TEST_NOTES, w: 390, h: 844, hide: true });
+  const open = await app.waitForCommand(c => c.c === 'capture' && c.on && c.app, { since });
+  assert.deepEqual(open.app, { id: TEST_NOTES, aspect: 0.4621, hide: true });
+  assert.equal(app.commands.slice(since).filter(c => c.c === 'capture' && c.app).length, 1);
+  assert.deepEqual(await v.next(['app']), { t: 'app', ok: true, id: TEST_NOTES, name: 'Test Notes' });
+  const statusApp = async (want) => {
+    for (let i = 0; i < 100; i++) {
+      if (v.all.findLast(m => m.t === 'status')?.app === want) return;
+      await sleep(50);
+    }
+    assert.fail(`no status with app ${want}`);
+  };
+  await statusApp(TEST_NOTES);
+  assert.match((await app.call('state')).activity[0].text, /App mode: Test Notes/);
+
+  // Later capture changes keep app mode; the same request again changes nothing.
+  since = app.commands.length;
+  v.send({ t: 'quality', preset: 'sharp' });
+  assert.deepEqual((await app.waitForCommand(c => c.c === 'capture' && c.on, { since })).app, open.app);
+  since = app.commands.length;
+  v.send({ t: 'app', id: TEST_NOTES, w: 390, h: 844, hide: true });
+  await sleep(150);
+  assert.equal(app.commands.slice(since).some(c => c.c === 'capture'), false);
+  // The device turns.
+  v.send({ t: 'app', id: TEST_NOTES, w: 844, h: 390, hide: true });
+  assert.equal((await app.waitForCommand(c => c.c === 'capture' && c.app, { since })).app.aspect, 2.1641);
+
+  // Its windows only, and bringing one to the front.
+  since = app.commands.length;
+  v.send({ t: 'windows' });
+  assert.equal((await app.waitForCommand(c => c.c === 'windows', { since })).app, TEST_NOTES);
+  assert.equal((await v.next(['windows'])).list.length, 1);
+  v.send({ t: 'app-raise', id: 7 });
+  assert.equal((await app.waitForCommand(c => c.c === 'app-raise', { since })).id, 7);
+
+  // Leaving: the whole display.
+  since = app.commands.length;
+  v.send({ t: 'app', id: null });
+  assert.equal('app' in (await app.waitForCommand(c => c.c === 'capture' && c.on, { since })), false);
+  await statusApp(null);
+  await sleep(350); // windows can be asked for at most every 300 ms
+  since = app.commands.length;
+  v.send({ t: 'app-raise', id: 7 });
+  v.send({ t: 'windows' });
+  assert.equal('app' in (await app.waitForCommand(c => c.c === 'windows', { since })), false);
+  assert.equal(app.commands.slice(since).some(c => c.c === 'app-raise'), false, 'not outside app mode');
+
+  // An app the Mac doesn't list: refused, and forgotten (later captures are of the whole display).
+  since = app.commands.length;
+  v.send({ t: 'app', id: 'com.example.nope', w: 1, h: 1 });
+  assert.deepEqual(await v.next(['app']), { t: 'app', ok: false, id: 'com.example.nope', error: 'not-found' });
+  await sleep(100);
+  since = app.commands.length;
+  v.send({ t: 'quality', preset: 'smooth' });
+  assert.equal('app' in (await app.waitForCommand(c => c.c === 'capture' && c.on, { since })), false);
+
+  // The app quitting: the whole display, and the viewer told.
+  v.send({ t: 'app', id: TEST_DRAW, w: 1, h: 1 });
+  await v.next(['app']);
+  since = app.commands.length;
+  app.event({ e: 'app-gone', id: TEST_DRAW });
+  assert.deepEqual(await v.next(['app']), { t: 'app', ok: false, id: TEST_DRAW, error: 'quit' });
+  assert.equal('app' in (await app.waitForCommand(c => c.c === 'capture' && c.on, { since })), false);
+
+  // Choosing one window leaves app mode.
+  v.send({ t: 'app', id: TEST_NOTES, w: 1, h: 1 });
+  await v.next(['app']);
+  since = app.commands.length;
+  v.send({ t: 'window', id: 7 });
+  const win = await app.waitForCommand(c => c.c === 'capture' && c.on, { since });
+  assert.deepEqual([win.window, 'app' in win], [7, false]);
+});
+
+test('app mode needs control of the Mac', async (t) => {
+  const ctx = await pairedHost(t, { permissions: { screen: true, accessibility: false } });
+  const { app } = ctx;
+  const { v } = await passkey(t, ctx);
+  const since = app.commands.length;
+  v.send({ t: 'app', id: TEST_NOTES, w: 390, h: 844 });
+  assert.deepEqual(await v.next(['app']), { t: 'app', ok: false, id: TEST_NOTES, error: 'view-only' });
+  assert.equal(app.commands.slice(since).some(c => c.c === 'capture' && c.app), false);
 });
 
 test('clipboard text both ways, for the signed-in owner only', async (t) => {

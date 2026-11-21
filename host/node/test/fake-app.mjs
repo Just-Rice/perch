@@ -28,6 +28,12 @@ export const DISPLAYS = [
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// App mode's pretend apps, as in the app's synthetic mode (host/app/Sources/PerchMedia/Apps.swift).
+export const TEST_NOTES = 'io.github.just-rice.perch.test-notes';
+export const TEST_DRAW = 'io.github.just-rice.perch.test-draw';
+export const FAKE_APPS = [{ id: TEST_DRAW, name: 'Test Draw' }, { id: TEST_NOTES, name: 'Test Notes' }];
+export const TINY_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
 // --- fixtures ---
 
 let cached = null;
@@ -192,14 +198,36 @@ export class FakeApp extends EventEmitter {
           this.player.keyframe();
           // One pretend window (id 7); asking for any other gets the whole display and a window-gone, as the app does.
           if (cmd.window && cmd.window !== 7) this.event({ e: 'window-gone', window: cmd.window });
+          // App mode: the two pretend apps open (once each time app mode begins); any other is refused.
+          const app = cmd.app && FAKE_APPS.some(a => a.id === cmd.app.id) ? cmd.app : null;
+          if (cmd.app && !app) this.event({ e: 'app-mode', id: cmd.app.id, ok: false, error: 'not-found' });
+          if (app && this.appMode !== app.id) {
+            this.event({ e: 'app-mode', id: app.id, ok: true, name: FAKE_APPS.find(a => a.id === app.id).name });
+          }
+          this.appMode = app?.id ?? null;
+          this.appModeAt = app ? { ...app } : null;
+          const h = 720, w = app ? Math.round(h * app.aspect / 2) * 2 : 640;
           this.event({
-            e: 'capture-started', display: cmd.display ?? 1, width: 640, height: 360, fps: cmd.fps ?? 30,
-            ...(cmd.window === 7 ? { window: 7 } : {}),
+            e: 'capture-started', display: cmd.display ?? 1, width: w, height: app ? h : 360, fps: cmd.fps ?? 30,
+            ...(cmd.window === 7 ? { window: 7 } : {}), ...(app ? { app: app.id } : {}),
           });
         } else {
           if (!this.streamAlways) this.player.stop();
+          this.appMode = null;
           this.event({ e: 'capture-stopped', reason: 'requested' });
         }
+        break;
+      case 'apps':
+        this.event({ e: 'apps', list: FAKE_APPS.map(a => ({ ...a, running: a.id === TEST_NOTES })) });
+        break;
+      case 'app-icons':
+        for (const id of cmd.ids ?? []) {
+          if (!FAKE_APPS.some(a => a.id === id)) continue;
+          this.event({ e: 'app-icon', id, size: cmd.size, mime: cmd.size === 180 ? 'image/jpeg' : 'image/png', data: TINY_PNG });
+        }
+        break;
+      case 'app-raise':
+        this.raised = cmd.id;
         break;
       case 'keyframe':
         this.player.keyframe();
@@ -225,7 +253,9 @@ export class FakeApp extends EventEmitter {
         } else this.event({ e: 'clipboard-set', ok: false });
         break;
       case 'windows':
-        this.event({ e: 'windows', list: [{ id: 7, app: 'Test App', title: 'Test Window', width: 800, height: 600 }] });
+        // The pretend window is Test Notes' (as in the app's synthetic mode).
+        this.event({ e: 'windows', list: cmd.app && cmd.app !== TEST_NOTES ? []
+          : [{ id: 7, app: 'Test App', title: 'Test Window', width: 800, height: 600 }] });
         break;
       case 'window-fit':
         this.event({ e: 'window-fit', window: cmd.window, ok: cmd.window === 7 });

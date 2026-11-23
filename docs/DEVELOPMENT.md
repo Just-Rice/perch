@@ -1,78 +1,72 @@
-# Developing Perch
+# Developing Roost
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `site/` | The website (GitHub Pages): `index.html` front page, `connect.html` sign-in and viewer, `install.sh`, `uninstall.sh` |
-| `site/js/shared/` | Code shared by the website and the host: MQTT client, sealed rendezvous, channel binding, constants |
-| `host/app/` | The Swift menu bar app (SwiftPM; Command Line Tools only) |
-| `host/` | The host: `src/` (rendezvous, WebRTC, sign-in, Setup server), `setup/` (the Setup page), `test/` |
-| `host/scripts/` | `make-app.sh` (assemble Perch.app), `set-version.sh`, signing helpers |
-| `tests/site/` | Website tests (unit and headless Chrome) |
-| `tests/e2e/` | End to end: `full.test.mjs` (website + host + stand-in app), `app.test.mjs` (website + host + real app) |
-| `docs/PROTOCOL.md` | The contract between the parts — change it first, then the code |
+| `app/` | roost.exe, the Windows app (Rust): `src/` portable core (IPC, input planning, key map, H.264/Opus, capture loop), `src/sys/windows/` everything Windows-only |
+| `host/` | The host (Node.js): `src/` rendezvous, WebRTC, sign-in, Control Center server; `setup/` the Control Center page; `test/` |
+| `site/` | The website (GitHub Pages): front page, `connect.html` sign-in and viewer, `install.ps1`, `uninstall.ps1` |
+| `site/js/shared/` | Code shared by the website and the host: MQTT, sealed rendezvous, channel binding, constants |
+| `relay/` | The optional Cloudflare Worker relay, and `relay/node/` its Node.js backup |
+| `scripts/` | `set-version.mjs`, `package.ps1` (the release zip) |
+| `tests/site/`, `tests/e2e/` | Website tests; end to end (website + host + stand-in app, or + the real roost.exe) |
+| `docs/` | `PROTOCOL.md` (the contract between the parts), `WINDOWS-APP.md` (roost.exe's side), `BRAND.md` |
 
-## Running the parts
+## Running it
 
-The app runs the host itself. For development, point it at the source and at Homebrew's Node:
-
-```
-swift build -c release --package-path host/app
-host/app/.build/release/Perch --node "$(command -v node)" --host host/src/main.mjs
-```
-
-Useful flags: `--synthetic` (a test pattern and tone instead of the real screen and sound; no Screen Recording
-needed), `--echo-input` (report input instead of performing it), `--no-ui` (no menu bar item), `--selftest`.
-`Perch --help` lists them all.
-
-Run from Terminal, the app borrows Terminal's permissions; launched with `open`, Perch.app is judged on its own.
-Test the real permission flow with `open build/Perch.app`.
-
-A local copy of the website with the local test broker:
+On Windows, with [Rust](https://rustup.rs) and Node.js 22 or later:
 
 ```
-python3 -m http.server 8765 --bind 127.0.0.1 --directory site   # then open http://localhost:8765/connect.html
+(cd host && npm ci)
+cd app
+cargo build --release
+target\release\roost.exe --node node --host ..\host\src\main.mjs
 ```
 
-The website honours `?test=1&brokers=ws://127.0.0.1:<port>/mqtt` (and `?demo=1`, a viewer with a test picture and
-no network) **only** on `localhost` / `127.0.0.1`. The host honours its test variables (`PERCH_TEST=1` plus
-`PERCH_HOME`, `PERCH_BROKERS`, `PERCH_TEST_ORIGIN`, `PERCH_RP_ID`, …, see docs/PROTOCOL.md "Test mode") only when
-`PERCH_TEST=1`.
+Useful flags (`roost.exe --help`): `--synthetic` (a moving test pattern and a tone instead of the real screen and
+sound), `--echo-input` (report input instead of performing it), `--no-ui` (no tray icon), `--selftest`
+(checks the encoder, Opus, displays, capture and sound on this PC).
+
+**On a Mac or Linux** the portable core builds and runs too: `cargo test`, and `cargo run -- --synthetic
+--echo-input --no-ui --node node --host ../host/src/main.mjs` runs the real app (test pattern only) against the
+real host. Type-check or build the Windows app without Windows using
+[cargo-xwin](https://github.com/rust-cross/cargo-xwin) and LLVM:
+
+```
+PATH="/opt/homebrew/opt/llvm/bin:$PATH" cargo xwin build --release --target x86_64-pc-windows-msvc
+```
+
+A local copy of the website with a local test broker:
+
+```
+python -m http.server 8765 --bind 127.0.0.1 --directory site   # then open http://localhost:8765/connect.html?demo=1
+```
+
+The website honours `?test=1&brokers=…` and `?demo=1` only on `localhost`; the host honours its `ROOST_*` test
+variables (docs/PROTOCOL.md, "Test mode") only with `ROOST_TEST=1`.
 
 ## Tests
 
-Nothing in the tests uses the public brokers, a real passkey or real input: there is a local MQTT broker
-(`tests/e2e/broker.mjs`), every Chrome tab gets a CDP virtual authenticator (`tests/e2e/cdp.mjs`), and the app runs
-with `--echo-input`.
+None of them use the public brokers, a real passkey or real input.
 
 ```
-(cd host/node && node --test --test-concurrency=1 'test/*.test.mjs')    # host: units, sessions, Setup page
-node --test --test-concurrency=1 'tests/site/*.test.mjs'                 # website
-node --test --test-concurrency=1 tests/e2e/full.test.mjs                 # website + host, every sign-in route
-swift build -c release --package-path host/app && node --test tests/e2e/app.test.mjs   # + the real app
-host/app/test/run.sh                                                      # the app: self-test, IPC, real capture, bundle
+(cd app && cargo test)                                                 # roost.exe's core
+(cd host && node --test --test-concurrency=1 'test/*.test.mjs')        # host, Control Center
+node --test --test-concurrency=1 'tests/site/*.test.mjs'               # website
+node --test --test-concurrency=1 tests/e2e/full.test.mjs               # website + host, every sign-in route
+node --test --test-concurrency=1 tests/e2e/app.test.mjs                # + the real roost.exe (--synthetic)
 ```
 
-`PERCH_E2E_APP=/path/to/Perch.app node --test tests/e2e/app.test.mjs` runs the last end-to-end test against a
-packaged app (its bundled Node and host). Long browser runs: prefix with `caffeinate -i` so the Mac doesn't sleep.
+CI (`.github/workflows/ci.yml`) runs all of these on GitHub's Windows runners, x64 and ARM64.
 
 ## Releases
 
-1. `host/scripts/set-version.sh 0.2.0` (updates Info.plist, the app's fallback version and host/package.json).
-2. Commit, then `git tag v0.2.0 && git push origin main v0.2.0`.
-3. `.github/workflows/release.yml` builds Perch.app on GitHub's Mac, signs it with Perch's certificate
-   (`PERCH_SIGNING_P12`, `PERCH_SIGNING_P12_PASSWORD` secrets), and publishes `Perch-0.2.0.zip` with its checksum.
-   `install.sh` and the app's update check pick it up.
+1. `node scripts/set-version.mjs 0.2.0`, commit.
+2. `git tag v0.2.0 && git push origin main v0.2.0`.
+3. `.github/workflows/release.yml` builds roost.exe for x64 and ARM64, bundles the host and the official Node.js
+   (checksum-checked), and publishes `Roost-0.2.0-win-x64.zip` / `-win-arm64.zip` with `.sha256` files. `install.ps1`
+   and the update check pick them up. A tag with a suffix (`v0.2.0-alpha.1`) is a pre-release.
 
-**Test builds.** `host/scripts/alpha.sh` tags what is committed as the next version's test build (`v0.3.4-alpha.1`,
-then `.2`, …), waits for the Release workflow to build and sign it and publish it as a pre-release, and installs it on
-this Mac once nobody is connected (`--now` doesn't wait, `--no-install` only publishes). Signed with Perch's
-certificate, a test build keeps Perch's permissions, unlike a local `make-app.sh` build. Pre-releases are installed
-only by name (`PERCH_VERSION=0.3.4-alpha.1` before `bash` in the install command) and never offered by the update
-check; the next full release (0.3.4) counts as newer, so a Mac on a test build is offered it as usual. Website changes
-in a test build go live only when `main` is pushed.
-
-**The signing certificate** is a long-lived self-signed code-signing certificate (`host/scripts/signing-cert.sh`).
-macOS ties Perch's permissions to it, so it must never change: a new certificate means every user grants the two
-permissions again. Keep the `.p12` and its password backed up somewhere safe, and never commit them.
+Code signing: Roost is unsigned for now. A code-signing certificate would remove SmartScreen's warning; add it as a
+signing step in release.yml (`signtool sign`) before packaging.

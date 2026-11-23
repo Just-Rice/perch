@@ -1,100 +1,92 @@
-# Perch
+# Roost
 
-**Your Mac, from any browser.** See and use your Mac from your phone, a tablet or another computer: the screen, the
-sound, the mouse and keyboard. Free and open source, with no account and no servers in between.
+**Your PC, from anywhere.** See and use your Windows PC from your phone, a tablet or another computer, in a
+browser: the screen, the sound, the mouse and the keyboard. Free and open source, with no account and no servers in
+between.
 
-**[just-rice.github.io/perch](https://just-rice.github.io/perch/)** · [Connect](https://just-rice.github.io/perch/connect.html) ·
-[Privacy](https://just-rice.github.io/perch/privacy.html) · [Security](SECURITY.md)
+**[faarisaahmed.github.io/roost](https://faarisaahmed.github.io/roost/)** ·
+[Connect](https://faarisaahmed.github.io/roost/connect.html) · [Security](SECURITY.md)
 
-- **Phones, tablets and computers:** touch, mouse, keyboard and sound, with a keyboard button for typing on a phone.
-- **Two-step sign-in checked by your Mac:** a passkey, then a 6-digit code. One tap after the first time.
-- **Private:** black out the Mac's own screen while you're connected, and lock it when you leave.
+- **Phones, tablets and computers:** touch, touchpad mode, mouse, keyboard and sound, with a Key deck for the keys a
+  phone doesn't have (Win, Alt+Tab, Ctrl+Shift+Esc, F-keys…).
+- **Two-step sign-in checked by your PC:** a passkey (Face ID, Touch ID, Windows Hello), then a 6-digit code.
+- **Private:** black out the PC's own screen while you're connected, and lock it when you leave.
 - **One window at a time:** show a single window instead of the whole desktop, reshaped to fit your phone.
-- **Talk through your Mac:** your microphone, played on the Mac's speakers or (with a loopback device) into a call.
+- **Every display**, with a map of how they're arranged.
+- **Clipboard both ways**, pictures too. **Talk through your PC:** your microphone, played on its speakers.
 - **Guest links:** let someone watch your screen for a while, without being able to touch anything.
-- **Strict Wi-Fi:** an optional relay in a free Cloudflare account of your own, for school and office networks: either
-  Cloudflare's TURN service, or a small Worker you deploy ([relay/](relay/README.md)) that needs no payment details.
-- **Apple silicon and Intel Macs.**
+- **Strict Wi-Fi:** an optional relay in a free Cloudflare account of your own (TURN, or a small Worker that needs
+  no payment details, with a Node.js / Cloudflare Quick Tunnel backup): [relay/](relay/README.md).
+- **Control admin apps:** optionally, Roost can click and type into apps that run as administrator.
+- **Windows 10 (1903 or later) and Windows 11, on x64 and ARM64.** No administrator rights needed to install.
 
-> Perch is a **beta**, so far tested on one Mac. Please [report problems](https://github.com/Just-Rice/perch/issues).
+> Roost is the Windows sibling of [Perch](https://github.com/Just-Rice/perch) (for Macs), and shares its
+> protocol and security model. It is a **beta**.
 
-## Install on a Mac
+## Install
 
-Open **Terminal** (Applications › Utilities), paste this line and press Return:
+Open **PowerShell** (Start › type "PowerShell"), paste this line and press Enter:
 
 ```
-curl -fsSL https://just-rice.github.io/perch/install.sh | bash
+irm https://faarisaahmed.github.io/roost/install.ps1 | iex
 ```
 
-It downloads the latest release from this repository, checks it against its published checksum, puts Perch in your
-Applications folder and opens it. Perch lives in the menu bar and opens its **Setup** page in your browser, which
-walks you through the rest:
+It downloads the latest release for your PC's processor from this repository, checks it against its published
+checksum, installs Roost for you only (in `%LOCALAPPDATA%\Programs\Roost`, no administrator prompt) and starts it.
+Roost lives in the notification area by the clock; its **Control Center** opens in your browser and walks you
+through the rest:
 
-1. **Two macOS permissions.** Screen & System Audio Recording (called Screen Recording before macOS 15) shows your screen and plays its sound. Accessibility
-   lets Perch click and type for you.
-2. **Your authenticator app** (Apple Passwords, Google Authenticator, 1Password, …) for the 6-digit codes.
-3. **Pairing your first device.** Scan the code Setup shows. Your device makes a passkey (Face ID or Touch ID), then
-   asks for a 6-digit code.
+1. **Your authenticator app** (Microsoft Authenticator, Google Authenticator, 1Password, …) for the 6-digit codes.
+2. **Pairing your first device.** Scan the code the Control Center shows. Your device makes a passkey, then asks for
+   a 6-digit code.
 
-After that, open [the website](https://just-rice.github.io/perch/connect.html) on that device to sign in and use your
-Mac. It also works inside an `about:blank` tab.
+After that, open [the website](https://faarisaahmed.github.io/roost/connect.html) on that device to sign in.
 
-**Why a Terminal command?** Perch isn't registered with Apple's paid developer programme, and macOS blocks
-unregistered apps downloaded in a browser. Files fetched by Terminal aren't marked that way. Prefer not to? Download
-`Perch-x.y.z.zip` from the [latest release](https://github.com/Just-Rice/perch/releases/latest), move Perch to
-Applications and open it. When macOS refuses, go to System Settings › Privacy & Security and click **Open Anyway**.
+**Why PowerShell?** Roost isn't signed with a paid code-signing certificate, so Windows SmartScreen warns about it
+when it's downloaded in a browser. Prefer the zip? Download `Roost-x.y.z-win-x64.zip` (or `-arm64`) from the
+[latest release](https://github.com/faarisaahmed/roost/releases/latest), unzip it and run `install.ps1`, or
+choose **More info › Run anyway** when SmartScreen asks.
 
-**Needs:**
+**Needs:** Windows 10 version 1903 or later (2004 or later for the privacy curtain and for sound without echo), a
+recent Safari, Chrome, Edge or Firefox on the viewing device, and the PC on, awake and signed in.
 
-- **The Mac:** macOS 13.5 Ventura or later, on Apple silicon (M1 or later) or Intel. The Intel version is new and has
-  only been tested in emulation so far.
-- **The viewing device:** a recent Safari, Chrome, Edge or Firefox.
-- **While you use it**, the Mac must be on, awake and logged in.
-
-**Uninstall:** use Setup's **Uninstall Perch** button, or run
-`curl -fsSL https://just-rice.github.io/perch/uninstall.sh | bash`.
+**Uninstall:** the Control Center's **Uninstall Roost** button, or
+`irm https://faarisaahmed.github.io/roost/uninstall.ps1 | iex`.
 
 ## How it works
 
 ```
- your browser                       public message services                 your Mac
- (just-rice.github.io/perch)        (MQTT, scrambled notes only)            (Perch menu bar app)
+ your browser                       public message services                  your PC
+ (faarisaahmed.github.io/roost)     (MQTT, sealed notes only)                (Roost, in the tray)
         │   "here's how to reach me"  ──────────────►  ◄────────────────────────  │
         │                                                                        │
         └──────────── direct, encrypted WebRTC connection (screen, sound, input) ┘
 ```
 
-- **The website** is the screen and the remote: plain HTML and JavaScript on GitHub Pages (`site/`).
-- **The Mac app** (`host/app/`, Swift, Command Line Tools only) records the screen and sound with ScreenCaptureKit,
-  compresses them with the Mac's hardware (VideoToolbox H.264, AudioToolbox Opus) and performs clicks and keys with
-  Quartz events. It runs the host as a child process with a bundled Node.js.
-- **The relay** (`relay/`, optional) is a Cloudflare Worker the owner deploys for networks that block WebRTC: it passes
-  the end-to-end encrypted connection along over WebSockets.
-- **The host** (`host/`) finds viewers through public MQTT brokers, connects with WebRTC
-  ([werift](https://github.com/shinyoshiaki/werift-webrtc)), checks every sign-in, and serves the local Setup page.
-- **Signing in** takes a passkey plus a 6-digit code, both checked by the Mac. Every proof is tied to that exact
-  connection. An optional backup sign-in uses the Mac's name, a password (checked with OPAQUE, so the password
-  itself is never sent) and the code.
+- **The website** (`site/`) is the viewer: plain HTML and JavaScript on GitHub Pages.
+- **roost.exe** (`app/`, Rust) is the Windows app: the tray icon and its panel, screen capture with DXGI Desktop
+  Duplication (GDI as a fallback), H.264 with OpenH264, sound with WASAPI process loopback and Opus, and the
+  viewer's mouse and keyboard with SendInput. It runs the host with a bundled Node.js.
+- **The host** (`host/`) finds viewers through public MQTT brokers, connects with WebRTC, checks every sign-in, and
+  serves the local Control Center (`host/setup/`).
+- **The relay** (`relay/`, optional) is a Cloudflare Worker you deploy for networks that block WebRTC.
 
-[docs/PROTOCOL.md](docs/PROTOCOL.md) is the full contract between the three parts; [SECURITY.md](SECURITY.md) explains
-what Perch protects against and its known limitations.
+[docs/PROTOCOL.md](docs/PROTOCOL.md) is the contract between the parts, [docs/WINDOWS-APP.md](docs/WINDOWS-APP.md)
+the Windows app's side of it, [docs/BRAND.md](docs/BRAND.md) Roost's look and words, and
+[SECURITY.md](SECURITY.md) what Roost protects against.
 
 ## Building from source
 
-You need a Mac with Apple silicon, Xcode's Command Line Tools (`xcode-select --install`), Node.js 22 or later and,
-for the tests, Google Chrome and ffmpeg.
+[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). In short, on Windows with Rust and Node.js 22+:
 
 ```
-git clone https://github.com/Just-Rice/perch && cd perch
-(cd host/node && npm ci && node scripts/bundle.mjs)
-NODE_BIN="$(host/app/test/fetch-node.sh .build/node v24.22.0)"     # the official Node.js, checksum-checked
-host/scripts/make-app.sh --host-bundle host/dist --node "$NODE_BIN"   # -> build/Perch.app
-open build/Perch.app
+git clone https://github.com/faarisaahmed/roost && cd roost
+(cd host && npm ci)
+cd app && cargo build --release
+target\release\roost.exe --node node --host ..\host\src\main.mjs
 ```
-
-A build of your own is signed ad hoc, so macOS asks for its two permissions again after every rebuild.
-[docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) covers running the parts separately, the test suites and releases.
 
 ## Licence
 
-Apache 2.0 ([LICENSE](LICENSE)). Third-party code and credits: [THIRD_PARTY.md](THIRD_PARTY.md).
+Apache 2.0 ([LICENSE](LICENSE)). Roost is derived from Perch by Just-Rice. Third-party code and credits:
+[THIRD_PARTY.md](THIRD_PARTY.md).

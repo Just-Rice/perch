@@ -1,8 +1,14 @@
-# Perch protocol
+# Roost protocol
+
+> Roost inherits this protocol from Perch (the Mac version). Wherever this document says **the Mac**, read **the
+> PC**; wherever it says the Swift app or Perch.app, read **roost.exe**. Windows-specific parts (secrets in DPAPI
+> instead of the Keychain, HELLO fields, display coordinates in pixels, input with SendInput, elevation) are in
+> [WINDOWS-APP.md](WINDOWS-APP.md), which takes precedence. Wire names (`macName`, `role=mac`, the `"perch … v1"`
+> labels) are unchanged on purpose.
 
 This is the contract between the three parts of Perch:
 
-- **the website** (`site/`, served from `https://just-rice.github.io/perch/`): the viewer;
+- **the website** (`site/`, served from `https://faarisaahmed.github.io/roost/`): the viewer;
 - **the Mac app** (`host/app/`, Swift): screen and sound capture, video encoding, input, menu bar, login item;
 - **the Mac host** (`host/`, Node.js, a child process of the app): rendezvous, WebRTC, sign-in, Setup page.
 
@@ -21,10 +27,10 @@ Protocol version: **1** (`PROTO` in `site/js/shared/proto.js`). Shared code for 
 | OPAQUE registration record | library string | `config.json` | Backup password verifier (not the password). |
 | Devices | per passkey | `config.json` | credential id, COSE public key, counter, transports, label, dates. |
 
-`config.json` lives in `$PERCH_HOME` (default `~/Library/Application Support/Perch/`, mode 0600). Secrets live in the
+`config.json` lives in `$ROOST_HOME` (default `~/Library/Application Support/Perch/`, mode 0600). Secrets live in the
 login Keychain (generic password, service `io.github.just-rice.perch`, account `secrets`, a JSON object
-`{sigKey, totpSecret, opaqueServerSetup}` with byte values in base64url) — or in `$PERCH_HOME/secrets.json` when
-`PERCH_SECRETS=file` (tests).
+`{sigKey, totpSecret, opaqueServerSetup}` with byte values in base64url) — or in `$ROOST_HOME/secrets.json` when
+`ROOST_SECRETS=file` (tests).
 
 Each Mac also has a fixed DTLS certificate (`secrets.dtls`, made once, replaced only by Start over); every WebRTC
 connection uses it. Its **pin** is the first 16 bytes of its SHA-256 fingerprint.
@@ -40,8 +46,8 @@ Viewer and Mac meet through every broker in `BROKERS` (public MQTT 3.1.1 over se
 
 Topics (`site/js/shared/rendezvous.js`):
 
-- host topic `perch/v1/h/<b64url(SHA-256("perch topic v1" ‖ hostId))[0..22]>` — passkey sign-ins and pairing;
-- name topic `perch/v1/n/<b64url(SHA-256("perch name v1" ‖ utf8(normalized macName)))[0..22]>` — backup sign-in,
+- host topic `roost/v1/h/<b64url(SHA-256("perch topic v1" ‖ hostId))[0..22]>` — passkey sign-ins and pairing;
+- name topic `roost/v1/n/<b64url(SHA-256("perch name v1" ‖ utf8(normalized macName)))[0..22]>` — backup sign-in,
   subscribed only while backup sign-in is on;
 - reply topic `<topic>/<sid>` — the viewer subscribes to it before saying hello; the Mac answers there.
 
@@ -101,7 +107,7 @@ WebSockets to it instead, and it passes bytes between them. Shared code: `site/j
 `host/src/wsrelay.mjs`; viewer side `site/js/ui/connection.js` and `site/js/ui/relaymedia.js`.
 
 **Setting it up.** Setup saves the Worker's address (`https://<name>.workers.dev` only: the website's CSP allows
-`wss://*.workers.dev` and nothing else). The Mac reads `GET /v1/info` (`{perch: "relay", v: 1, claimed}`); if the
+`wss://*.workers.dev` and nothing else). The Mac reads `GET /v1/info` (`{roost: "relay", v: 1, claimed}`); if the
 relay is unclaimed it claims it with `POST /v1/claim {secret}` (32 random bytes, hex), and the first claim wins (or
 the Worker's `RELAY_SECRET`, if its owner set one). It then proves it holds the secret with
 `GET /v1/check?auth=HMAC-SHA256(secret, "perch relay check v1")` and keeps `{url, secret}` with the secrets.
@@ -138,13 +144,13 @@ keyframe) · `u64 BE pts µs` · the H.264 Annex-B access unit; `17` audio: `u8 
 
 **Rendezvous through the relay.** The relay is also a broker: `wss://…/v1/mqtt` speaks the MQTT subset Perch's
 client uses (CONNECT, QoS 0 PUBLISH and SUBSCRIBE, UNSUBSCRIBE, PINGREQ, DISCONNECT), for exact topics under
-`perch/v1/` only (no wildcards; at most 8 per connection; a publish is at most 70 KB and limited to a burst of 60 and
+`roost/v1/` only (no wildcards; at most 8 per connection; a publish is at most 70 KB and limited to a burst of 60 and
 2 a second per connection). Everything published there is the same sealed envelope as on the public brokers. The Mac
 adds it to its brokers while a relay is set up, and names the relay to signed-in viewers in `ready` (`relay`, its
-https address), which remember it with the Mac (`perch.macs.v1`, `relay`) and add its broker the next time.
+https address), which remember it with the Mac (`roost.macs.v1`, `relay`) and add its broker the next time.
 
 **The website from the relay.** The relay Worker also serves `site/` (Workers static assets) from its own address. A
-page whose origin is a `workers.dev` relay (`GET /v1/info` answers `{perch: "relay"}`) puts that relay's broker first,
+page whose origin is a `workers.dev` relay (`GET /v1/info` answers `{roost: "relay"}`) puts that relay's broker first,
 so it can find the Mac even on a first visit where only `*.workers.dev` gets through. Passkeys belong to that address,
 so it is one of the Mac's sites (Setup, "Sites that can sign in"), and devices pair there once.
 
@@ -271,14 +277,14 @@ usual.
 
 **Guest link** (`route:"guest"`). The owner can make a link that lets someone watch, never control:
 `connect.html#guest=<b64url(guestId ‖ guestSecret ‖ pin)>`, valid for a chosen time (1 minute to 24 hours), one at a
-time. It has a meeting point of its own, `perch/v1/g/<hash(guestId)>` sealed with `HKDF(guestSecret, …, "guest")`, so
+time. It has a meeting point of its own, `roost/v1/g/<hash(guestId)>` sealed with `HKDF(guestSecret, …, "guest")`, so
 it reveals nothing about the Mac's usual address or key. After `hi` the guest sends
 `{t:"guest1", proof: HMAC-SHA256(guestSecret, "perch guest v1" ‖ bind)}` and gets `ready` with `guest: true,
 input: false` (no passkey, no code: the link is the pass). Up to 3 guests at once receive the same picture and sound
 as the owner's viewer (or the main display when the owner isn't connected); their input and every control message
 except `ping` and `keyframe` are ignored. Stopping the link or its running out ends them with `bye removed`.
 
-**Sites.** A Mac accepts passkey sign-ins and pairings only from its list of sites: `https://just-rice.github.io`
+**Sites.** A Mac accepts passkey sign-ins and pairings only from its list of sites: `https://faarisaahmed.github.io`
 always, its own Worker relay's address once that relay is saved (the relay serves the site too), plus any the owner
 added in Setup (`config.sites`: `{origin, url}`, https and a domain name only). A passkey
 belongs to one site's domain (its RP ID, the origin's hostname), so each device is paired once per site: `pair1`
@@ -287,7 +293,7 @@ every registration and assertion is verified against the origin in its signed cl
 Devices remember their RP ID; removing a site removes the devices paired there. Pairing links are made for a chosen
 site (`pairStart(site)`), by default the Mac's own relay's site when it has one, otherwise the official site; devices
 paired before sites had their own RP IDs stay on
-`just-rice.github.io`. The backup route has no origin check (the Mac can't see where a password was typed).
+`faarisaahmed.github.io`. The backup route has no origin check (the Mac can't see where a password was typed).
 
 **Codes are the owner's choice.** Settings `codeWithPasskey`, `codeWithBackup` and `codeWithPairing` (all on by
 default) say whether the 6-digit code follows a passkey, the backup password and a pairing passkey. With one off, the
@@ -428,7 +434,7 @@ the app starts its sound tap, which then runs until capture stops), `relaunch {}
 ## Setup page (local only)
 
 The host serves Setup on `http://127.0.0.1:<random port>/` and only answers requests that carry its random key
-(`?k=` on the first load, then the `X-Perch-Key` header), whose `Host` is `127.0.0.1:<port>` or `localhost:<port>`,
+(`?k=` on the first load, then the `X-Roost-Key` header), whose `Host` is `127.0.0.1:<port>` or `localhost:<port>`,
 and — for POSTs — whose `Origin` matches. The app's "Open Setup…" menu item opens that URL. The API is under `/api/`;
 see `host/src/setup-server.mjs`.
 
@@ -442,14 +448,14 @@ the host restarts Perch itself, only into a copy signed like the running one (it
 Accessibility). With `autoUpdate` on, a new release is installed the same way, while idle. Neither is tried again
 for the same version for 30 minutes (restart) or 6 hours (update).
 
-Pairing links look like `https://just-rice.github.io/perch/connect.html#pair=<b64url(hostId ‖ sigKey ‖ pairId ‖ pairSecret ‖ pin)>`
+Pairing links look like `https://faarisaahmed.github.io/roost/connect.html#pair=<b64url(hostId ‖ sigKey ‖ pairId ‖ pairSecret ‖ pin)>`
 (the pin is missing from links made by Perch 0.1) and expire after 10 minutes.
 
 ## Test mode
 
-With `PERCH_TEST=1` the host also honours `PERCH_HOME`, `PERCH_SECRETS=file`, `PERCH_BROKERS` (comma list),
-`PERCH_TEST_ORIGIN` (an extra accepted origin such as `http://localhost:8765`), `PERCH_RP_ID`, `PERCH_SITE` (base for
-pairing links), `PERCH_SETUP_PORT`, `PERCH_SETUP_KEY` and `PERCH_ICE` (`none` = host candidates only), and exposes
+With `ROOST_TEST=1` the host also honours `ROOST_HOME`, `ROOST_SECRETS=file`, `ROOST_BROKERS` (comma list),
+`ROOST_TEST_ORIGIN` (an extra accepted origin such as `http://localhost:8765`), `ROOST_RP_ID`, `ROOST_SITE` (base for
+pairing links), `ROOST_SETUP_PORT`, `ROOST_SETUP_KEY` and `ROOST_ICE` (`none` = host candidates only), and exposes
 `GET /api/test/state` and `GET /api/test/input-echo`. The website accepts `?brokers=` and `?test=1` only when served
 from `localhost` or `127.0.0.1`. The app accepts `--synthetic` (moving test pattern and a test tone instead of the
 real screen and sound), `--echo-input` (report input instead of performing it), `--no-ui` (no menu bar item),

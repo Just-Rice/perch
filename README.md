@@ -20,8 +20,8 @@ between.
 - **Control admin apps:** optionally, Roost can click and type into apps that run as administrator.
 - **Windows 10 (1903 or later) and Windows 11, on x64 and ARM64.** No administrator rights needed to install.
 
-> Roost is the Windows sibling of [Perch](https://github.com/Just-Rice/perch) (for Macs), and shares its
-> protocol and security model. It is a **beta**.
+> Roost is built on **[Perch](https://github.com/Just-Rice/perch) by [Just-Rice](https://github.com/Just-Rice)**,
+> the Mac original, and shares its protocol and security model. It is a **beta**. See [Credits](#credits).
 
 ## Install
 
@@ -86,7 +86,24 @@ cd app && cargo build --release
 target\release\roost.exe --node node --host ..\host\src\main.mjs
 ```
 
+## Credits
+
+Roost exists because of **[Perch](https://github.com/Just-Rice/perch)**, created by
+**[Just-Rice](https://github.com/Just-Rice)**. Perch is the original: a way to reach a Mac from any browser with no
+account and no servers in between. Nearly everything that makes Roost trustworthy was designed and built there first:
+
+- the sign-in: passkeys plus authenticator codes, checked by the computer itself, with every proof bound to its
+  connection; the OPAQUE backup password; pairing and guest links;
+- the way a device finds its computer through sealed notes on public message servers, and the direct WebRTC
+  connection that follows;
+- the Cloudflare relays (TURN, the Worker, and the Node.js / Quick Tunnel backup) for strict networks;
+- the host, its adaptive picture quality, and the viewer's foundations: touch, keyboard, clipboard, displays and one
+  window at a time.
+
+Roost brings that to Windows: a new native app (`app/`), a Windows port of the host and relays, and its own design for
+the website, the viewer and the Control Center. If you have a Mac, use Perch.
+
 ## Licence
 
-Apache 2.0 ([LICENSE](LICENSE)). Roost is derived from Perch by Just-Rice. Third-party code and credits:
-[THIRD_PARTY.md](THIRD_PARTY.md).
+Apache 2.0 ([LICENSE](LICENSE)), the same as Perch. [NOTICE](NOTICE) says what comes from Perch;
+[THIRD_PARTY.md](THIRD_PARTY.md) lists everything else Roost uses.

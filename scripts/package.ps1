@@ -37,7 +37,7 @@ Set-Content -Path "$out/VERSION" -Value $version -NoNewline -Encoding ascii
 foreach ($f in 'install.ps1', 'uninstall.ps1') {
   if (Test-Path "$root/site/$f") { Copy-Item "$root/site/$f" "$out/$f" }
 }
-Copy-Item "$root/LICENSE", "$root/THIRD_PARTY.md" $out
+Copy-Item "$root/LICENSE", "$root/NOTICE", "$root/THIRD_PARTY.md" $out
 
 New-Item -ItemType Directory -Force -Path "$root/dist" | Out-Null
 $zip = Join-Path $root "dist/Roost-$version-win-$Arch.zip"

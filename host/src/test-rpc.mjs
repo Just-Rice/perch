@@ -22,13 +22,16 @@ export function startTestRpc(fd, controller, log, extras = {}) {
     let req;
     try { req = JSON.parse(line); } catch { return; }
     const { id, method, args = [] } = req ?? {};
+    log?.debug?.(`[test] rpc ${id} ${method} (${line.length} bytes)`);
     try {
       let result;
       if (Object.hasOwn(extras, method)) result = await extras[method](...args);
       else if (METHODS.has(method)) result = await controller[method](...args);
       else throw new Error(`no method ${method}`);
       reply({ id, result: result ?? null });
+      log?.debug?.(`[test] rpc ${id} ${method}: answered`);
     } catch (e) {
+      log?.debug?.(`[test] rpc ${id} ${method}: ${e.message}`);
       reply({ id, error: e.message });
     }
   }

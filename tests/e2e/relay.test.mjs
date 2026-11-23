@@ -43,7 +43,7 @@ function freePort() {
 // `wrangler dev` with its own empty storage, so the relay starts unclaimed.
 async function startRelay() {
   const port = await freePort();
-  const state = mkdtempSync(join(tmpdir(), 'perch-relay-'));
+  const state = mkdtempSync(join(tmpdir(), 'roost-relay-'));
   const proc = NODE_RELAY
     ? spawn(process.execPath, [join(ROOT, 'relay/node/server.mjs')], { stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', RELAY_DATA: state, RELAY_SECRET: '' } })
@@ -81,8 +81,13 @@ test.before(async () => {
 test.after(async () => {
   await app?.stop();
   await stack?.close();
-  relay?.proc.kill();
-  if (relay) rmSync(relay.state, { recursive: true, force: true });
+  if (relay) {
+    // Windows keeps the relay's files locked until its process has really gone, so wait for that, then retry.
+    const gone = relay.proc.exitCode !== null ? null : new Promise(r => relay.proc.once('exit', r));
+    relay.proc.kill();
+    await Promise.race([gone, new Promise(r => setTimeout(r, 5000))]);
+    try { rmSync(relay.state, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
+  }
 });
 test.afterEach(async (t) => {
   for (const p of stack?.pages ?? []) {
@@ -129,7 +134,7 @@ async function assertInputReachesMac(page) {
   assert.ok(Math.abs(down.x - 0.5) < 0.02 && Math.abs(down.y - 0.5) < 0.02, `click in the middle (${down.x}, ${down.y})`);
 }
 
-test('setting up the relay: Perch claims a new relay, and refuses an address that isn’t one', { skip }, async () => {
+test('setting up the relay: Roost claims a new relay, and refuses an address that isn’t one', { skip }, async () => {
   await assert.rejects(app.call('workerRelaySet', 'https://example.com'), /doesn’t look right/);
   await app.call('workerRelaySet', relayUrl);
   const st = (await app.call('state')).workerRelay;
@@ -157,7 +162,7 @@ function upgradeStatus(url) {
   });
 }
 
-test('pairing over the relay: the Mac on screen with sound, and input reaching the Mac', { skip }, async () => {
+test('pairing over the relay: the PC on screen with sound, and input reaching the PC', { skip }, async () => {
   // For the test page (a Mac with its own relay would otherwise make the link for the relay's own site).
   const { link } = await app.call('pairStart', new URL(stack.base).origin);
   const page = await openPage(stack, link.replace('connect.html#', `connect.html?${testParams()}#`), { name: 'pair-relay' });
@@ -181,7 +186,7 @@ test('pairing over the relay: the Mac on screen with sound, and input reaching t
   assert.deepEqual(page.problems(), []);
 });
 
-test('signing in again over the relay: the pinned Mac’s signed offer, passkey, then code', { skip }, async () => {
+test('signing in again over the relay: the pinned PC’s signed offer, passkey, then code', { skip }, async () => {
   const page = await openPage(stack, `${stack.base}connect.html?${testParams()}`, { name: 'signin-relay' });
   await page.waitScreen('home');
   await page.waitFor(`document.querySelectorAll('#macList button').length > 0`, { what: 'the remembered Mac' });
@@ -202,7 +207,7 @@ test('signing in again over the relay: the pinned Mac’s signed offer, passkey,
   assert.deepEqual(page.problems(), []);
 });
 
-test('the relay is a rendezvous broker: Perch’s own MQTT client meets there, on Perch’s topics only', { skip }, async () => {
+test('the relay is a rendezvous broker: Roost’s own MQTT client meets there, on Roost’s topics only', { skip }, async () => {
   const url = relayBroker(relayUrl);
   const a = new MqttClient(url), b = new MqttClient(url);
   await a.connect();
@@ -232,7 +237,7 @@ test('the relay is a rendezvous broker: Perch’s own MQTT client meets there, o
   b.close();
 });
 
-test('where only the relay gets through: a page it serves pairs and signs in, finding the Mac through it alone', { skip }, async () => {
+test('where only the relay gets through: a page it serves pairs and signs in, finding the PC through it alone', { skip }, async () => {
   // The Mac listens on the relay's broker as soon as the relay is set up (it was, in the first test).
   await app.waitFor(async () => (await app.call('state')).rendezvous.some(r => r.url.endsWith('/v1/mqtt') && r.connected),
     { what: 'the Mac on the relay’s broker' });
@@ -262,7 +267,7 @@ test('where only the relay gets through: a page it serves pairs and signs in, fi
   await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
 });
 
-test('saving the relay made its address one of this Mac\u2019s sign-in sites, and the default for new pairing links', { skip }, async () => {
+test('saving the relay made its address one of this PC\u2019s sign-in sites, and the default for new pairing links', { skip }, async () => {
   const st = await app.call('state');
   const own = st.sites.find(x => x.origin === relayUrl);
   assert.ok(own && !own.builtIn && own.primary, JSON.stringify(st.sites));

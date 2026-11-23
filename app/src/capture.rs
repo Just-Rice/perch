@@ -455,7 +455,11 @@ mod tests {
         let sink = Arc::new(Collect::default());
         let mut c = controller(sink.clone());
         c.capture(CaptureRequest { max_edge: 640, fps: 30, kbps: 1500, ..Default::default() });
-        std::thread::sleep(Duration::from_millis(400));
+        // Waits for frames and sound rather than a fixed time: CI's ARM machines run the debug build slowly.
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while (sink.frames.lock().unwrap().len() < 5 || *sink.audio.lock().unwrap() < 10) && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         {
             let f = sink.frames.lock().unwrap();
             assert!(f.len() >= 5, "frames flow: {}", f.len());
@@ -467,7 +471,10 @@ mod tests {
         // A new size on the same display: same stream, a new keyframe.
         sink.frames.lock().unwrap().clear();
         c.capture(CaptureRequest { max_edge: 1280, fps: 30, kbps: 1500, ..Default::default() });
-        std::thread::sleep(Duration::from_millis(300));
+        let until = std::time::Instant::now() + Duration::from_secs(5);
+        while !sink.frames.lock().unwrap().iter().any(|f| f.0) && std::time::Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         assert!(sink.frames.lock().unwrap().iter().any(|f| f.0), "a keyframe starts the new size");
         assert_eq!(sink.events.lock().unwrap().last().unwrap()["width"], 1280);
         // One window.

@@ -1,8 +1,8 @@
 {
-  "name": "perch-relay-node",
+  "name": "roost-relay-node",
   "version": "0.1.0",
   "private": true,
-  "description": "Perch's relay as a plain Node.js server, for running behind a tunnel such as zrok.",
+  "description": "Roost's relay as a plain Node.js server, for running behind a tunnel such as zrok or a Cloudflare Quick Tunnel.",
   "type": "module",
   "license": "Apache-2.0",
   "scripts": { "start": "node server.mjs" },

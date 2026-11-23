@@ -1,5 +1,5 @@
-// Logging for the host process: every line goes to stderr (the app shows or saves it) and to $PERCH_HOME/perch.log,
-// which is rotated to perch.log.1 at about 2 MB so it never grows without bound.
+// Logging for the host process: every line goes to stderr (the app shows or saves it) and to $ROOST_HOME/roost.log,
+// which is rotated to roost.log.1 at about 2 MB so it never grows without bound.
 //
 // stdout is reserved for IPC frames to the app (src/ipc.mjs); nothing in the host may print there. Never log secrets,
 // codes, passwords, SDPs or sign-in responses: log what happened, not the material.
@@ -19,7 +19,7 @@ function format(parts) {
 
 export function createLog({ home = null, level = 'info', stderr = process.stderr, maxBytes = LOG_MAX_BYTES } = {}) {
   const min = LEVELS[level] ?? LEVELS.info;
-  const path = home ? join(home, 'perch.log') : null;
+  const path = home ? join(home, 'roost.log') : null;
   let size = 0;
   let fileOk = !!path;
   if (path) {

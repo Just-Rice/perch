@@ -18,9 +18,9 @@ const ANSWER_TIMEOUT_MS = 15000; // offer sent, no answer yet
 
 export const MAX_CONTROL_BYTES = 64 * 1024;
 export const MAX_INPUT_BYTES = 4096;
-export const MAX_CLIP_CHARS = 30000; // clipboard text, either way (the Mac app has the same limit)
+export const MAX_CLIP_CHARS = 30000; // clipboard text, either way (the app has the same limit)
 // Clipboard images go in pieces of CLIP_PART_CHARS base64 characters, each in its own control message, followed by the
-// clip-set or clip that names them. At most MAX_CLIP_IMAGE bytes (the Mac app has the same limit).
+// clip-set or clip that names them. At most MAX_CLIP_IMAGE bytes (the app has the same limit).
 export const MAX_CLIP_IMAGE = 20 * 1024 * 1024;
 export const CLIP_PART_CHARS = 48 * 1024;
 const MAX_CLIP_B64 = Math.ceil(MAX_CLIP_IMAGE / 3) * 4;
@@ -82,7 +82,7 @@ export class Session {
     }, Math.min(authTimeoutMs, ANSWER_TIMEOUT_MS));
 
     this.transport = 'webrtc';
-    this.ws = null;            // the Worker relay offer made alongside the WebRTC one, if the Mac has a relay
+    this.ws = null;            // the Worker relay offer made alongside the WebRTC one, if the PC has a relay
     this.peerSubs = [];
     this._attach(peer);
   }
@@ -430,7 +430,7 @@ export class Session {
     this.log?.info(`signed in (${this.route})`);
     const path = this.peer.route?.();
     if (path) this.log?.info(`route: ${ROUTE_WORDS[path.kind].toLowerCase()} (${path.local} ↔ ${path.remote})`);
-    // Which H.264 profile this viewer agreed to, known before the Mac is asked for a picture (the Worker relay has no
+    // Which H.264 profile this viewer agreed to, known before the PC is asked for a picture (the Worker relay has no
     // such agreement: Baseline there).
     this.videoProfile = this.peer.videoProfile === 'high' ? 'high' : 'baseline';
     const info = this.guest ? this.hub.guestSignedIn(this) : this.hub.sessionSignedIn(this);
@@ -463,7 +463,7 @@ export class Session {
       this.sendStatus();
     }, STATUS_EVERY_MS, true);
     if (!this.guest) this._watchIdle(); // a guest never sends input; the link's own time limit ends their watching
-    if (!this.hub.permissions.screen) this.sendError('no-screen-permission', 'The Mac has not allowed Perch to record the screen yet.');
+    if (!this.hub.permissions.screen) this.sendError('no-screen-permission', 'The PC has not allowed Roost to record the screen yet.');
   }
 
   // The largest picture worth sending: what the quality preset allows, and no more than the viewer's screen shows.
@@ -530,7 +530,7 @@ export class Session {
         this.hub.captureChanged(this);
         return;
       case 'levels':
-        // The owner's sound sliders: the Mac's speakers (0–1) and what is sent here (0–1.5).
+        // The owner's sound sliders: the PC's speakers (0–1) and what is sent here (0–1.5).
         this.hub.setLevels?.(this, {
           speakers: Number.isFinite(msg.speakers) ? Math.min(1, Math.max(0, msg.speakers)) : undefined,
           stream: Number.isFinite(msg.stream) ? Math.min(1.5, Math.max(0, msg.stream)) : undefined,
@@ -567,7 +567,7 @@ export class Session {
         return;
       }
       case 'clip-get': {
-        // The Mac's clipboard text, for the viewer to copy. Answered with {t:'clip', ok, text}.
+        // The PC's clipboard text, for the viewer to copy. Answered with {t:'clip', ok, text}.
         const now = this.now();
         if (now - (this.clipAt ?? -Infinity) < 300) return;
         this.clipAt = now;
@@ -577,7 +577,7 @@ export class Session {
       case 'clip-part':
         return this._clipPart(msg);
       case 'clip-set': {
-        // Text and/or an image (sent before in clip-part pieces) from the viewer onto the Mac's clipboard, and pasted
+        // Text and/or an image (sent before in clip-part pieces) from the viewer onto the PC's clipboard, and pasted
         // there if asked. Answered with {t:'clip-set', ok}.
         const text = msg.text === undefined ? undefined : msg.text;
         let image;
@@ -594,11 +594,11 @@ export class Session {
         return;
       }
       case 'clip-sync':
-        // The viewer wants whatever is copied on the Mac from now on, as {t:'clip', auto: true, ...}.
+        // The viewer wants whatever is copied on the PC from now on, as {t:'clip', auto: true, ...}.
         this.clipSync = msg.on === true;
         return;
       case 'mic':
-        // The viewer turned their microphone on or off: the Mac plays what they say.
+        // The viewer turned their microphone on or off: the PC plays what they say.
         if (typeof msg.on !== 'boolean' || msg.on === !!this.micOn) return;
         this.micOn = msg.on;
         this.hub.micChanged(this, msg.on);
@@ -654,7 +654,7 @@ export class Session {
   }
 
   sendWindows(list) { if (this.state === 'ready' && !this.guest) this._send({ t: 'windows', list }); }
-  // The Mac's clipboard: text, and a PNG (base64) sent ahead in clip-part pieces. auto: copied on the Mac just now.
+  // The PC's clipboard: text, and a PNG (base64) sent ahead in clip-part pieces. auto: copied on the PC just now.
   sendClip(text, ok = true, { image = null, auto = false } = {}) {
     if (this.state !== 'ready' || this.guest) return;
     const m = { t: 'clip', ok: !!ok, text: ok ? String(text ?? '').slice(0, MAX_CLIP_CHARS) : '' };

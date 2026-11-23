@@ -1,23 +1,25 @@
-// The local Setup page: a tiny web server on 127.0.0.1 that only this Mac can reach.
+// The local Setup page, which people see as the Control Center: a tiny web server on 127.0.0.1 that only this PC can
+// reach.
 //
-// Setup can pair new devices, so whoever can use it can end up controlling the Mac. Every request therefore has to
+// Setup can pair new devices, so whoever can use it can end up controlling the PC. Every request therefore has to
 // pass these checks, in this order:
 //  - the Host header must be 127.0.0.1:<port> or localhost:<port>. A website can point its own domain name at
 //    127.0.0.1 ("DNS rebinding") to make the browser treat this server as part of that site; the browser still sends
 //    the website's name as the Host, so this check stops it.
-//  - the page itself (GET /) only loads with the random key in its address (?k=…), which only Perch's menu bar knows.
-//    The page then sends the key in an X-Perch-Key header with every API call, so nothing else on this Mac (another
-//    website, another app) can use the API without first reading the key out of Perch.
+//  - the page itself (GET /) only loads with the random key in its address (?k=…), which only Roost's tray icon knows.
+//    The page then sends the key in an X-Roost-Key header with every API call (X-Perch-Key, the old name, is still
+//    accepted, so a page from before the rename keeps working), so nothing else on this PC (another
+//    website, another app) can use the API without first reading the key out of Roost.
 //  - POSTs must come from this page (Origin), as JSON (a plain HTML form can't send that), and be small.
 // Answers never carry CORS headers, and every one carries headers that stop it being framed, sniffed or cached.
 //
-// The API, all JSON, all with the X-Perch-Key header:
+// The API, all JSON, all with the X-Roost-Key header:
 //   GET  /api/state             controller.state()
 //   GET  /api/events            Server-Sent Events: `event: state` with a state snapshot now and after every change,
 //                               and a keep-alive comment every 15 s. (Read with fetch(), since EventSource can't send
 //                               the key header.)
 //   POST /api/<action>          one controller method each (see ACTIONS); answers {result, state} or 400 {error}
-//   GET  /api/test/state, /api/test/input-echo   only when state().test is true (PERCH_TEST=1)
+//   GET  /api/test/state, /api/test/input-echo   only when state().test is true (ROOST_TEST=1)
 import { createServer } from 'node:http';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -59,7 +61,8 @@ const TYPES = {
 };
 
 // POST /api/<name>: which controller method each one calls and the body fields it passes along, in order.
-// Field rules: 'string' (non-empty, at most 16 KB), 'object' (a plain object).
+// Field rules: 'string' (non-empty, at most 16 KB), 'string?' (the same, or missing), 'object' (a plain object),
+// 'number' (finite), 'boolean' (true or false).
 const ACTIONS = {
   totpStart: [],
   totpConfirm: [['code', 'string']],
@@ -85,6 +88,8 @@ const ACTIONS = {
   workerRelayTunnelSet: [['url', 'string']],
   workerRelayTunnelRemove: [],
   updateSettings: [['patch', 'object']],
+  // "Control admin apps" (Windows): on runs roost.exe elevated through a scheduled task; off goes back to normal.
+  elevation: [['on', 'boolean']],
   disconnect: [],
   requestPermission: [['which', 'string']],
   resetPermission: [['which', 'string']],
@@ -108,6 +113,7 @@ function checkField(value, rule, name) {
   if ((rule === 'string' || rule === 'string?') && typeof value === 'string' && value.length > 0 && value.length <= 16384) return value;
   if (rule === 'object' && value && typeof value === 'object' && !Array.isArray(value)) return value;
   if (rule === 'number' && typeof value === 'number' && Number.isFinite(value)) return value;
+  if (rule === 'boolean' && typeof value === 'boolean') return value;
   throw new HttpError(400, `Something was missing from that request (${name}). Reload the page and try again.`);
 }
 
@@ -153,16 +159,16 @@ export async function startSetupServer({
   function sendNoKeyPage(res) {
     send(res, 403, `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="light dark"><title>Perch Setup</title>
+<meta name="color-scheme" content="light dark"><title>Roost Control Center</title>
 <link rel="stylesheet" href="/setup.css"><link rel="icon" href="/icon.svg" type="image/svg+xml"></head>
 <body><header class="top"><div class="page top-inner"><span class="brand"><img src="/icon.svg" alt="" width="30" height="30">
-Perch <span class="brand-sub">Setup</span></span></div></header>
+Roost <span class="brand-sub">Control Center</span></span></div></header>
 <main class="page"><section class="card blocked" aria-labelledby="t">
-<h1 id="t">Open Setup from Perch</h1>
-<p>For your safety, Setup only opens from Perch itself. Click the Perch icon in the menu bar at the top of your
-screen, then choose <b>Open Setup…</b> from its menu.</p>
-<p class="small muted">A Setup tab stops working when Perch restarts. Opening Setup from the menu bar gives you a
-fresh one.</p>
+<h1 id="t">Open the Control Center from Roost</h1>
+<p>For your safety, the Control Center only opens from Roost itself. Click the Roost icon in the notification area
+of the taskbar (you may need the ^ arrow to see it), then choose <b>Open Control Center</b>.</p>
+<p class="small muted">A Control Center tab stops working when Roost restarts. Opening it from the Roost icon gives
+you a fresh one.</p>
 </section></main></body></html>`, 'text/html; charset=utf-8');
   }
 
@@ -198,7 +204,7 @@ fresh one.</p>
 
   async function runAction(name, body) {
     const args = ACTIONS[name].map(([field, rule]) => checkField(body[field], rule, field));
-    if (typeof controller[name] !== 'function') throw new HttpError(404, 'This version of Perch can\'t do that yet.');
+    if (typeof controller[name] !== 'function') throw new HttpError(404, 'This version of Roost can\'t do that yet.');
     let result;
     try {
       result = await controller[name](...args);
@@ -217,8 +223,8 @@ fresh one.</p>
     // Browsers label every request with where it came from; anything not from this page itself is refused.
     const site = req.headers['sec-fetch-site'];
     if (site !== undefined && site !== 'same-origin') throw new HttpError(403, 'Requests from other pages aren\'t allowed.');
-    if (!keyMatches(req.headers['x-perch-key'])) {
-      throw new HttpError(403, 'This Setup page is out of date. Open Setup again from the Perch icon in the menu bar.');
+    if (!keyMatches(req.headers['x-roost-key'] ?? req.headers['x-perch-key'])) {
+      throw new HttpError(403, 'This Control Center tab is out of date. Open it again from the Roost icon in the taskbar.');
     }
     const name = pathname.slice('/api/'.length);
     if (!['GET', 'HEAD', 'POST'].includes(req.method)) throw new HttpError(405, 'That request method isn\'t allowed.');
@@ -325,7 +331,7 @@ fresh one.</p>
     const host = String(req.headers.host ?? '').toLowerCase();
     if (!allowedHosts().includes(host)) {
       warn(`refused a request for host "${host.slice(0, 80)}"`);
-      return sendText(res, 403, 'Perch Setup only answers at 127.0.0.1.');
+      return sendText(res, 403, 'The Roost Control Center only answers at 127.0.0.1.');
     }
     // Only origin-form targets ("/path?query"); never "http://elsewhere/…" or "*".
     if (!req.url.startsWith('/') || req.url.startsWith('//')) return sendText(res, 400, 'Bad request.');
@@ -358,7 +364,7 @@ fresh one.</p>
       // A body we refused without reading (too large, wrong page) shouldn't keep the connection busy: close it.
       const extra = req.complete ? {} : { Connection: 'close' };
       let status = 500;
-      let message = 'Something went wrong in Perch. Please try again.';
+      let message = 'Something went wrong in Roost. Please try again.';
       if (e instanceof HttpError) {
         ({ status, message } = e);
         if (status === 403) warn(`refused ${req.method} ${String(req.url).split('?')[0].slice(0, 80)}: ${message}`);
@@ -375,7 +381,7 @@ fresh one.</p>
 
   await new Promise((resolve, reject) => {
     const onError = (e) => reject(new Error(e.code === 'EADDRINUSE'
-      ? `Setup couldn't start: port ${port} is already in use.` : `Setup couldn't start: ${e.message}`));
+      ? `The Control Center couldn't start: port ${port} is already in use.` : `The Control Center couldn't start: ${e.message}`));
     server.once('error', onError);
     server.listen(port, '127.0.0.1', () => { server.off('error', onError); resolve(); });
   });

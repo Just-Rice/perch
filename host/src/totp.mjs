@@ -1,5 +1,5 @@
 // Authenticator app codes (TOTP, RFC 6238): HMAC-SHA1, 6 digits, 30-second steps — what every authenticator app
-// uses by default. The Mac accepts the previous, current and next step, and each step only once.
+// uses by default. The PC accepts the previous, current and next step, and each step only once.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 export const STEP_SECONDS = 30;
@@ -69,6 +69,6 @@ export function checkCode(secret, code, { now = Date.now(), lastStep = -1, windo
 }
 
 export function otpauthUri(secret, macName) {
-  const label = encodeURIComponent(`Perch:${macName}`);
-  return `otpauth://totp/${label}?secret=${base32(secret)}&issuer=Perch&algorithm=SHA1&digits=6&period=${STEP_SECONDS}`;
+  const label = encodeURIComponent(`Roost:${macName}`);
+  return `otpauth://totp/${label}?secret=${base32(secret)}&issuer=Roost&algorithm=SHA1&digits=6&period=${STEP_SECONDS}`;
 }

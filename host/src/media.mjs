@@ -1,4 +1,4 @@
-// Sending the Mac's video and sound to the one signed-in viewer.
+// Sending the PC's video and sound to the one signed-in viewer.
 //
 // Video frames arrive from the app as H.264 access units with microsecond timestamps. Each frame is cut into RTP
 // packets (src/h264.mjs) and handed to a pacer, so a big keyframe leaves over a few milliseconds instead of as one

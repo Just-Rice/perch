@@ -2,7 +2,7 @@
 // libopus. Run from host/node:  node scripts/make-fixtures.mjs
 //
 // clip.h264  3 s of 640x360 test pattern at 30 fps, Constrained Baseline H.264, Annex-B, no B-frames, an IDR every
-//            second with SPS/PPS repeated before each one — the same shape the Mac app's encoder produces.
+//            second with SPS/PPS repeated before each one — the same shape the app's encoder produces.
 // clip.opusl 3 s of a 440 Hz tone as 20 ms Opus packets (48 kHz stereo), each stored as [u16 BE length][packet].
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, statSync } from 'node:fs';
@@ -60,7 +60,7 @@ export function encodeLengthPrefixed(packets) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const tmp = mkdtempSync(join(tmpdir(), 'perch-fixtures-'));
+  const tmp = mkdtempSync(join(tmpdir(), 'roost-fixtures-'));
   try {
     execFileSync('ffmpeg', [...VIDEO_ARGS, join(OUT, 'clip.h264')], { stdio: 'inherit' });
     execFileSync('ffmpeg', [...AUDIO_ARGS, join(tmp, 'clip.ogg')], { stdio: 'inherit' });

@@ -9,7 +9,7 @@ import { Auth } from '../src/auth.mjs';
 import { Controller } from '../src/controller.mjs';
 
 async function rig() {
-  const home = mkdtempSync(join(tmpdir(), 'perch-levels-'));
+  const home = mkdtempSync(join(tmpdir(), 'roost-levels-'));
   const store = await Store.open({ home, secrets: 'file' });
   const config = { test: false, version: '0.3.5', origins: ['https://just-rice.github.io'], rpId: 'just-rice.github.io',
     site: 'https://just-rice.github.io/perch/connect.html' };

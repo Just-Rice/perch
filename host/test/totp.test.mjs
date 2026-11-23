@@ -45,8 +45,8 @@ test('base32 round-trips and the otpauth link is well formed', () => {
   const uri = new URL(otpauthUri(RFC_KEY, 'amber-otter-4821'));
   assert.equal(uri.protocol, 'otpauth:');
   assert.equal(uri.searchParams.get('secret'), 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ');
-  assert.equal(uri.searchParams.get('issuer'), 'Perch');
-  assert.match(decodeURIComponent(uri.pathname), /Perch:amber-otter-4821$/);
+  assert.equal(uri.searchParams.get('issuer'), 'Roost');
+  assert.match(decodeURIComponent(uri.pathname), /Roost:amber-otter-4821$/);
 });
 
 test('Mac names and suggested passwords look right', () => {

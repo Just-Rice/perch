@@ -2,7 +2,7 @@
 // "Input and pointer channels".
 //
 // Only the fields listed in the protocol are passed on, with the right types and sensible ranges; anything else is
-// dropped. The app then posts real events on the Mac, so this is the last line between a browser tab and the
+// dropped. The app then posts real events on the PC, so this is the last line between a browser tab and the
 // keyboard: be strict, and never forward something we didn't build ourselves.
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -10,8 +10,8 @@ const isNum = v => typeof v === 'number' && Number.isFinite(v);
 const coord = v => (isNum(v) ? clamp(v, 0, 1) : null);
 
 export const MAX_TEXT_CHARS = 256;
-// The Mac's special keys a viewer can press: sound, screen and keyboard brightness, media.
-// Only silent ones: no volume, mute or media keys, so a viewer can never make the Mac itself play sound.
+// The PC's special keys a viewer can press: sound, screen and keyboard brightness, media.
+// Only silent ones: no volume, mute or media keys, so a viewer can never make the PC itself play sound.
 export const SYSTEM_KEYS = new Set(['brightnessUp', 'brightnessDown', 'keyboardLightUp', 'keyboardLightDown']);
 export const MAX_SCROLL = 10000;          // CSS pixels in one wheel event
 const CODE_RE = /^[A-Za-z0-9]{1,32}$/;    // DOM KeyboardEvent.code, e.g. "KeyA", "ArrowLeft", "Digit1"
@@ -25,7 +25,7 @@ export function validateInput(msg, channel) {
     if (msg.t !== 'm') return null;
     const x = coord(msg.x), y = coord(msg.y);
     if (x === null || y === null) return null;
-    // A captured mouse also says how far it moved (fractions of the picture), for games on the Mac.
+    // A captured mouse also says how far it moved (fractions of the picture), for games on the PC.
     if (msg.dx === undefined && msg.dy === undefined) return { t: 'm', x, y };
     if (!isNum(msg.dx) || !isNum(msg.dy)) return null;
     return { t: 'm', x, y, dx: clamp(msg.dx, -1, 1), dy: clamp(msg.dy, -1, 1) };
@@ -59,7 +59,7 @@ export function validateInput(msg, channel) {
     case 'rel':
       return { t: 'rel' };
     case 'sys':
-      // One of the Mac's special keys, pressed and let go (the Mac app has the same list).
+      // One of the PC's special keys, pressed and let go (the app has the same list).
       return SYSTEM_KEYS.has(msg.k) ? { t: 'sys', k: msg.k } : null;
     default:
       return null;

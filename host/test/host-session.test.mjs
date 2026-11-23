@@ -1,7 +1,7 @@
 // Whole sessions through the real host process: src/main.mjs runs as a child of test/fake-app.mjs (standing in for
 // the Swift app, playing the committed fixtures) and test/soft-viewer.mjs plays the website, with werift as its
 // WebRTC and a software passkey. Everything goes through the local test broker (tests/e2e/broker.mjs), never the
-// public ones, and nothing touches the real screen, keyboard or Keychain.
+// public ones, and nothing touches the real screen, keyboard or saved secrets.
 //
 // What these check, above all: no picture, no sound and no input before a viewer has signed in over this exact
 // connection, and every sign-in proof fails when an SDP was changed on the way.
@@ -218,8 +218,8 @@ test('pairing: nothing is sent and no input reaches the app until the code is ri
   // The pairing options followed the protocol and were made for this connection.
   const o = v.pairOptions;
   assert.equal(o.challenge, Buffer.from(v.bind).toString('base64url'));
-  assert.deepEqual(o.rp, { id: TEST_RP_ID, name: 'Perch' });
-  assert.equal(o.user.name, `Perch · ${hi.name}`);
+  assert.deepEqual(o.rp, { id: TEST_RP_ID, name: 'Roost' });
+  assert.equal(o.user.name, `Roost · ${hi.name}`);
   assert.equal(o.authenticatorSelection.userVerification, 'required');
   assert.equal(o.authenticatorSelection.residentKey, 'required');
   // hostId ‖ sigKey ‖ a 16-byte pin of the Mac's fixed DTLS certificate: the fingerprint in the Mac's offer.
@@ -506,7 +506,7 @@ test('a name the owner chose: checked, normalized, and backup sign-in works with
   for (const bad of ['abc', 'a'.repeat(41), 'my--mac', '-mymac', 'mymac-', 'my.mac', 'mäc-book', '']) {
     await assert.rejects(app.call('customMacName', bad), /4 to 40 letters or numbers/, JSON.stringify(bad));
   }
-  await assert.rejects(app.call('customMacName', macName), /already this Mac/);
+  await assert.rejects(app.call('customMacName', macName), /already this PC/);
   assert.equal(await app.call('customMacName', '  Jordan MacBook  '), 'jordan-macbook');
   const st = await app.call('state');
   assert.equal(st.macName, 'jordan-macbook');
@@ -912,14 +912,14 @@ test('at most three sign-ins at once, and each must finish in time', async (t) =
 // --- the app and the menu bar ---
 
 test('the menu bar status follows the state; quitting says goodbye to the viewer; a second run does not open Setup', async (t) => {
-  const home = mkdtempSync(join(tmpdir(), 'perch-host-'));
+  const home = mkdtempSync(join(tmpdir(), 'roost-host-'));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const app = await host(t, { home });
   await app.waitForCommand(c => c.c === 'status' && c.state === 'needs-setup');
   const status = app.commands.findLast(c => c.c === 'status');
   assert.equal(status.macName, identity(app).macName);
   assert.match(status.setupUrl, /^http:\/\/127\.0\.0\.1:\d+\/\?k=/);
-  assert.equal(status.text, 'Finish setting up: add Perch to your authenticator app');
+  assert.equal(status.text, 'Finish setting up: add Roost to your authenticator app');
 
   await app.setupTotp();
   const { v } = await pair(t, app);

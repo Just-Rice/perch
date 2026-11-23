@@ -10,3 +10,5 @@ tests/e2e/out/
 .reference/
 .build-intel/
 .wrangler/
+app/target/
+host/dist/

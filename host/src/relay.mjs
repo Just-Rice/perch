@@ -1,6 +1,6 @@
 // The optional TURN relay for strict networks (school or office Wi-Fi that blocks direct connections): the owner's own
-// Cloudflare TURN key, kept in the Keychain. (Without a card, the owner's own Worker relay does the same job:
-// wsrelay.mjs.) The Mac sends the logins to the viewer inside the sealed offer; the viewer's browser then reaches the Mac through
+// Cloudflare TURN key, kept with the other secrets. (Without a card, the owner's own Worker relay does the same job:
+// wsrelay.mjs.) The PC sends the logins to the viewer inside the sealed offer; the viewer's browser then reaches the PC through
 // Cloudflare over the normal web port when nothing else gets through. See docs/PROTOCOL.md, "Relay".
 import { cleanIceServers, hasRelay } from '../../site/js/shared/relay.js';
 
@@ -36,14 +36,14 @@ export class Relay {
         signal: AbortSignal.timeout(10000),
       });
     } catch {
-      throw new Error('Perch couldn’t reach Cloudflare. Check this Mac’s internet connection and try again.');
+      throw new Error('Roost couldn’t reach Cloudflare. Check this PC’s internet connection and try again.');
     }
     if ([400, 401, 403, 404].includes(res.status)) {
       throw new Error('Cloudflare didn’t accept that relay key. Check the Turn Token ID and the API token.');
     }
     if (!res.ok) throw new Error(`Cloudflare answered with an error (${res.status}). Try again in a minute.`);
     let body;
-    try { body = await res.json(); } catch { throw new Error('Cloudflare sent an answer Perch couldn’t read.'); }
+    try { body = await res.json(); } catch { throw new Error('Cloudflare sent an answer Roost couldn’t read.'); }
     const raw = Array.isArray(body?.iceServers) ? body.iceServers : [body?.iceServers];
     // Only the relay entries: viewers already have STUN servers of their own.
     const list = cleanIceServers(raw).filter(s => s.urls.some(u => !u.startsWith('stun:')));
@@ -69,7 +69,7 @@ export class Relay {
   // Fetch now so the first viewer doesn't wait (called at startup).
   warm() { if (this.active) this._refresh(); }
 
-  // Also after Start over, which gives this Mac a new relay key.
+  // Also after Start over, which gives this PC a new relay key.
   forget() { this.cache = null; this.lastError = null; this.lastOkAt = null; }
 
   _remember(list, ttlS = TTL_S) {

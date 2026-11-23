@@ -1,4 +1,4 @@
-// IPC between the Swift app and this host process: the app writes frames to our stdin, we write frames to our
+// IPC between roost.exe and this host process: the app writes frames to our stdin, we write frames to our
 // stdout. Every frame is [u32 big-endian length of the rest][u8 type][payload]. See docs/PROTOCOL.md, "App ⇄ host
 // process (IPC)".
 //
@@ -121,7 +121,7 @@ export class FrameReader {
 //
 // With `autoStart: false` nothing is read until start(): the app sends HELLO the moment it launches the host, and an
 // event emitted before anyone listens is simply lost. main.mjs wires up its handlers first (after opening the store,
-// which reads the Keychain and takes a while), then starts reading; until then the bytes wait in the pipe.
+// which reads the secrets through roost.exe and takes a while), then starts reading; until then the bytes wait in the pipe.
 export class HostIpc extends EventEmitter {
   constructor({ input = process.stdin, output = process.stdout, log = null, autoStart = true } = {}) {
     super();

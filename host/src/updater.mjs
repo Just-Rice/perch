@@ -1,14 +1,20 @@
-// Updates: asks GitHub whether a newer Perch has been released, and installs it with the same one-line script people
-// used to install Perch in the first place (it downloads the release, checks its checksum, quits Perch, replaces it
-// and opens it again).
+// Updates: asks GitHub whether a newer Roost has been released, and installs it with the same PowerShell script people
+// used to install Roost in the first place (install.ps1: it downloads the release zip for this PC's processor
+// (Roost-<version>-win-x64.zip or -win-arm64.zip), checks it against its .sha256, quits Roost, replaces it and starts
+// it again).
 //
 // Checking never throws: no network, GitHub being down or a strange answer all simply mean "no update right now".
-import { spawn, execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
+import { existsSync, readFile } from 'node:fs';
+import path from 'node:path';
+import { tmpdir } from 'node:os';
 
-export const REPO = 'Just-Rice/perch';
+export const REPO = 'faarisaahmed/roost';
 export const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 export const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
-export const INSTALL_COMMAND = 'curl -fsSL https://just-rice.github.io/perch/install.sh | bash -s -- --update';
+export const SITE = 'https://faarisaahmed.github.io/roost/';
+// Used when the installed copy has no install.ps1 beside it (an older or hand-made install).
+export const INSTALL_SCRIPT_URL = `${SITE}install.ps1`;
 const TIMEOUT_MS = 10_000;
 const NOTES_MAX = 500;
 
@@ -78,7 +84,7 @@ export async function checkForUpdate(currentVersion, { fetchImpl = globalThis.fe
   try {
     const res = await fetchImpl(LATEST_RELEASE_API, {
       headers: {
-        'User-Agent': `Perch/${currentVersion} (+https://just-rice.github.io/perch/)`,
+        'User-Agent': `Roost/${currentVersion} (+${SITE})`,
         Accept: 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
       },
@@ -116,52 +122,59 @@ export async function checkForUpdate(currentVersion, { fetchImpl = globalThis.fe
 
 // --- installing ---
 
-// Starts the install script in its own process group so it outlives this process: the script quits Perch (which
-// ends this host process too), replaces the app and opens it again. It always installs the latest release, so it
-// needs nothing about the update; `options` may carry {log} (and {spawnImpl} in tests), and anything else is ignored.
+// Windows' own PowerShell, by its full path when Windows says where it is, so a powershell.exe elsewhere on the PATH
+// (in a folder another program added) can't stand in for it.
+export function powershellPath(env = process.env) {
+  const root = env.SystemRoot || env.SYSTEMROOT || env.windir;
+  return root ? path.win32.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe') : 'powershell.exe';
+}
+
+// What installUpdate runs: install.ps1 from the installed copy when it has one, otherwise the one on the website,
+// fetched and run in the same PowerShell. Both with -Update, so the script installs the latest release over this one
+// and starts Roost again. Returns {cmd, args}.
+export function installCommand({ installDir = null, env = process.env, exists = existsSync } = {}) {
+  const cmd = powershellPath(env);
+  const base = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
+  const local = installDir ? path.join(installDir, 'install.ps1') : null;
+  if (local && exists(local)) return { cmd, args: [...base, '-File', local, '-Update'] };
+  // TLS 1.2 first: Windows PowerShell 5.1 on an older Windows 10 may not offer it by default, and GitHub needs it.
+  // DownloadString always gives text, whatever type the website labels the file with.
+  const script = '[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor ' +
+    '[Net.SecurityProtocolType]::Tls12; ' +
+    `& ([scriptblock]::Create((New-Object Net.WebClient).DownloadString('${INSTALL_SCRIPT_URL}'))) -Update`;
+  return { cmd, args: [...base, '-Command', script] };
+}
+
+// Starts the install script detached, so it outlives this process: the script quits Roost (which ends this host
+// process too), replaces it and starts it again. It always installs the latest release, so it needs nothing about the
+// update; `options` may carry {log, installDir} (and {spawnImpl, env, exists} in tests), and anything else is ignored.
 export function installUpdate(options) {
-  const { spawnImpl = spawn, log = defaultLog } = options ?? {};
-  const child = spawnImpl('/bin/bash', ['-c', INSTALL_COMMAND], { detached: true, stdio: 'ignore', cwd: '/' });
+  const { spawnImpl = spawn, log = defaultLog, installDir = null, env = process.env, exists = existsSync } = options ?? {};
+  const { cmd, args } = installCommand({ installDir, env, exists });
+  const child = spawnImpl(cmd, args, {
+    detached: true, stdio: 'ignore', windowsHide: true,
+    // Not from inside the install folder: the script replaces it, and Windows won't remove a folder in use.
+    cwd: tmpdir(),
+  });
   child.on?.('error', (e) => log(`updater: couldn't start the update (${e.message})`));
   child.unref();
-  log('updater: update started');
+  log(`updater: update started (${args.includes('-File') ? 'install.ps1 from the installed copy' : 'install.ps1 from the website'})`);
   return { started: true };
 }
 
 // --- finishing an update ---
 //
-// An update only takes effect once Perch has restarted. These look at the copy of Perch on disk, so the host can tell
-// when it is newer than the one running (an update that replaced the files but couldn't restart Perch) and say so.
+// An update only takes effect once Roost has restarted. installedVersion looks at the copy on disk, so the host can
+// tell when it differs from the one running (an update that replaced the files but couldn't restart Roost) and say so.
 
-// The Perch.app this host runs from (…/Perch.app/Contents/Helpers/node), or null when it isn't running from one.
-export function appBundleOf(execPath = process.execPath) {
-  const m = /^(\/.+\.app)\/Contents\/Helpers\/node$/.exec(String(execPath ?? ''));
-  return m ? m[1] : null;
-}
-
-function runTool(cmd, args, { execFileImpl = execFile, timeoutMs = 20_000 } = {}) {
+// The version in <installDir>\VERSION (the installer writes it, e.g. "0.1.0"), or null: no install folder, the file
+// missing or mid-write, or not a version number.
+export function installedVersion(installDir, { readFileImpl = readFile } = {}) {
+  if (!installDir) return Promise.resolve(null);
   return new Promise((resolve) => {
-    execFileImpl(cmd, args, { timeout: timeoutMs }, (err, stdout, stderr) =>
-      resolve({ ok: !err, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }));
+    readFileImpl(path.join(installDir, 'VERSION'), 'utf8', (err, text) => {
+      const v = err ? '' : String(text ?? '').replace(/^\uFEFF/, '').trim();
+      resolve(parseVersion(v) && v.length <= 64 ? v : null);
+    });
   });
-}
-
-// The version of the Perch.app at `appPath` as it is on disk now, or null (mid-install, missing, unreadable).
-export async function installedVersion(appPath, opts) {
-  if (!appPath) return null;
-  const r = await runTool('/usr/bin/plutil',
-    ['-extract', 'CFBundleShortVersionString', 'raw', '-o', '-', `${appPath}/Contents/Info.plist`], opts);
-  const v = r.ok ? r.stdout.trim() : '';
-  return parseVersion(v) ? v : null;
-}
-
-// Who signed the Perch.app at `appPath`: its designated requirement, which is what macOS ties Screen Recording and
-// Accessibility to. Null when the signature is broken or can't be read.
-export async function signerOf(appPath, opts) {
-  if (!appPath) return null;
-  const verify = await runTool('/usr/bin/codesign', ['--verify', '--deep', '--strict', appPath], opts);
-  if (!verify.ok) return null;
-  const r = await runTool('/usr/bin/codesign', ['-d', '-r-', appPath], opts);
-  const m = /designated => (.+)/.exec(`${r.stdout}\n${r.stderr}`);
-  return r.ok && m ? m[1].trim() : null;
 }

@@ -54,7 +54,7 @@ function checkShape(resp, kind) {
   }
 }
 
-// Perch's own rule on top of the library's, for registration AND sign-in: the ceremony must have happened in a
+// Roost's own rule on top of the library's, for registration AND sign-in: the ceremony must have happened in a
 // top-level page of an allowed origin. @simplewebauthn/server never checks crossOrigin/topOrigin for registration.
 export function checkClientData(resp, type, origins) {
   let cd;
@@ -65,7 +65,7 @@ export function checkClientData(resp, type, origins) {
   if (cd.type !== type) throw new AuthError('bad-passkey', `clientData type ${cd.type}, expected ${type}`);
   if (cd.crossOrigin !== undefined && cd.crossOrigin !== false) throw new AuthError('bad-passkey', 'made inside a cross-origin frame');
   if (cd.topOrigin !== undefined) throw new AuthError('bad-passkey', 'made inside a frame (topOrigin present)');
-  if (!origins.includes(cd.origin)) throw new AuthError('origin', `origin ${cd.origin} is not one this Mac accepts sign-ins from`);
+  if (!origins.includes(cd.origin)) throw new AuthError('origin', `origin ${cd.origin} is not one this PC accepts sign-ins from`);
   return cd;
 }
 
@@ -91,15 +91,15 @@ export class Auth {
 
   // --- sites ---
 
-  // Every site this Mac accepts sign-ins from: the built-in ones, then those the owner added in Setup.
+  // Every site this PC accepts sign-ins from: the built-in ones, then those the owner added in Setup.
   sites() {
     return [...this.builtinSites, ...this.store.sites.map(x => ({
       origin: x.origin, rpId: new URL(x.origin).hostname, url: x.url, builtIn: false, addedAt: x.addedAt ?? null,
     }))];
   }
   siteFor(origin) { return this.sites().find(x => x.origin === origin) ?? null; }
-  // Where pairing and guest links point unless another site is asked for: this Mac's own relay Worker when it has one
-  // (the relay serves the Perch site too, and gets through where little else does), otherwise the official site.
+  // Where pairing and guest links point unless another site is asked for: this PC's own relay Worker when it has one
+  // (the relay serves the Roost site too, and gets through where little else does), otherwise the official site.
   get primarySite() {
     const own = this.store.workerRelay?.url;
     return (own && this.siteFor(own)) || this.builtinSites.at(-1);
@@ -114,11 +114,11 @@ export class Auth {
   creationOptions(bind, origin = null) {
     const macName = this.store.macName;
     const site = origin ? this.siteFor(origin) : this.primarySite;
-    if (!site) throw new AuthError('origin', `origin ${String(origin).slice(0, 100)} is not one this Mac accepts sign-ins from`);
+    if (!site) throw new AuthError('origin', `origin ${String(origin).slice(0, 100)} is not one this PC accepts sign-ins from`);
     return {
       challenge: toB64url(bind),
-      rp: { id: site.rpId, name: 'Perch' },
-      user: { id: toB64url(this.store.userHandle), name: `Perch · ${macName}`, displayName: `Perch on ${macName}` },
+      rp: { id: site.rpId, name: 'Roost' },
+      user: { id: toB64url(this.store.userHandle), name: `Roost · ${macName}`, displayName: `Roost on ${macName}` },
       pubKeyCredParams: COSE_ALGS.map(alg => ({ type: 'public-key', alg })),
       timeout: 120000,
       excludeCredentials: this.store.devices.filter(d => this.deviceRpId(d) === site.rpId)
@@ -132,7 +132,7 @@ export class Auth {
   async verifyAssertion(response, bind) {
     checkShape(response, 'get');
     const device = this.store.findDevice(response.id);
-    if (!device) throw new AuthError('unknown-device', 'credential is not one of this Mac\'s devices');
+    if (!device) throw new AuthError('unknown-device', 'credential is not one of this PC\'s devices');
     const cd = checkClientData(response, 'webauthn.get', this.origins);
     const site = this.siteFor(cd.origin);
     // A passkey only ever works on the site it was made for.
@@ -140,11 +140,11 @@ export class Auth {
     // A valid passkey that signed some other connection's challenge: the SDP was changed on the way.
     if (cd.challenge !== toB64url(bind)) throw new AuthError('bad-proof', 'challenge is not this connection\'s binding');
     const uh = response.response.userHandle;
-    // Passkeys made before one-tap sign-in carry the shorter, 48-byte handle; both are this Mac's.
+    // Passkeys made before one-tap sign-in carry the shorter, 48-byte handle; both are this PC's.
     if (uh != null) {
       const given = fromB64url(uh);
       if (!equalBytes(given, this.store.userHandle) && !equalBytes(given, this.store.legacyUserHandle)) {
-        throw new AuthError('bad-passkey', 'user handle is not this Mac\'s');
+        throw new AuthError('bad-passkey', 'user handle is not this PC\'s');
       }
     }
     let v;
@@ -221,10 +221,10 @@ export class Auth {
   createPairing(siteOrigin = null) {
     if (this.store.codeNeeded('pair') && !this.store.config.totp.set) throw new Error('Set up the authenticator app first.');
     const site = siteOrigin ? this.siteFor(siteOrigin) : this.primarySite;
-    if (!site) throw new Error('That site isn’t one this Mac accepts sign-ins from.');
+    if (!site) throw new Error('That site isn’t one this PC accepts sign-ins from.');
     const id = randomBytes(PAIR_ID_BYTES);
     const secret = randomBytes(PAIR_SECRET_BYTES);
-    // ‖ the Mac's certificate pin, so the new device trusts only this Mac from its very first connection.
+    // ‖ the PC's certificate pin, so the new device trusts only this PC from its very first connection.
     const pin = this.store.dtlsPin;
     const token = pin ? concat(this.store.hostId, this.store.sigKey, id, secret, pin)
       : concat(this.store.hostId, this.store.sigKey, id, secret);
@@ -293,7 +293,7 @@ export class Auth {
   createGuest({ minutes = 30, siteOrigin = null } = {}) {
     if (!Number.isFinite(minutes) || minutes < 1 || minutes > 24 * 60) throw new Error('A guest link can last from 1 minute to 24 hours.');
     const site = siteOrigin ? this.siteFor(siteOrigin) : this.primarySite;
-    if (!site) throw new Error('That site isn’t one this Mac accepts sign-ins from.');
+    if (!site) throw new Error('That site isn’t one this PC accepts sign-ins from.');
     const id = randomBytes(PAIR_ID_BYTES);
     const secret = randomBytes(PAIR_SECRET_BYTES);
     const pin = this.store.dtlsPin;
@@ -302,7 +302,7 @@ export class Auth {
       id: new Uint8Array(id), secret: new Uint8Array(secret), expiresAt: this.now() + minutes * 60000,
       link: `${site.url}#guest=${toB64url(token)}`,
     };
-    this.store.activity('guest', `Made a guest link to show this Mac's screen (view only, ${minutes} min)`);
+    this.store.activity('guest', `Made a guest link to show this PC's screen (view only, ${minutes} min)`);
     return this.guestInfo();
   }
 
@@ -359,7 +359,7 @@ export class Auth {
     return true;
   }
 
-  // --- backup password (OPAQUE: the Mac never learns the password) ---
+  // --- backup password (OPAQUE: the PC never learns the password) ---
 
   get opaqueUser() { return normalizeMacName(this.store.macName); }
 

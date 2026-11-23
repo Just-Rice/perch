@@ -1,7 +1,7 @@
-// The Mac's side of each WebRTC connection, built on werift. See docs/PROTOCOL.md, "WebRTC".
+// The PC's side of each WebRTC connection, built on werift. See docs/PROTOCOL.md, "WebRTC".
 //
-// The Mac is always the offerer: one sendonly H.264 video track (nothing else is offered, so the browser can't pick
-// a codec the Mac can't make), one Opus track (the Mac's sound out; the viewer's microphone back, when they turn it
+// The PC is always the offerer: one sendonly H.264 video track (nothing else is offered, so the browser can't pick
+// a codec the PC can't make), one Opus track (the PC's sound out; the viewer's microphone back, when they turn it
 // on), and the three data channels. ICE is not trickled: the offer
 // is sent once gathering has finished, so a single rendezvous message carries everything. The exact offer and
 // answer texts are kept because the sign-in proofs are bound to them (site/js/shared/bind.js).
@@ -16,7 +16,7 @@ export const VIDEO_FMTP = 'profile-level-id=42e01f;packetization-mode=1;level-as
 // Constrained High: the same picture in about a fifth fewer bits (measured on a scrolling screen at 60 frames a second:
 // 1.1 dB sharper while scrolling with 20% fewer bits). Offered first, under both of its labels: Constrained High
 // (640c1f, which Safari lists) and High (64001f, which Chrome lists; a Constrained High stream is a valid High one). A
-// browser with neither answers with Constrained Baseline, and the Mac encodes whichever was agreed.
+// browser with neither answers with Constrained Baseline, and the PC encodes whichever was agreed.
 export const VIDEO_FMTP_HIGH = 'profile-level-id=640c1f;packetization-mode=1;level-asymmetry-allowed=1';
 export const VIDEO_FMTP_HIGH_PLAIN = 'profile-level-id=64001f;packetization-mode=1;level-asymmetry-allowed=1';
 
@@ -25,7 +25,7 @@ export function profileOf(codec) {
   const m = /profile-level-id=([0-9a-f]{6})/i.exec(codec?.parameters ?? '');
   return m && m[1].slice(0, 2).toLowerCase() === '64' ? 'high' : 'baseline';
 }
-// stereo/sprop-stereo make browsers decode both channels instead of folding the Mac's sound down to mono.
+// stereo/sprop-stereo make browsers decode both channels instead of folding the PC's sound down to mono.
 export const OPUS_FMTP = 'minptime=10;useinbandfec=1;stereo=1;sprop-stereo=1';
 export const GATHER_TIMEOUT_MS = 5000;
 
@@ -38,24 +38,24 @@ export const GATHER_TIMEOUT_MS = 5000;
 //    in order and a late one would hold up the next. This sends the flag the RFC asks for (0x80 | type).
 export function applyWeriftPatches() {
   const ice = Connection.prototype;
-  if (!ice.__perchNoDefaultStun) {
+  if (!ice.__roostNoDefaultStun) {
     const orig = ice.applyStunTurnServersFromOptions;
     if (typeof orig !== 'function') throw new Error('werift changed: applyStunTurnServersFromOptions is missing');
     ice.applyStunTurnServersFromOptions = function () {
       orig.call(this);
       if (!this.options.stunServer) this.stunServer = undefined;
     };
-    ice.__perchNoDefaultStun = true;
+    ice.__roostNoDefaultStun = true;
   }
   const sctp = RTCSctpTransport.prototype;
-  if (sctp.__perchUnorderedFlag === undefined) {
+  if (sctp.__roostUnorderedFlag === undefined) {
     // Only replace the exact code this was written against; a newer werift may well have fixed it. (This reads
     // werift's source text, so the bundle must not be minified.)
     const matches = /channelType = 128;[\s\S]*channelType = 1;/.test(String(sctp.dataChannelOpen));
     if (matches) sctp.dataChannelOpen = dataChannelOpenFixed;
-    sctp.__perchUnorderedFlag = matches;
+    sctp.__roostUnorderedFlag = matches;
   }
-  return { noDefaultStun: true, unorderedFlag: sctp.__perchUnorderedFlag };
+  return { noDefaultStun: true, unorderedFlag: sctp.__roostUnorderedFlag };
 }
 
 const DATA_CHANNEL_OPEN = 3;
@@ -89,8 +89,8 @@ function dataChannelOpenFixed(channel) {
   this.dataChannelFlush();
 }
 
-// The Mac's DTLS certificate, made once and kept with the secrets: passkeys pin its fingerprint (one-tap sign-in), so
-// it must stay the same for as long as this Mac's identity does (Start over makes a new one with everything else).
+// The PC's DTLS certificate, made once and kept with the secrets: passkeys pin its fingerprint (one-tap sign-in), so
+// it must stay the same for as long as this PC's identity does (Start over makes a new one with everything else).
 export async function ensureDtlsIdentity(store) {
   if (store.dtlsKeys) return store.dtlsKeys;
   const keys = await createSelfSignedCertificate(
@@ -113,7 +113,7 @@ export function peerConfig({ iceServers = [], iceLoopback = false, dtlsKeys = nu
     headerExtensions: { video: [useSdesMid(), useAbsSendTime()], audio: [useSdesMid()] },
     bundlePolicy: 'max-bundle',
     iceStunGatherTimeout: 3,
-    // Test mode without STUN: also offer a loopback candidate so two processes on one Mac always find each other.
+    // Test mode without STUN: also offer a loopback candidate so two processes on one PC always find each other.
     ...(iceLoopback ? { iceAdditionalHostAddresses: ['127.0.0.1'], iceUseIpv6: false } : {}),
   };
 }
@@ -134,7 +134,7 @@ export class HostPeer {
     this.log = log;
     this.pc = new RTCPeerConnection(peerConfig({ iceServers, iceLoopback, dtlsKeys }));
     this.videoTransceiver = this.pc.addTransceiver('video', { direction: 'sendonly' });
-    // Both ways: the Mac's sound goes out, and the viewer's microphone can come back on the same line.
+    // Both ways: the PC's sound goes out, and the viewer's microphone can come back on the same line.
     this.audioTransceiver = this.pc.addTransceiver('audio', { direction: 'sendrecv' });
     /** Called with each RTP packet of the viewer's microphone (set by the session). */
     this.onMicRtp = null;

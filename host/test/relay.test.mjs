@@ -29,7 +29,7 @@ function fakeCloudflare({ status = 201, body = CLOUDFLARE, fail = false } = {}) 
   return { calls, fetchImpl };
 }
 
-const store = async () => Store.open({ home: mkdtempSync(join(tmpdir(), 'perch-relay-')), secrets: 'file' });
+const store = async () => Store.open({ home: mkdtempSync(join(tmpdir(), 'roost-relay-')), secrets: 'file' });
 
 test('saving a key checks it with Cloudflare first, keeps the token secret, and hands out relay logins', async () => {
   const s = await store();

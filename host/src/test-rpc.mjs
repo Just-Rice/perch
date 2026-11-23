@@ -1,4 +1,4 @@
-// Test mode only (PERCH_TEST=1 and PERCH_TEST_RPC_FD): lets a test drive the controller of a running host over an
+// Test mode only (ROOST_TEST=1 and ROOST_TEST_RPC_FD): lets a test drive the controller of a running host over an
 // extra file descriptor, one JSON object per line: {id, method, args} → {id, result} or {id, error}. This stands in
 // for the Setup page, so host tests don't depend on it, and it never touches the app's stdin/stdout protocol.
 //

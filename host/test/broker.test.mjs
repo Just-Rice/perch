@@ -1,4 +1,4 @@
-// The local test broker must behave like the public ones for Perch's client.
+// The local test broker must behave like the public ones for Roost's client.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { startBroker } from '../../tests/e2e/broker.mjs';

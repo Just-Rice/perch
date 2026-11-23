@@ -20,7 +20,7 @@ const homes = [];
 test.after(() => { for (const h of homes) rmSync(h, { recursive: true, force: true }); });
 
 async function setup({ withTotp = true } = {}) {
-  const home = mkdtempSync(join(tmpdir(), 'perch-auth-'));
+  const home = mkdtempSync(join(tmpdir(), 'roost-auth-'));
   homes.push(home);
   const store = await Store.open({ home, secrets: 'file' });
   let clock = 1_800_000_000_000;
@@ -58,11 +58,11 @@ test('creation options follow the protocol', async () => {
   const bind = bindOf();
   const o = auth.creationOptions(bind);
   assert.equal(o.challenge, toB64url(bind));
-  assert.deepEqual(o.rp, { id: RP_ID, name: 'Perch' });
+  assert.deepEqual(o.rp, { id: RP_ID, name: 'Roost' });
   assert.ok(equalBytes(fromB64url(o.user.id), store.userHandle));
   assert.equal(fromB64url(o.user.id).length, 48);
-  assert.equal(o.user.name, `Perch · ${store.macName}`);
-  assert.equal(o.user.displayName, `Perch on ${store.macName}`);
+  assert.equal(o.user.name, `Roost · ${store.macName}`);
+  assert.equal(o.user.displayName, `Roost on ${store.macName}`);
   assert.deepEqual(o.pubKeyCredParams.map(p => p.alg), [-7, -8, -257]);
   assert.equal(o.authenticatorSelection.residentKey, 'required');
   assert.equal(o.authenticatorSelection.userVerification, 'required');
@@ -92,7 +92,7 @@ test('registration is refused for every bad field', async () => {
     ['crossOrigin true', { crossOrigin: true }, 'bad-passkey', /cross-origin/],
     ['topOrigin present', { topOrigin: 'https://evil.example' }, 'bad-passkey', /topOrigin/],
     ['crossOrigin true with topOrigin', { crossOrigin: true, topOrigin: 'https://evil.example' }, 'bad-passkey', /cross-origin/],
-    ['wrong origin', { origin: 'https://evil.example' }, 'origin', /not one this Mac accepts/],
+    ['wrong origin', { origin: 'https://evil.example' }, 'origin', /not one this PC accepts/],
     ['wrong type', { type: 'webauthn.get' }, 'bad-passkey', /expected webauthn.create/],
     ['user not verified', { flags: FLAG.UP | FLAG.AT }, 'bad-passkey', /verification was required/],
     ['user not present', { flags: FLAG.UV | FLAG.AT }, 'bad-passkey', /presence was required/],
@@ -129,8 +129,8 @@ test('sign-in is refused for every bad field', async () => {
     ['crossOrigin true', { crossOrigin: true }, 'bad-passkey', /cross-origin/],
     ['topOrigin present', { topOrigin: APP_ORIGIN }, 'bad-passkey', /topOrigin/],
     ['crossOrigin true with topOrigin', { crossOrigin: true, topOrigin: 'https://evil.example' }, 'bad-passkey', /cross-origin/],
-    ['wrong origin', { origin: 'https://just-rice.github.io.evil.example' }, 'origin', /not one this Mac accepts/],
-    ['http origin', { origin: 'http://just-rice.github.io' }, 'origin', /not one this Mac accepts/],
+    ['wrong origin', { origin: 'https://just-rice.github.io.evil.example' }, 'origin', /not one this PC accepts/],
+    ['http origin', { origin: 'http://just-rice.github.io' }, 'origin', /not one this PC accepts/],
     ['wrong type', { type: 'webauthn.create' }, 'bad-passkey', /expected webauthn.get/],
     ['user not verified', { flags: FLAG.UP }, 'bad-passkey', /verification required/],
     ['user not present', { flags: FLAG.UV }, 'bad-passkey', /not present/],
@@ -326,7 +326,7 @@ test('extra sites: accepted only once added, each with passkeys of its own', asy
   const bind = bindOf();
   // Not on the list: no pairing options for it, and nothing made there is accepted.
   await assert.rejects(async () => auth.creationOptions(bind, MINE), e => e.reason === 'origin');
-  assert.throws(() => auth.createPairing(MINE), /isn’t one this Mac accepts/);
+  assert.throws(() => auth.createPairing(MINE), /isn’t one this PC accepts/);
 
   store.addSite({ origin: MINE, url: `${MINE}/remote/connect.html` });
   assert.deepEqual(auth.sites().map(x => [x.origin, x.rpId, x.builtIn]),
@@ -357,13 +357,13 @@ test('extra sites: accepted only once added, each with passkeys of its own', asy
   await assert.rejects(auth.verifyAssertion(mine.get({ challenge: toB64url(b2) }), b2), e => e.reason === 'origin');
 });
 
-test('a Mac with its own relay Worker: new pairing links point at the relay\u2019s site; older devices keep theirs', async () => {
+test('a PC with its own relay Worker: new pairing links point at the relay\u2019s site; older devices keep theirs', async () => {
   const { Auth } = await import('../src/auth.mjs');
   const { Store } = await import('../src/store.mjs');
   const { mkdtempSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
   const { join } = await import('node:path');
-  const store = await Store.open({ home: mkdtempSync(join(tmpdir(), 'perch-worker-site-')), secrets: 'file' });
+  const store = await Store.open({ home: mkdtempSync(join(tmpdir(), 'roost-worker-site-')), secrets: 'file' });
   const config = { origins: ['https://just-rice.github.io'], rpId: 'just-rice.github.io', site: 'https://just-rice.github.io/perch/connect.html' };
   const auth = new Auth({ store, config });
   await auth.init();

@@ -1,17 +1,17 @@
-// Perch's Worker relay: the owner's own Cloudflare Worker, for networks that block the direct (WebRTC) connection.
+// Roost's Worker relay: the owner's own Cloudflare Worker, for networks that block the direct (WebRTC) connection.
 // See docs/PROTOCOL.md, "Worker relay".
 //
-// It only ever passes bytes between two WebSockets, one from the Mac and one from the viewer, in a "room" the Mac
-// names for each connection. Everything in them is end-to-end encrypted by Perch (site/js/shared/wsrelay.js), so this
+// It only ever passes bytes between two WebSockets, one from the PC and one from the viewer, in a "room" the PC
+// names for each connection. Everything in them is end-to-end encrypted by Roost (site/js/shared/wsrelay.js), so this
 // Worker can't see the screen, the sound, the sign-in or the input.
 //
-//   GET  /v1/info                         {perch: "relay", v, claimed}
-//   POST /v1/claim  {secret}              the first Mac to call this owns the relay (or RELAY_SECRET, if set)
+//   GET  /v1/info                         {roost: "relay", v, claimed}
+//   POST /v1/claim  {secret}              the first PC to call this owns the relay (or RELAY_SECRET, if set)
 //   GET  /v1/check?auth=…                 200 when auth = HMAC(secret, "perch relay check v1")
 //   GET  /v1/room/<room>?role=mac&auth=…  WebSocket; auth = HMAC(secret, "perch relay room v1" ‖ room)
-//   GET  /v1/room/<room>?role=viewer      WebSocket; only paired with a Mac that opened the room
+//   GET  /v1/room/<room>?role=viewer      WebSocket; only paired with a PC that opened the room
 //   GET  /v1/mqtt                         WebSocket (subprotocol "mqtt"): a small rendezvous broker, see Broker
-//   anything else                         the Perch website (site/), so it can be used from this address too
+//   anything else                         the Roost website (site/), so it can be used from this address too
 //
 // Both sides get the text "peer" once the other is there; until then they must wait. Binary messages from one side go
 // to the other unchanged. "ping" is answered with "pong" without waking the room.
@@ -21,7 +21,7 @@ const VERSION = 1;
 const ROOM_RE = /^[A-Za-z0-9_-]{22}$/;      // 16 random bytes, base64url
 const HEX64_RE = /^[0-9a-f]{64}$/;
 const WAIT_FOR_PEER_MS = 30_000;            // a room whose other side never comes is closed after this
-const MAX_MESSAGE = 1024 * 1024;            // Perch sends at most 256 KB at a time
+const MAX_MESSAGE = 1024 * 1024;            // Roost sends at most 256 KB at a time
 
 const enc = new TextEncoder();
 const json = (body, status = 200) => Response.json(body, {
@@ -39,7 +39,7 @@ function sameHex(a, b) {
   return crypto.subtle.timingSafeEqual(enc.encode(a), enc.encode(b));
 }
 
-// The relay's owner: one secret, set once by the first Mac to claim it (or by the RELAY_SECRET Worker secret).
+// The relay's owner: one secret, set once by the first PC to claim it (or by the RELAY_SECRET Worker secret).
 export class Config extends DurableObject {
   async fetch(request) {
     const { op, secret } = await request.json();
@@ -63,7 +63,7 @@ async function ownerSecret(env) {
   return (await res.json()).secret;
 }
 
-// One connection's meeting place: at most one Mac and one viewer.
+// One connection's meeting place: at most one PC and one viewer.
 export class Room extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -73,7 +73,7 @@ export class Room extends DurableObject {
   async fetch(request) {
     const role = new URL(request.url).searchParams.get('role');
     if (role !== 'mac' && role !== 'viewer') return new Response('bad role', { status: 400 });
-    // The viewer may only join a room its Mac opened (or opens within a moment).
+    // The viewer may only join a room its PC opened (or opens within a moment).
     if (this.ctx.getWebSockets(role).length) return new Response('this side is already here', { status: 409 });
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server, [role]);
@@ -119,16 +119,16 @@ export class Room extends DurableObject {
 
 // --- the rendezvous broker ---
 //
-// The public brokers Perch meets on (site/js/shared/proto.js BROKERS) may be blocked where the relay isn't. So the relay
-// is one too: just enough MQTT 3.1.1 over WebSocket for Perch's own client (site/js/shared/mqtt.js): CONNECT, QoS 0
-// PUBLISH and SUBSCRIBE (exact topics under perch/v1/, no wildcards), UNSUBSCRIBE, PINGREQ, DISCONNECT. Everything
+// The public brokers Roost meets on (site/js/shared/proto.js BROKERS) may be blocked where the relay isn't. So the relay
+// is one too: just enough MQTT 3.1.1 over WebSocket for Roost's own client (site/js/shared/mqtt.js): CONNECT, QoS 0
+// PUBLISH and SUBSCRIBE (exact topics under roost/v1/, no wildcards), UNSUBSCRIBE, PINGREQ, DISCONNECT. Everything
 // published is a sealed envelope (site/js/shared/rendezvous.js) that only the two ends can open. One Durable Object holds
 // every connection; it hibernates between messages, and each socket's topics live in its attachment.
 
 const MQTT = { CONNECT: 1, CONNACK: 2, PUBLISH: 3, SUBSCRIBE: 8, SUBACK: 9, UNSUBSCRIBE: 10, UNSUBACK: 11,
   PINGREQ: 12, PINGRESP: 13, DISCONNECT: 14 };
-const TOPIC_RE = /^perch\/v1\/[A-Za-z0-9_\/-]{1,120}$/;
-const MAX_TOPICS = 8;               // a Mac listens on 2 or 3, a viewer on 1
+const TOPIC_RE = /^roost\/v1\/[A-Za-z0-9_\/-]{1,120}$/;
+const MAX_TOPICS = 8;               // a PC listens on 2 or 3, a viewer on 1
 const MAX_PUBLISH = 70 * 1024;      // envelopes are at most 64 KB
 const PUBLISH_BURST = 60;           // per connection, refilled at PUBLISH_RATE a second
 const PUBLISH_RATE = 2;
@@ -177,7 +177,7 @@ export class Broker extends DurableObject {
     if (typeof message === 'string') return this._drop(ws);
     const b = new Uint8Array(message);
     try {
-      // A message holds whole packets (Perch's client sends one per message).
+      // A message holds whole packets (Roost's client sends one per message).
       for (let at = 0; at < b.length;) {
         const type = b[at] >> 4;
         const len = readVarInt(b, at + 1);
@@ -276,7 +276,7 @@ export default {
 
     if (path === '/v1/info') {
       const secret = await ownerSecret(env);
-      return json({ perch: 'relay', v: VERSION, claimed: !!secret });
+      return json({ roost: 'relay', v: VERSION, claimed: !!secret });
     }
 
     if (path === '/v1/claim' && request.method === 'POST') {
@@ -310,7 +310,7 @@ export default {
       if (role === 'mac') {
         const secret = await ownerSecret(env);
         if (!secret || !sameHex(url.searchParams.get('auth'), await hmacHex(secret, 'perch relay room v1', room))) {
-          return new Response('not this relay’s Mac', { status: 403 });
+          return new Response('not this relay’s PC', { status: 403 });
         }
       } else if (role !== 'viewer') {
         return new Response('bad role', { status: 400 });
@@ -319,7 +319,7 @@ export default {
       return stub.fetch(new Request(`https://room/?role=${role}`, request));
     }
 
-    // The Perch website, served from this relay too (wrangler.toml, [assets]).
+    // The Roost website, served from this relay too (wrangler.toml, [assets]).
     if (env.ASSETS && !path.startsWith('/v1/')) return env.ASSETS.fetch(request);
     return new Response('Not found', { status: 404 });
   },

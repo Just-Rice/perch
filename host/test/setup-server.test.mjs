@@ -49,7 +49,7 @@ async function setup(opts = {}) {
   const api = (method, path, more = {}) => http(port, method, path, {
     ...more,
     headers: {
-      'X-Perch-Key': srv.key,
+      'X-Roost-Key': srv.key,
       ...(method === 'POST' ? { Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/json' } : {}),
       ...(more.headers ?? {}),
     },
@@ -89,7 +89,7 @@ test('the page only loads with the right key', async (t) => {
   for (const path of ['/', '/?k=', '/?k=wrong', `/?k=${srv.key}x`, `/?k=${srv.key.slice(1)}`, '/index.html', `/?K=${srv.key}`]) {
     const r = await http(port, 'GET', path);
     assert.equal(r.status, 403, path);
-    assert.match(r.text, /menu bar/, `${path}: tells the person where to open Setup`);
+    assert.match(r.text, /Roost icon in the notification area/, `${path}: tells the person where to open the Control Center`);
     assert.doesNotMatch(r.text, /setup\.js/, `${path}: the real page isn't sent`);
     checkSecurityHeaders(r, path);
   }
@@ -109,15 +109,15 @@ test('requests for any other host name are refused (DNS rebinding)', async (t) =
     `127.0.0.2:${port}`, `[::1]:${port}`, `0.0.0.0:${port}`, `127.0.0.1:${port}.evil.example`, ''];
   for (const host of bad) {
     for (const path of [`/?k=${srv.key}`, '/api/state', '/setup.js']) {
-      const r = await http(port, 'GET', path, { headers: { Host: host, 'X-Perch-Key': srv.key } });
+      const r = await http(port, 'GET', path, { headers: { Host: host, 'X-Roost-Key': srv.key } });
       assert.ok(r.status === 403 || r.status === 400, `${host} ${path}: ${r.status}`);
       assert.doesNotMatch(r.text, /macName|setup\.js/, `${host} ${path}: nothing leaks`);
     }
   }
-  const noHost = await http(port, 'GET', '/api/state', { headers: { Host: null, 'X-Perch-Key': srv.key } });
+  const noHost = await http(port, 'GET', '/api/state', { headers: { Host: null, 'X-Roost-Key': srv.key } });
   assert.ok(noHost.status === 400 || noHost.status === 403, `no Host: ${noHost.status}`);
   for (const host of [`127.0.0.1:${port}`, `localhost:${port}`, `LOCALHOST:${port}`]) {
-    const r = await http(port, 'GET', '/api/state', { headers: { Host: host, 'X-Perch-Key': srv.key } });
+    const r = await http(port, 'GET', '/api/state', { headers: { Host: host, 'X-Roost-Key': srv.key } });
     assert.equal(r.status, 200, host);
   }
 });
@@ -126,10 +126,10 @@ test('the API needs the key header', async (t) => {
   const { srv, port, api } = await setup();
   t.after(() => srv.close());
   for (const key of [undefined, '', 'wrong', srv.key.toUpperCase(), `${srv.key}x`, `x${srv.key}`, srv.key.slice(0, -1), 'x'.repeat(5000)]) {
-    const headers = key === undefined ? {} : { 'X-Perch-Key': key };
+    const headers = key === undefined ? {} : { 'X-Roost-Key': key };
     const r = await http(port, 'GET', '/api/state', { headers });
     assert.equal(r.status, 403, `key ${String(key).slice(0, 20)}`);
-    assert.match(r.json?.error ?? '', /menu bar/);
+    assert.match(r.json?.error ?? '', /Roost icon/);
     checkSecurityHeaders(r, 'refused API');
     const p = await http(port, 'POST', '/api/reset', {
       headers: { ...headers, Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/json' }, body: '{}',
@@ -206,7 +206,7 @@ test('bodies over 64 KB are refused, declared or streamed', async (t) => {
 });
 
 test('static files: served from the Setup folder, never from outside it', async (t) => {
-  const dir = mkdtempSync(join(tmpdir(), 'perch-setup-static-'));
+  const dir = mkdtempSync(join(tmpdir(), 'roost-setup-static-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, 'setup', 'lib'), { recursive: true });
   writeFileSync(join(dir, 'setup', 'index.html'), '<!doctype html><title>t</title><script type="module" src="setup.js"></script>');
@@ -305,6 +305,24 @@ test('actions call the controller and answer {result, state}; its errors become 
   assert.deepEqual(d.json, { error: 'Nobody is connected.' });
   assert.equal((await api('POST', '/api/requestPermission', { body: '{"which":"screen"}' })).status, 200);
   assert.deepEqual(mock.callsOf('requestPermission').at(-1), ['requestPermission', 'screen']);
+
+  // "Control admin apps": a real true or false only.
+  for (const bad of ['{}', '{"on":"yes"}', '{"on":1}', '{"on":null}']) {
+    assert.equal((await api('POST', '/api/elevation', { body: bad })).status, 400, bad);
+  }
+  const el = await api('POST', '/api/elevation', { body: '{"on":true}' });
+  assert.equal(el.status, 200);
+  assert.deepEqual(mock.callsOf('elevation').at(-1), ['elevation', true]);
+  assert.equal(el.json.state.app.elevatedTask, true);
+});
+
+test('the key header from before the rename (X-Perch-Key) still works', async (t) => {
+  const { srv, port } = await setup();
+  t.after(() => srv.close());
+  assert.equal((await http(port, 'GET', '/api/state', { headers: { 'X-Perch-Key': srv.key } })).status, 200);
+  assert.equal((await http(port, 'GET', '/api/state', { headers: { 'X-Perch-Key': 'wrong' } })).status, 403);
+  // A wrong new header isn't rescued by a right old one: the new name is the one that counts when both are there.
+  assert.equal((await http(port, 'GET', '/api/state', { headers: { 'X-Roost-Key': 'wrong', 'X-Perch-Key': srv.key } })).status, 403);
 });
 
 test('a controller bug is a 500 with a generic message', async (t) => {
@@ -314,7 +332,7 @@ test('a controller bug is a 500 with a generic message', async (t) => {
   };
   const srv = await startSetupServer({ controller });
   t.after(() => srv.close());
-  const r = await http(srv.port, 'GET', '/api/state', { headers: { 'X-Perch-Key': srv.key } });
+  const r = await http(srv.port, 'GET', '/api/state', { headers: { 'X-Roost-Key': srv.key } });
   assert.equal(r.status, 500);
   assert.doesNotMatch(r.json.error, /internal detail/);
 });
@@ -329,17 +347,17 @@ test('in an action, a bug is a 500 but a refusal is a 400 with its own words; bo
   log.error = (m) => lines.push(['error', m]);
   const srv = await startSetupServer({ controller, log });
   t.after(() => srv.close());
-  const headers = { 'X-Perch-Key': srv.key, Origin: `http://127.0.0.1:${srv.port}`, 'Content-Type': 'application/json' };
+  const headers = { 'X-Roost-Key': srv.key, Origin: `http://127.0.0.1:${srv.port}`, 'Content-Type': 'application/json' };
   const bug = await http(srv.port, 'POST', '/api/disconnect', { headers, body: '{}' });
   assert.equal(bug.status, 500);
-  assert.match(bug.json.error, /^Something went wrong in Perch/);
+  assert.match(bug.json.error, /^Something went wrong in Roost/);
   assert.ok(lines.some(([lvl, m]) => lvl === 'error' && /TypeError: Cannot read properties/.test(m)), 'the details are in the log');
   mock.failNext('pairCancel', 'Nothing to cancel.');
   const refused = await http(srv.port, 'POST', '/api/pairCancel', { headers, body: '{}' });
   assert.deepEqual([refused.status, refused.json], [400, { error: 'Nothing to cancel.' }]);
   assert.ok(lines.some(([lvl, m]) => lvl === 'info' && m === 'pairCancel refused: Nothing to cancel.'));
-  await http(srv.port, 'GET', '/api/state', { headers: { 'X-Perch-Key': 'wrong' } });
-  await http(srv.port, 'GET', '/api/state', { headers: { Host: 'evil.example', 'X-Perch-Key': srv.key } });
+  await http(srv.port, 'GET', '/api/state', { headers: { 'X-Roost-Key': 'wrong' } });
+  await http(srv.port, 'GET', '/api/state', { headers: { Host: 'evil.example', 'X-Roost-Key': srv.key } });
   assert.equal(lines.filter(([lvl]) => lvl === 'warn').length, 2, 'refused requests are warnings');
   assert.ok(lines.every(([, m]) => !m.startsWith('setup:')), 'the host logger adds its own tag');
   assert.ok(lines.every(([, m]) => !m.includes(srv.key)), 'the key is never logged');
@@ -368,7 +386,7 @@ function readEvents(port, key, until, { timeoutMs = 5000 } = {}) {
   return new Promise((resolve, reject) => {
     const events = [];
     let buffer = '';
-    const req = request({ host: '127.0.0.1', port, path: '/api/events', headers: { Host: `127.0.0.1:${port}`, 'X-Perch-Key': key } }, (res) => {
+    const req = request({ host: '127.0.0.1', port, path: '/api/events', headers: { Host: `127.0.0.1:${port}`, 'X-Roost-Key': key } }, (res) => {
       events.headers = res.headers;
       events.status = res.statusCode;
       res.setEncoding('utf8');
@@ -399,6 +417,8 @@ function readEvents(port, key, until, { timeoutMs = 5000 } = {}) {
 test('live updates: a snapshot now, one per change, keep-alives, and cleanup', async (t) => {
   const { srv, port, mock } = await setup({ keepAliveMs: 100 });
   t.after(() => srv.close());
+  // Start from both off, whatever the mock starts with (on Windows both are on), so turning them on is a change.
+  mock.setPermissions({ screen: false, accessibility: false });
   const events = await readEvents(port, srv.key, (evs) => {
     const states = evs.filter(e => e.event === 'state');
     if (states.length === 1 && !evs.done1) {
@@ -430,7 +450,7 @@ test('old event streams are closed past the limit, and close() ends them all', a
   for (let i = 0; i < 10; i++) {
     // One at a time, so the server sees them in this order.
     await new Promise((resolve) => {
-      const req = request({ host: '127.0.0.1', port, path: '/api/events', headers: { Host: `127.0.0.1:${port}`, 'X-Perch-Key': srv.key } }, (res) => {
+      const req = request({ host: '127.0.0.1', port, path: '/api/events', headers: { Host: `127.0.0.1:${port}`, 'X-Roost-Key': srv.key } }, (res) => {
         res.on('data', () => resolve());
         res.on('end', () => { ended.push(i); });
       });

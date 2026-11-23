@@ -1,8 +1,8 @@
 {
-  "name": "perch-relay",
+  "name": "roost-relay",
   "version": "0.3.0",
   "private": true,
-  "description": "Perch's Worker relay: passes end-to-end encrypted bytes between a Mac and a viewer when WebRTC can't connect.",
+  "description": "Roost's Worker relay: passes end-to-end encrypted bytes between a PC and a viewer when WebRTC can't connect.",
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {

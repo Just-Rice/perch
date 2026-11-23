@@ -1,6 +1,7 @@
-// Builds the host into one file for the app bundle: dist/perch-host.mjs (the app runs
-// Contents/Resources/host/perch-host.mjs), with the Setup page's files beside it in dist/setup/.
-// Run from host/node:  node scripts/bundle.mjs   (needs the esbuild dev dependency)
+// Builds the host into one file for the installer: dist/roost-host.mjs (roost.exe runs
+// %LOCALAPPDATA%\Programs\Roost\host\roost-host.mjs with its bundled node\node.exe), with the Control Center's
+// files (the Setup page) beside it in dist/setup/.
+// Run from host/:  node scripts/bundle.mjs   (needs the esbuild dev dependency)
 //
 // Everything the host needs is inside the one .mjs file: werift, the WebAuthn checks, the OPAQUE library (its
 // WebAssembly is embedded in the library itself), the shared site modules and package.json's version. The Setup
@@ -17,7 +18,7 @@ const OPAQUE_FOR_BROWSERS = join(ROOT, '..', 'site', 'js', 'vendor', 'opaque', '
 export async function bundle({ outDir = OUT } = {}) {
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(outDir, { recursive: true });
-  const outfile = join(outDir, 'perch-host.mjs');
+  const outfile = join(outDir, 'roost-host.mjs');
   await build({
     entryPoints: [join(ROOT, 'src', 'main.mjs')],
     outfile,
@@ -27,7 +28,7 @@ export async function bundle({ outDir = OUT } = {}) {
     target: 'node22',
     // werift's ESM build still has CommonJS dependencies (debug and friends) that call require() for Node's own
     // modules; an ESM bundle needs a real require for those.
-    banner: { js: "import { createRequire as __perchCreateRequire } from 'node:module';\nconst require = __perchCreateRequire(import.meta.url);" },
+    banner: { js: "import { createRequire as __roostCreateRequire } from 'node:module';\nconst require = __roostCreateRequire(import.meta.url);" },
     // Prefer each package's ESM build ("import" condition), the same files `node src/main.mjs` loads.
     conditions: ['import', 'node'],
     mainFields: ['module', 'main'],

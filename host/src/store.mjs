@@ -1,10 +1,12 @@
-// Everything Perch remembers on this Mac.
+// Everything Roost remembers on this PC.
 //
-// config.json ($PERCH_HOME, mode 0600): the Mac's id and name, settings, paired devices (public keys only), the
+// config.json ($ROOST_HOME, mode 0600): the PC's id and name, settings, paired devices (public keys only), the
 // backup sign-in verifier, lockout counters and a short activity log.
-// Secrets (the rendezvous key, the authenticator secret, the backup sign-in server key) live in the login Keychain,
-// read and written through /usr/bin/security so app updates never trigger Keychain prompts — or in secrets.json
-// when PERCH_SECRETS=file (tests). See docs/PROTOCOL.md, "Identities and secrets".
+// Secrets (the rendezvous key, the authenticator secret, the backup sign-in server key) live in secrets.dpapi,
+// encrypted with Windows' DPAPI for the signed-in user. The host never touches DPAPI itself: it asks roost.exe
+// (`roost.exe --secrets read|write --home <dir>`, docs/WINDOWS-APP.md, "Secrets"). Tests, and development on a
+// computer without roost.exe, keep them in plain secrets.json instead (ROOST_SECRETS=file).
+// See docs/PROTOCOL.md, "Identities and secrets".
 import { mkdirSync, readFileSync, writeFileSync, renameSync, chmodSync, existsSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -15,8 +17,10 @@ import { HOST_ID_BYTES, SIG_KEY_BYTES, DEFAULT_QUALITY } from '../../site/js/sha
 import { newMacName } from './names.mjs';
 import { freshLimit } from './limits.mjs';
 
-export const KEYCHAIN_SERVICE = 'io.github.just-rice.perch';
-const KEYCHAIN_ACCOUNT = 'secrets';
+export const DPAPI_FILE = 'secrets.dpapi';
+// roost.exe --secrets read: exit 3 means there is no secrets file yet (a first run, or after Start over).
+const NO_SECRETS_YET = 3;
+const SECRETS_TIMEOUT_MS = 15_000;
 const LOG_KEEP = 200;
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -25,9 +29,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   backupOn: false,
   idleMinutes: 60,
   paused: false,
-  lockOnDisconnect: false,   // lock the Mac when a viewer's session ends
-  curtain: false,            // black out the Mac's own screen while a viewer is connected
-  micOutput: '',             // where a viewer's microphone is played: '' = the Mac's current output, or a device UID
+  lockOnDisconnect: false,   // lock the PC when a viewer's session ends
+  curtain: false,            // black out the PC's own screen while a viewer is connected
+  micOutput: '',             // where a viewer's microphone is played: '' = the PC's current output, or a device UID
   quality: DEFAULT_QUALITY,
   // The 6-digit authenticator code, asked for after each of these (the owner can switch any of them off in Setup).
   codeWithPasskey: true,
@@ -36,8 +40,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   // Install a new version by itself once nobody has been connected for a couple of minutes (off: Setup and the menu
   // bar say when one is out, and the owner chooses when).
   autoUpdate: false,
-  // Sound while someone is connected: the Mac's own speakers (0–1; below 1 the Mac's sound is tapped and kept off
-  // them, and Perch plays its own copy at this level) and what is sent to the viewer (0–1.5).
+  // Sound while someone is connected: the PC's own speakers (0–1; below 1 the PC's own speakers are turned down to
+  // this level) and what is sent to the viewer (0–1.5). (macSpeakers keeps Roost's name: it is a wire field.)
   macSpeakers: 1,
   streamVolume: 1,
 });
@@ -45,37 +49,57 @@ export const DEFAULT_SETTINGS = Object.freeze({
 // Which code setting covers each route.
 export const CODE_SETTING = Object.freeze({ passkey: 'codeWithPasskey', backup: 'codeWithBackup', pair: 'codeWithPairing' });
 
-export function defaultHome() {
-  return join(homedir(), 'Library', 'Application Support', 'Perch');
+// Where Roost keeps its files: %LOCALAPPDATA%\Roost on Windows (the app passes the same as ROOST_HOME), ~/.roost
+// anywhere else (development).
+export function defaultHome(env = process.env, platform = process.platform) {
+  if (platform === 'win32') {
+    const base = env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
+    return join(base, 'Roost');
+  }
+  return join(homedir(), '.roost');
 }
 
-function run(cmd, args, input) {
+// Runs `cmd args`, feeding it `input` on stdin. Resolves {code, stdout, stderr}, never rejects: code is the exit code,
+// or a string such as 'ENOENT' when it couldn't start, or 'timeout'.
+function run(cmd, args, input, execFileImpl = execFile) {
   return new Promise((resolve) => {
-    const child = execFile(cmd, args, { timeout: 15000 }, (err, stdout, stderr) =>
-      resolve({ code: err ? (err.code ?? 1) : 0, stdout, stderr }));
-    if (input !== undefined) child.stdin.end(input);
+    const child = execFileImpl(cmd, args, { timeout: SECRETS_TIMEOUT_MS, windowsHide: true, maxBuffer: 4 * 1024 * 1024 },
+      (err, stdout, stderr) => resolve({
+        code: !err ? 0 : err.killed ? 'timeout' : (err.code ?? 1),
+        stdout: String(stdout ?? ''), stderr: String(stderr ?? ''),
+      }));
+    child.stdin?.on?.('error', () => {}); // a program that exits without reading stdin must not crash the host
+    child.stdin?.end?.(input ?? '');
   });
 }
 
 // --- secret backends ---
 
-export class KeychainSecrets {
-  constructor(service = KEYCHAIN_SERVICE) { this.service = service; }
+// Secrets encrypted with DPAPI, through roost.exe. Reading fails loudly rather than returning nothing: an empty answer
+// would make the store start a new identity and overwrite the real secrets, which would unpair every device.
+export class DpapiSecrets {
+  constructor({ exe, home, execFileImpl = execFile }) {
+    if (!exe) throw new Error('DpapiSecrets needs the path of roost.exe');
+    Object.assign(this, { exe, home, execFileImpl });
+    this.path = join(home, DPAPI_FILE);
+  }
   async read() {
-    const r = await run('/usr/bin/security', ['find-generic-password', '-s', this.service, '-a', KEYCHAIN_ACCOUNT, '-w']);
-    if (r.code !== 0) return null; // 44 = not found
-    try { return JSON.parse(r.stdout.trim()); } catch { return null; }
+    const r = await run(this.exe, ['--secrets', 'read', '--home', this.home], '', this.execFileImpl);
+    if (r.code === NO_SECRETS_YET) return null;
+    if (r.code !== 0) throw new Error(`could not read the secrets (roost.exe answered ${r.code}): ${r.stderr.trim().slice(0, 300)}`);
+    try {
+      const obj = JSON.parse(r.stdout);
+      if (obj && typeof obj === 'object' && !Array.isArray(obj)) return obj;
+    } catch {}
+    throw new Error('could not read the secrets: roost.exe sent something that isn\'t a secrets object');
   }
   async write(obj) {
-    // `security -i` reads the command from stdin, so the secret never appears in the process list. -X = hex data.
-    const hex = Buffer.from(JSON.stringify(obj)).toString('hex');
-    const r = await run('/usr/bin/security', ['-i'],
-      `add-generic-password -U -s ${this.service} -a ${KEYCHAIN_ACCOUNT} -l Perch -X ${hex}\n`);
-    if (r.code !== 0 || /error|SecKeychain/i.test(r.stderr)) throw new Error(`could not save to the Keychain: ${r.stderr.trim()}`);
+    // The secrets go in on stdin, never on the command line, so they don't show up in the process list.
+    const r = await run(this.exe, ['--secrets', 'write', '--home', this.home], JSON.stringify(obj), this.execFileImpl);
+    if (r.code !== 0) throw new Error(`could not save the secrets (roost.exe answered ${r.code}): ${r.stderr.trim().slice(0, 300)}`);
   }
-  async remove() {
-    await run('/usr/bin/security', ['delete-generic-password', '-s', this.service, '-a', KEYCHAIN_ACCOUNT]);
-  }
+  // roost.exe has no "remove": the file is useless without this user's DPAPI key, but it goes anyway.
+  async remove() { rmSync(this.path, { force: true }); }
 }
 
 export class FileSecrets {
@@ -105,9 +129,11 @@ export class Store {
     this.secrets = null;
   }
 
-  static async open({ home = defaultHome(), secrets = 'keychain' } = {}) {
+  // secrets: 'file' (secrets.json) or 'dpapi' (secrets.dpapi through roost.exe at `appExe`); see config.mjs.
+  static async open({ home = defaultHome(), secrets = 'file', appExe = null, execFileImpl } = {}) {
     mkdirSync(home, { recursive: true, mode: 0o700 });
-    const store = new Store(home, secrets === 'file' ? new FileSecrets(home) : new KeychainSecrets());
+    const backend = secrets === 'dpapi' ? new DpapiSecrets({ exe: appExe, home, execFileImpl }) : new FileSecrets(home);
+    const store = new Store(home, backend);
     await store._load();
     return store;
   }
@@ -169,7 +195,7 @@ export class Store {
     h.set(this.sigKey, HOST_ID_BYTES);
     return h;
   }
-  // hostId ‖ sigKey ‖ the first 16 bytes of this Mac's DTLS certificate fingerprint (64 bytes, WebAuthn's maximum):
+  // hostId ‖ sigKey ‖ the first 16 bytes of this PC's DTLS certificate fingerprint (64 bytes, WebAuthn's maximum):
   // the pin a browser checks before sending a one-tap sign-in. 48 bytes until the certificate exists.
   get userHandle() {
     const pin = this.dtlsPin;
@@ -180,7 +206,7 @@ export class Store {
     return h;
   }
 
-  // The Mac's own DTLS certificate (it never changes, so passkeys can pin it). {certPem, keyPem, signatureHash}.
+  // The PC's own DTLS certificate (it never changes, so passkeys can pin it). {certPem, keyPem, signatureHash}.
   get dtlsKeys() { return this.secrets.dtls ?? null; }
   async setDtlsKeys(keys, pin) {
     this.secrets.dtls = { certPem: keys.certPem, keyPem: keys.keyPem, signatureHash: keys.signatureHash, pin: toB64url(pin) };
@@ -250,7 +276,7 @@ export class Store {
     this.config.workerRelayBackup = url ?? null;
     this.save();
   }
-  // A relay on this Mac (relay/node with QUICK_TUNNEL=1) whose public address changes; asked for it when needed.
+  // A relay on this PC (relay/node with QUICK_TUNNEL=1) whose public address changes; asked for it when needed.
   get workerRelayTunnel() { return this.config.workerRelayTunnel ?? null; }
   setWorkerRelayTunnel(url) {
     this.config.workerRelayTunnel = url ?? null;
@@ -283,7 +309,7 @@ export class Store {
     this.save();
   }
 
-  // --- extra sites this Mac accepts sign-ins from (the official site is always accepted) ---
+  // --- extra sites this PC accepts sign-ins from (the official site is always accepted) ---
   get sites() { return this.config.sites ?? []; }
   addSite(site) {
     this.config.sites = [...this.sites.filter(x => x.origin !== site.origin), { ...site, addedAt: new Date().toISOString() }];
@@ -296,7 +322,7 @@ export class Store {
     return this.config.sites.length < before;
   }
 
-  // --- things Perch did by itself (restarting into an installed update, updating), so a failed try isn't repeated ---
+  // --- things Roost did by itself (restarting into an installed update, updating), so a failed try isn't repeated ---
   autoTriedRecently(kind, version, withinMs, now) {
     const last = this.config.autoTried?.[kind];
     return !!last && last.version === version && now - Date.parse(last.at) < withinMs;

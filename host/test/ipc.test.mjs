@@ -8,7 +8,7 @@ import {
 } from '../src/ipc.mjs';
 
 const frames = () => [
-  encodeJson(T.HELLO, { app: 'Perch', version: '1.0.0', ipc: 1 }),
+  encodeJson(T.HELLO, { app: 'Roost', version: '1.0.0', ipc: 1 }),
   encodeVideo({ keyframe: true, ptsUs: 123456789, data: randomBytes(70000) }),
   encodeAudio({ ptsUs: 2 ** 40 + 5, data: randomBytes(160) }),
   encodeJson(T.EVENT, { e: 'lock', locked: true, text: 'é ✓' }),

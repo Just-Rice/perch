@@ -12,19 +12,19 @@ import { ensureDtlsIdentity } from '../src/rtc.mjs';
 import { WorkerRelay, WsPeer, WsMediaSender } from '../src/wsrelay.mjs';
 import * as W from '../../site/js/shared/wsrelay.js';
 
-const BASE = 'https://perch-relay.someone.workers.dev';
-const store = async () => Store.open({ home: mkdtempSync(join(tmpdir(), 'perch-wsrelay-')), secrets: 'file' });
+const BASE = 'https://roost-relay.someone.workers.dev';
+const store = async () => Store.open({ home: mkdtempSync(join(tmpdir(), 'roost-wsrelay-')), secrets: 'file' });
 
 // A stand-in relay Worker: /v1/info, /v1/claim, /v1/check, with the same rules as relay/src/index.js.
-function fakeWorker({ claimedBy = null, down = false, notPerch = false } = {}) {
+function fakeWorker({ claimedBy = null, down = false, notRoost = false } = {}) {
   const w = { secret: claimedBy, calls: [] };
   w.fetchImpl = async (url, opts = {}) => {
     w.calls.push({ url, method: opts.method ?? 'GET' });
     if (down) throw new Error('offline');
     const u = new URL(url);
     const reply = (status, body) => ({ ok: status === 200, status, json: async () => body });
-    if (notPerch) return reply(200, { hello: 'world' });
-    if (u.pathname === '/v1/info') return reply(200, { perch: 'relay', v: 1, claimed: !!w.secret });
+    if (notRoost) return reply(200, { hello: 'world' });
+    if (u.pathname === '/v1/info') return reply(200, { roost: 'relay', v: 1, claimed: !!w.secret });
     if (u.pathname === '/v1/claim') {
       const { secret } = JSON.parse(opts.body);
       if (!w.secret) { w.secret = secret; return reply(200, { ok: true }); }
@@ -60,9 +60,9 @@ test('saving a relay claims it, keeps its secret out of config.json, and works a
 test('a relay owned by another Mac, a wrong address or an outage is refused with a plain message', async () => {
   const s = await store();
   const taken = new WorkerRelay({ store: s, fetchImpl: fakeWorker({ claimedBy: 'cd'.repeat(32) }).fetchImpl });
-  await assert.rejects(taken.save(BASE), /already belongs to another Mac/);
+  await assert.rejects(taken.save(BASE), /already belongs to another PC/);
   await assert.rejects(new WorkerRelay({ store: s, fetchImpl: fakeWorker().fetchImpl }).save('https://example.com'), /doesn’t look right/);
-  await assert.rejects(new WorkerRelay({ store: s, fetchImpl: fakeWorker({ notPerch: true }).fetchImpl }).save(BASE), /no Perch relay/);
+  await assert.rejects(new WorkerRelay({ store: s, fetchImpl: fakeWorker({ notRoost: true }).fetchImpl }).save(BASE), /no Roost relay/);
   await assert.rejects(new WorkerRelay({ store: s, fetchImpl: fakeWorker({ down: true }).fetchImpl }).save(BASE), /couldn’t reach/);
   await assert.rejects(new WorkerRelay({ store: s, fetchImpl: fakeWorker().fetchImpl }).save('http://localhost:8787'), /doesn’t look right/,
     'loopback only in test mode');
@@ -83,7 +83,7 @@ test('a backup relay with the same secret: offers name it only while the main re
   const r = new WorkerRelay({ store: s, fetchImpl, now: () => t });
   await assert.rejects(r.saveBackup(BACKUP), /main relay first/);
   await r.save(BASE);
-  await assert.rejects(r.saveBackup(BACKUP), /didn’t recognise this Mac/, 'the backup must already hold the secret');
+  await assert.rejects(r.saveBackup(BACKUP), /didn’t recognise this PC/, 'the backup must already hold the secret');
   backup.secret = main.secret;
   await assert.rejects(r.saveBackup(BASE), /That is the main relay/);
   await r.saveBackup(`${BACKUP}/`);
@@ -131,7 +131,7 @@ test('a Quick Tunnel backup: its changing address is asked of the relay on this 
   const r = new WorkerRelay({ store: s, fetchImpl, now: () => t });
   await r.save(BASE);
   tunnelRelay.secret = main.secret;
-  await assert.rejects(r.saveTunnel('https://example.com'), /relay’s address on this Mac/);
+  await assert.rejects(r.saveTunnel('https://example.com'), /relay’s address on this PC/);
   await assert.rejects(r.saveTunnel(LOCAL), /no Quick Tunnel running yet/);
   publicUrl = 'https://first-words.trycloudflare.com';
   await r.saveTunnel(`${LOCAL}/`);
@@ -172,7 +172,7 @@ test('the offer is signed with the Mac’s own certificate, so a viewer holding 
   assert.match(prep.room, /^[A-Za-z0-9_-]{22}$/);
   const got = await W.readOffer(prep.offerText, { sid, pin: s.dtlsPin });
   assert.equal(got.room, prep.room);
-  await assert.rejects(W.readOffer(prep.offerText, { sid, pin: new Uint8Array(16) }), /another Mac/);
+  await assert.rejects(W.readOffer(prep.offerText, { sid, pin: new Uint8Array(16) }), /another (Mac|PC)/); // the site's wording
   assert.notEqual((await r.prepare(sid, s.dtlsKeys)).room, prep.room, 'a fresh room every time');
 });
 

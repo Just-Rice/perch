@@ -1,9 +1,9 @@
-// Perch's Mac host process. The Swift app starts it (node main.mjs, or the bundled build) and talks to it over
-// stdin/stdout (src/ipc.mjs); everything the host logs goes to stderr and $PERCH_HOME/perch.log.
+// Roost's host process on the PC. roost.exe starts it (node main.mjs, or the bundled build) and talks to it over
+// stdin/stdout (src/ipc.mjs); everything the host logs goes to stderr and $ROOST_HOME/roost.log.
 //
 // Start-up: read the environment, open the store, get sign-in ready, listen on the rendezvous brokers (retrying in
-// the background, 'offline' until one answers), start the local Setup page, and keep the menu bar's status line
-// current. On the very first run it opens Setup in the browser.
+// the background, 'offline' until one answers), start the Control Center (the local Setup page), and keep the
+// tray's status line current. On the very first run it opens the Control Center in the browser.
 import { ensureDtlsIdentity } from './rtc.mjs';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -57,7 +57,10 @@ async function main() {
     }
   });
 
-  log.info(`Perch host ${config.version} starting (node ${process.version}${config.test ? ', TEST MODE' : ''})`);
+  log.info(`Roost host ${config.version} starting (node ${process.version}${config.test ? ', TEST MODE' : ''})`);
+  if (process.platform === 'win32' && config.secrets !== 'dpapi' && !config.test) {
+    log.warn('ROOST_APP_EXE is not set: keeping the secrets in plain secrets.json (start Roost from roost.exe to protect them)');
+  }
   const patched = applyWeriftPatches();
   if (!patched.unorderedFlag) log.warn('werift: the data channel ordering fix did not apply (werift changed?)');
 
@@ -67,10 +70,10 @@ async function main() {
 
   let store;
   try {
-    store = await Store.open({ home: config.home, secrets: config.secrets });
+    store = await Store.open({ home: config.home, secrets: config.secrets, appExe: config.appExe });
   } catch (e) {
     log.error('could not open the store:', e);
-    ipc.command('status', { state: 'error', text: 'Perch couldn’t read its settings or the Keychain. Quit and open Perch again.', macName: '', setupUrl: null, settings: {} });
+    ipc.command('status', { state: 'error', text: 'Roost couldn’t read its settings or its saved keys. Quit Roost and open it again.', macName: '', setupUrl: null, settings: {} });
     ipc.on('close', () => process.exit(1));
     ipc.start();
     return;
@@ -118,7 +121,7 @@ async function main() {
       log.error('error while quitting:', e);
     }
     rendezvous.close();
-    // "Quit Perch" in the menu: the app waits for this before it quits too.
+    // "Quit Roost" in the tray menu: the app waits for this before it quits too.
     if (tellApp) ipc.command('quit', {});
     process.exitCode = code;
     // Give the last frame a moment to reach the app, then go.
@@ -149,10 +152,10 @@ async function main() {
         log: log.child('setup'),
       });
       controller.setSetupUrl(setup.url);
-      log.info(`Setup page on port ${setup.port}`);
+      log.info(`Control Center (Setup page) on port ${setup.port}`);
       if (firstRun) ipc.command('open-url', { url: setup.url });
     } catch (e) {
-      log.error('could not start the Setup page:', e);
+      log.error('could not start the Control Center (Setup page):', e);
     }
   }
 
@@ -164,11 +167,10 @@ async function main() {
       // The first check a minute after starting; after that the controller's maintenance tick checks daily (every six
       // hours with automatic updates on), and notices an update that is installed but not yet running.
       setTimeout(() => controller.checkForUpdates().catch(e => log.debug(e.message)), FIRST_UPDATE_CHECK_MS).unref();
-      controller.appPath = updater.appBundleOf?.() ?? null;
-      if (controller.appPath) {
-        updater.signerOf(controller.appPath).then(signer => { controller.signer = signer; }).catch(() => {});
-        controller.startMaintenance();
-      }
+      // Installed by the installer (roost.exe passes ROOST_INSTALL_DIR): its VERSION file says which version is on
+      // disk, so an update that couldn't restart Roost can be finished. A development run has none.
+      controller.installDir = config.installDir;
+      if (controller.installDir) controller.startMaintenance();
     }
   }
 
@@ -183,6 +185,6 @@ async function main() {
 }
 
 main().catch(e => {
-  process.stderr.write(`Perch host failed to start: ${e?.stack ?? e}\n`);
+  process.stderr.write(`Roost host failed to start: ${e?.stack ?? e}\n`);
   process.exit(1);
 });

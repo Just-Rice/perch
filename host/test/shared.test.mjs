@@ -48,7 +48,7 @@ test('topics are stable, distinct and do not reveal the input', async () => {
   const id = randomBytes(16);
   assert.equal(await hostTopic(id), await hostTopic(id));
   assert.notEqual(await hostTopic(id), await hostTopic(randomBytes(16)));
-  assert.match(await hostTopic(id), /^perch\/v1\/h\/[A-Za-z0-9_-]{22}$/);
+  assert.match(await hostTopic(id), /^roost\/v1\/h\/[A-Za-z0-9_-]{22}$/);
   assert.equal(await nameTopic('Amber-Otter-4821 '), await nameTopic('amber-otter-4821'));
   assert.ok(!(await nameTopic('amber-otter-4821')).includes('amber'));
   assert.equal(normalizeMacName('  Amber Otter 4821 '), 'amber-otter-4821');
@@ -132,13 +132,13 @@ test('MQTT client reassembles split packets and delivers large payloads', async 
   await b.connect();
   const got = [];
   b.onmessage = (topic, payload) => got.push([topic, payload.length, payload[payload.length - 1]]);
-  await b.subscribe('perch/v1/test');
+  await b.subscribe('roost/v1/test');
   const big = new Uint8Array(200_000).fill(7);
   big[big.length - 1] = 9;
-  a.publish('perch/v1/test', big);
-  a.publish('perch/v1/test', 'hi');
+  a.publish('roost/v1/test', big);
+  a.publish('roost/v1/test', 'hi');
   for (let i = 0; i < 200 && got.length < 2; i++) await new Promise(r => setTimeout(r, 10));
-  assert.deepEqual(got, [['perch/v1/test', 200_000, 9], ['perch/v1/test', 2, 105]]);
+  assert.deepEqual(got, [['roost/v1/test', 200_000, 9], ['roost/v1/test', 2, 105]]);
   a.close();
   b.close();
 });

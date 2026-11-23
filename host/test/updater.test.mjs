@@ -2,13 +2,17 @@
 // starting the install script (with a fake spawn, never for real). Run: node --test test/updater.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
-  checkForUpdate, installUpdate, parseVersion, compareVersions, LATEST_RELEASE_API, INSTALL_COMMAND,
+  checkForUpdate, installUpdate, installCommand, installedVersion, powershellPath, parseVersion, compareVersions,
+  LATEST_RELEASE_API, INSTALL_SCRIPT_URL,
 } from '../src/updater.mjs';
 
 const release = (over = {}) => ({
   tag_name: 'v0.2.0',
-  html_url: 'https://github.com/Just-Rice/perch/releases/tag/v0.2.0',
+  html_url: 'https://github.com/faarisaahmed/roost/releases/tag/v0.2.0',
   draft: false,
   prerelease: false,
   body: 'Smoother video on slow networks.\r\n\r\nFixes a crash when a display is unplugged.',
@@ -58,14 +62,14 @@ test('a newer release is offered, with its page and short notes', async () => {
   const u = await checkForUpdate('0.1.0', { fetchImpl: f, log: quiet });
   assert.deepEqual(u, {
     version: '0.2.0',
-    url: 'https://github.com/Just-Rice/perch/releases/tag/v0.2.0',
+    url: 'https://github.com/faarisaahmed/roost/releases/tag/v0.2.0',
     notes: 'Smoother video on slow networks.\n\nFixes a crash when a display is unplugged.',
   });
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0].url, LATEST_RELEASE_API);
-  assert.equal(LATEST_RELEASE_API, 'https://api.github.com/repos/Just-Rice/perch/releases/latest');
+  assert.equal(LATEST_RELEASE_API, 'https://api.github.com/repos/faarisaahmed/roost/releases/latest');
   const headers = f.calls[0].opts.headers;
-  assert.match(headers['User-Agent'], /^Perch\/0\.1\.0 /);
+  assert.match(headers['User-Agent'], /^Roost\/0\.1\.0 /);
   assert.equal(headers.Accept, 'application/vnd.github+json');
   assert.ok(f.calls[0].opts.signal instanceof AbortSignal, 'has a timeout');
   // A release after a pre-release of the same version counts as newer.
@@ -73,7 +77,7 @@ test('a newer release is offered, with its page and short notes', async () => {
   // Two-digit parts compare as numbers, not text.
   assert.equal((await checkForUpdate('0.9.0', { fetchImpl: fakeFetch(release({ tag_name: 'v0.10.0' })), log: quiet }))?.version, '0.10.0');
   // A tag without the v, and with build metadata.
-  assert.equal((await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ tag_name: '0.3.1+mac' })), log: quiet }))?.version, '0.3.1');
+  assert.equal((await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ tag_name: '0.3.1+win' })), log: quiet }))?.version, '0.3.1');
 });
 
 test('the same or an older release is no update', async () => {
@@ -149,10 +153,39 @@ test('notes are cut to about 500 characters and links stay on our release pages'
   assert.match(u.notes, /word\d+…$/, 'cut between words');
   const empty = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ body: null })), log: quiet });
   assert.equal(empty.notes, '');
-  for (const html_url of ['https://evil.example/perch', 'javascript:alert(1)', 'https://github.com/Someone-Else/perch/releases/tag/v0.2.0', undefined]) {
+  for (const html_url of ['https://evil.example/roost', 'javascript:alert(1)', 'https://github.com/Someone-Else/roost/releases/tag/v0.2.0', undefined]) {
     const r = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ html_url })), log: quiet });
-    assert.equal(r.url, 'https://github.com/Just-Rice/perch/releases/tag/v0.2.0', String(html_url));
+    assert.equal(r.url, 'https://github.com/faarisaahmed/roost/releases/tag/v0.2.0', String(html_url));
   }
+});
+
+const WIN_ENV = { SystemRoot: 'C:\\Windows', TEMP: 'C:\\Users\\Ann\\AppData\\Local\\Temp' };
+const POWERSHELL = 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe';
+
+test('Windows PowerShell is started by its full path when Windows says where it is', () => {
+  assert.equal(powershellPath(WIN_ENV), POWERSHELL);
+  assert.equal(powershellPath({ windir: 'D:\\Win' }), 'D:\\Win\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+  assert.equal(powershellPath({}), 'powershell.exe');
+});
+
+test('the install script: install.ps1 from the installed copy, or else from the website', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'roost-install-'));
+  const local = join(dir, 'install.ps1');
+  const withIt = installCommand({ installDir: dir, env: WIN_ENV, exists: p => p === local });
+  assert.deepEqual(withIt, {
+    cmd: POWERSHELL,
+    args: ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', local, '-Update'],
+  });
+  for (const opts of [{ installDir: dir, exists: () => false }, { installDir: null, exists: () => true }]) {
+    const { cmd, args } = installCommand({ ...opts, env: WIN_ENV });
+    assert.equal(cmd, POWERSHELL);
+    assert.deepEqual(args.slice(0, 5), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command']);
+    assert.equal(args.length, 6);
+    assert.match(args[5], /Tls12/);
+    assert.ok(args[5].includes(`DownloadString('${INSTALL_SCRIPT_URL}')`));
+    assert.match(args[5], /\) -Update$/, 'run with -Update');
+  }
+  assert.equal(INSTALL_SCRIPT_URL, 'https://faarisaahmed.github.io/roost/install.ps1');
 });
 
 test('installUpdate starts the install script detached and lets go of it', () => {
@@ -162,28 +195,44 @@ test('installUpdate starts the install script detached and lets go of it', () =>
     spawned.push({ cmd, args, opts });
     return { unref: () => { unrefs++; }, on: () => {} };
   };
-  assert.deepEqual(installUpdate({ spawnImpl, log: quiet }), { started: true });
+  const installDir = 'C:\\Users\\Ann\\AppData\\Local\\Programs\\Roost';
+  assert.deepEqual(installUpdate({ spawnImpl, log: quiet, installDir, env: WIN_ENV, exists: () => true }), { started: true });
   assert.equal(spawned.length, 1);
-  assert.equal(spawned[0].cmd, '/bin/bash');
-  assert.deepEqual(spawned[0].args, ['-c', 'curl -fsSL https://just-rice.github.io/perch/install.sh | bash -s -- --update']);
-  assert.equal(INSTALL_COMMAND, spawned[0].args[1]);
+  assert.equal(spawned[0].cmd, POWERSHELL);
+  assert.deepEqual(spawned[0].args, installCommand({ installDir, env: WIN_ENV, exists: () => true }).args);
+  assert.ok(spawned[0].args.includes('-Update'));
   assert.equal(spawned[0].opts.detached, true);
   assert.equal(spawned[0].opts.stdio, 'ignore');
+  assert.equal(spawned[0].opts.windowsHide, true);
   assert.equal(unrefs, 1);
 });
 
 test('installUpdate copes with whatever the caller hands it', () => {
-  // The controller may pass {log}, the update it found, or nothing; none of that may stop it starting (only the
-  // spawn is faked here, by replacing it on the options object that carries the test hook).
+  // The controller may pass {log, installDir}, the update it found, or nothing; none of that may stop it starting
+  // (only the spawn is faked here, by replacing it on the options object that carries the test hook).
   const logs = [];
   const spawnImpl = () => ({ unref() {}, on() {} });
-  assert.deepEqual(installUpdate({ spawnImpl, log: (m) => logs.push(m) }), { started: true });
-  assert.deepEqual(logs, ['updater: update started']);
+  assert.deepEqual(installUpdate({ spawnImpl, log: (m) => logs.push(m), exists: () => false }), { started: true });
+  assert.deepEqual(logs, ['updater: update started (install.ps1 from the website)']);
   assert.deepEqual(installUpdate({ spawnImpl, log: quiet, version: '0.2.0', url: 'x', notes: '' }), { started: true });
   // A failure to start is logged, not thrown (spawn reports it later, as an 'error' event).
   const errors = [];
   let onError;
   installUpdate({ spawnImpl: () => ({ unref() {}, on(ev, fn) { if (ev === 'error') onError = fn; } }), log: (m) => errors.push(m) });
-  onError(new Error('spawn /bin/bash ENOENT'));
-  assert.match(errors.at(-1), /couldn't start the update \(spawn \/bin\/bash ENOENT\)/);
+  onError(new Error('spawn powershell.exe ENOENT'));
+  assert.match(errors.at(-1), /couldn't start the update \(spawn powershell\.exe ENOENT\)/);
+});
+
+test('the version on disk comes from the install folder\'s VERSION file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'roost-version-'));
+  assert.equal(await installedVersion(dir), null, 'no VERSION file (yet)');
+  writeFileSync(join(dir, 'VERSION'), '0.2.1\r\n');
+  assert.equal(await installedVersion(dir), '0.2.1');
+  writeFileSync(join(dir, 'VERSION'), '\uFEFF0.3.0-beta.1');
+  assert.equal(await installedVersion(dir), '0.3.0-beta.1', 'a byte-order mark (PowerShell writes one) is fine');
+  for (const junk of ['', 'latest', '0.3', '<script>']) {
+    writeFileSync(join(dir, 'VERSION'), junk);
+    assert.equal(await installedVersion(dir), null, JSON.stringify(junk));
+  }
+  assert.equal(await installedVersion(null), null, 'a development run has no install folder');
 });

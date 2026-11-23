@@ -1,8 +1,8 @@
-// The Mac's side of the Worker relay (docs/PROTOCOL.md, "Worker relay"): the owner's own Cloudflare Worker (relay/),
+// The PC's side of the Worker relay (docs/PROTOCOL.md, "Worker relay"): the owner's own Cloudflare Worker (relay/),
 // used when a network blocks WebRTC. Unlike the TURN relay (relay.mjs) it needs no payment details and has no data
 // allowance to use up: Workers don't charge for bandwidth.
 //
-// WorkerRelay is the setting (the Worker's address and the secret that proves this Mac owns it). WsPeer stands in for
+// WorkerRelay is the setting (the Worker's address and the secret that proves this PC owns it). WsPeer stands in for
 // HostPeer once a viewer answers an offer over the relay: the same three channels and offer/answer texts, so the
 // session (session.mjs) signs the viewer in exactly as it does over WebRTC. WsMediaSender stands in for MediaSender.
 import { X509Certificate, sign, randomBytes } from 'node:crypto';
@@ -40,20 +40,20 @@ export class WorkerRelay {
     try {
       res = await this.fetchImpl(url, { ...init, signal: AbortSignal.timeout(10000) });
     } catch {
-      throw new Error('Perch couldn’t reach the relay. Check its address and this Mac’s internet connection.');
+      throw new Error('Roost couldn’t reach the relay. Check its address and this PC’s internet connection.');
     }
     let body = null;
     try { body = await res.json(); } catch {}
     return { status: res.status, body };
   }
 
-  // Checks the Worker at `url` is a Perch relay this Mac owns (claiming it if it's new), then saves it.
+  // Checks the Worker at `url` is a Roost relay this PC owns (claiming it if it's new), then saves it.
   async save(url) {
     const base = relayBase(url, { allowLocal: this.allowLocal });
-    if (!base) throw new Error('That address doesn’t look right. It should look like https://perch-relay.your-name.workers.dev');
+    if (!base) throw new Error('That address doesn’t look right. It should look like https://roost-relay.your-name.workers.dev');
     const info = await this._json(`${base}/v1/info`);
-    if (info.status !== 200 || info.body?.perch !== 'relay') {
-      throw new Error('There’s no Perch relay at that address. Check you deployed the relay folder and copied its address.');
+    if (info.status !== 200 || info.body?.roost !== 'relay') {
+      throw new Error('There’s no Roost relay at that address. Check you deployed the relay folder and copied its address.');
     }
     const known = this.store.workerRelay;
     let secret = known && known.url === base ? known.secret : null;
@@ -62,9 +62,9 @@ export class WorkerRelay {
       const claim = await this._json(`${base}/v1/claim`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ secret }),
       });
-      if (claim.status !== 200) throw new Error('The relay wouldn’t accept this Mac as its owner. Try again in a minute.');
+      if (claim.status !== 200) throw new Error('The relay wouldn’t accept this PC as its owner. Try again in a minute.');
     } else if (!secret) {
-      throw new Error('That relay already belongs to another Mac. Deploy a fresh copy (with a new name) for this one.');
+      throw new Error('That relay already belongs to another PC. Deploy a fresh copy (with a new name) for this one.');
     }
     await this.check({ url: base, secret });
     await this.store.setWorkerRelay({ url: base, secret });
@@ -72,11 +72,11 @@ export class WorkerRelay {
     this.lastError = null;
   }
 
-  // Asks the relay whether this Mac's secret is still the right one. Throws with a plain message if not.
+  // Asks the relay whether this PC's secret is still the right one. Throws with a plain message if not.
   async check(login = this.store.workerRelay) {
     const r = await this._json(`${login.url}/v1/check?auth=${await checkAuth(login.secret)}`);
     if (r.status !== 200 || r.body?.ok !== true) {
-      throw new Error('The relay didn’t recognise this Mac. Remove it here, deploy a fresh copy and set it up again.');
+      throw new Error('The relay didn’t recognise this PC. Remove it here, deploy a fresh copy and set it up again.');
     }
     return true;
   }
@@ -88,7 +88,7 @@ export class WorkerRelay {
       e => { this.lastError = e.message; this.log?.warn(`worker relay: ${e.message}`); });
   }
 
-  // A backup relay: another copy (relay/node) that already holds this Mac's secret (its RELAY_SECRET). Offers name it
+  // A backup relay: another copy (relay/node) that already holds this PC's secret (its RELAY_SECRET). Offers name it
   // while the main relay can't be reached, say when it has used up its day on Cloudflare's free plan.
   async saveBackup(url) {
     if (!this.configured) throw new Error('Set up the main relay first.');
@@ -105,7 +105,7 @@ export class WorkerRelay {
     this._picked = null;
   }
 
-  // A relay on this Mac behind a Cloudflare Quick Tunnel (relay/node, QUICK_TUNNEL=1): `local` is its loopback address.
+  // A relay on this PC behind a Cloudflare Quick Tunnel (relay/node, QUICK_TUNNEL=1): `local` is its loopback address.
   // Its public https://….trycloudflare.com address is new each time the tunnel starts, so it is asked for whenever an
   // offer needs a backup, rather than saved.
   async saveTunnel(local) {
@@ -113,7 +113,7 @@ export class WorkerRelay {
     let u;
     try { u = new URL(String(local).trim()); } catch {}
     if (!u || u.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(u.hostname) || u.pathname !== '/' || u.search) {
-      throw new Error('That should be the relay’s address on this Mac, like http://127.0.0.1:8788');
+      throw new Error('That should be the relay’s address on this PC, like http://127.0.0.1:8788');
     }
     const base = `http://${u.host}`;
     const url = await this._tunnelUrl(base);
@@ -191,7 +191,7 @@ export class WorkerRelay {
     };
   }
 
-  // A relay offer for one connection: a fresh room and ECDH key, signed with the Mac's DTLS certificate when it has
+  // A relay offer for one connection: a fresh room and ECDH key, signed with the PC's DTLS certificate when it has
   // one (the key its pin names). Resolves to {offerText, base, room, privateKey, secret}.
   async prepare(sid, dtlsKeys) {
     const login = this.store.workerRelay;

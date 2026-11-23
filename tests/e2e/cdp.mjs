@@ -1,10 +1,22 @@
 // Tiny headless-Chrome launcher + CDP client (flattened sessions) for Node 26 (global WebSocket, no deps).
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-export const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+// Where Chrome is: CHROME_PATH if set, else the usual place on Windows (per machine or per user), macOS or Linux.
+function findChrome(env = process.env) {
+  if (env.CHROME_PATH) return env.CHROME_PATH;
+  if (process.platform === 'win32') {
+    const places = [env.ProgramFiles, env['ProgramFiles(x86)'], env.LOCALAPPDATA].filter(Boolean)
+      .map(base => path.win32.join(base, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+    return places.find(p => existsSync(p)) ?? places[0] ?? 'chrome.exe';
+  }
+  if (process.platform === 'darwin') return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+  return ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find(p => existsSync(p)) ?? 'google-chrome';
+}
+
+export const CHROME = findChrome();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function randomPort() { return 20000 + Math.floor(Math.random() * 30000); }
@@ -136,7 +148,7 @@ export function collectConsole(session) {
 
 /**
  * Gives every page (and popup, and out-of-process frame) its own CDP virtual passkey authenticator before any of its
- * scripts run, so no WebAuthn request can ever reach the real Touch ID or iCloud Keychain. Credentials made in one
+ * scripts run, so no WebAuthn request can ever reach the real Windows Hello, Touch ID or a password manager. Credentials made in one
  * tab are copied into new tabs (with the current sign counter) so a passkey "syncs" like a real one.
  * Returns { sessions, credentials() }.
  */

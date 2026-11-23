@@ -1,7 +1,7 @@
 // One smoke test with a real browser: headless Chrome pairs with the real host process (src/main.mjs under
 // test/fake-app.mjs) and decodes its H.264 video and Opus sound. The viewer is our own tiny page (test/chrome/), not
 // the website, which is built separately. Chrome makes a real passkey, but in CDP's virtual authenticator
-// (tests/e2e/cdp.mjs), so nothing reaches Touch ID or the Keychain; all rendezvous goes through the local broker.
+// (tests/e2e/cdp.mjs), so nothing reaches a real passkey or password store; all rendezvous goes through the local broker.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';

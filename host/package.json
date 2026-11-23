@@ -1,8 +1,8 @@
 {
-  "name": "perch-host",
+  "name": "roost-host",
   "version": "0.4.0",
   "private": true,
-  "description": "Perch's Mac host process: rendezvous, WebRTC, sign-in and the local Setup page.",
+  "description": "Roost's host process on the PC: rendezvous, WebRTC, sign-in and the local Control Center.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
@@ -10,7 +10,7 @@
   },
   "main": "src/main.mjs",
   "scripts": {
-    "test": "node --test 'test/*.test.mjs'",
+    "test": "node --test --test-concurrency=1 'test/*.test.mjs'",
     "bundle": "node scripts/bundle.mjs"
   },
   "dependencies": {

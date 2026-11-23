@@ -1,4 +1,4 @@
-// Mac names like "amber-otter-4821": easy to read aloud and type, unique enough that two Macs won't collide, and
+// PC names like "amber-otter-4821": easy to read aloud and type, unique enough that two PCs won't collide, and
 // not guessable at scale (256 × 256 × 9000 ≈ 590 million names). The name is the username for backup sign-in.
 import { randomInt } from 'node:crypto';
 

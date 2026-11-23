@@ -1,10 +1,11 @@
-// The host controller: the one object that knows everything about this Mac's Perch and can change it. The Setup
-// page (src/setup-server.mjs), the menu bar (via the app's 'menu' events) and the tests all go through it.
+// The host controller: the one object that knows everything about Roost on this PC and can change it. The Control
+// Center (the Setup page, src/setup-server.mjs), the tray menu (via the app's 'menu' events) and the tests all go
+// through it.
 //
 // It owns the sessions: it creates them for signaling, picks the one signed-in viewer that gets the picture, feeds
 // that viewer the app's video and sound, and passes that viewer's (already checked) input to the app. All methods
 // may be async; errors are thrown as Error with a plain-language message safe to show the user.
-import { QUALITY, DEFAULT_QUALITY, PAIR_TTL_MS, AUTH_TIMEOUT_MS, APP_ORIGIN } from '../../site/js/shared/proto.js';
+import { QUALITY, DEFAULT_QUALITY, PAIR_TTL_MS, AUTH_TIMEOUT_MS, APP_ORIGIN, SITE_URL } from '../../site/js/shared/proto.js';
 import { newMacName as makeMacName, suggestPassword } from './names.mjs';
 import { normalizeMacName, CUSTOM_MAC_NAME_RE } from '../../site/js/shared/rendezvous.js';
 import { HostPeer, ensureDtlsIdentity } from './rtc.mjs';
@@ -18,7 +19,7 @@ import { silentLog } from './log.mjs';
 const ACTIVITY_SHOWN = 50;
 const ECHO_KEEP = 500;
 const BYE_TEXT = {
-  'signed-in-elsewhere': 'another device signed in', paused: 'Perch was paused', quit: 'Perch quit', idle: 'no input for a while',
+  'signed-in-elsewhere': 'another device signed in', paused: 'Roost was paused', quit: 'Roost quit', idle: 'no input for a while',
   removed: 'the device was removed', disconnected: 'disconnected', bye: 'the viewer left', denied: 'sign-in refused',
 };
 const CAPTURE_ERRORS = ['no-screen-permission', 'capture-failed'];
@@ -29,9 +30,14 @@ const MAX_GUESTS = 3;
 export const IDLE_BEFORE_AUTO_MS = 2 * 60 * 1000;
 const AUTO_RESTART_RETRY_MS = 30 * 60 * 1000;
 const AUTO_UPDATE_RETRY_MS = 6 * 60 * 60 * 1000;
-// How often to ask GitHub for a new version: daily, or every six hours when Perch may update itself.
+// How often to ask GitHub for a new version: daily, or every six hours when Roost may update itself.
 const UPDATE_CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
 const AUTO_UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+
+// The website's address as people type it, for the "Ready" line: faarisaahmed.github.io/roost.
+const SITE_SHORT = SITE_URL.replace(/^https:\/\//, '').replace(/\/$/, '');
+
+const str = (v, max = 80) => (typeof v === 'string' ? v.slice(0, max) : null);
 
 const publicDevice = d => ({ id: d.id, label: d.label, createdAt: d.createdAt ?? null, lastUsedAt: d.lastUsedAt ?? null });
 
@@ -89,19 +95,20 @@ export class Controller {
     // What the app has told us (HELLO and events).
     this.appInfo = null;
     this.permissions = { screen: false, accessibility: false };
+    // Windows: whether roost.exe runs as administrator (so it can control admin apps and see UAC prompts), whether the
+    // "highest privileges" scheduled task that starts it that way is registered, and why turning it on last failed.
+    this.elevationState = { elevated: false, task: false, error: null };
     this.displays = [];
-    this.audioOutputs = [];    // the Mac's sound outputs, as the app lists them
+    this.audioOutputs = [];    // the PC's sound outputs, as the app lists them
     this.loginItemState = { on: false, status: 'unknown' };
     this.locked = false;
     this.capture = null;
     this.captureOn = false;
     this.inputEcho = [];
     this.pairTimer = null;
-    // Finishing updates (see tick()). appPath: the Perch.app this host runs from (main.mjs sets it; null outside one).
-    // signer: who signed that app when this host started. installed: {version, sameSigner} of the copy on disk when it
-    // isn't the version running.
-    this.appPath = null;
-    this.signer = null;
+    // Finishing updates (see tick()). installDir: the folder roost.exe is installed in (ROOST_INSTALL_DIR; main.mjs
+    // sets it, null in a development run). installed: {version} of the copy on disk when it isn't the version running.
+    this.installDir = null;
     this.installed = null;
     this.lastBusyAt = now();
     this.lastUpdateCheckAt = null;
@@ -161,9 +168,9 @@ export class Controller {
       case 'connected': return `${this.active.label} is connected`;
       case 'paused': return 'Paused: nobody can connect';
       case 'offline': return 'Offline: can’t reach the internet. Retrying…';
-      case 'needs-setup': return this.store.authenticatorNeeded && !this.store.config.totp.set ? 'Finish setting up: add Perch to your authenticator app'
+      case 'needs-setup': return this.store.authenticatorNeeded && !this.store.config.totp.set ? 'Finish setting up: add Roost to your authenticator app'
         : 'Finish setting up: pair a phone or computer';
-      default: return 'Ready: open just-rice.github.io/perch to connect';
+      default: return `Ready: open ${SITE_SHORT} to connect`;
     }
   }
 
@@ -196,13 +203,15 @@ export class Controller {
       activity: s.config.log.slice(-ACTIVITY_SHOWN).reverse(),
       update: this.update,
       soundTap: !!this.appInfo?.soundTap,
-      restart: this.installed ? { version: this.installed.version, running: this.hv, sameSigner: this.installed.sameSigner,
+      app: this.appState(),
+      // sameSigner is always true on Windows (nothing there is tied to who signed the app); kept for the page.
+      restart: this.installed ? { version: this.installed.version, running: this.hv, sameSigner: true,
         autoAfterMs: IDLE_BEFORE_AUTO_MS } : null,
       test: !!this.config.test,
     };
   }
 
-  // What the menu bar shows (the 'status' command).
+  // What the tray shows (the 'status' command).
   statusCommand() {
     const state = this.stateName();
     return {
@@ -212,20 +221,53 @@ export class Controller {
     };
   }
 
+  // What the Control Center shows about the app and the PC: {os, osVersion, arch, elevated, elevatedTask, features,
+  // elevationError}. Before the app's HELLO everything is null (elevated and elevatedTask false).
+  appState() {
+    const a = this.appInfo;
+    return {
+      os: a?.os ?? null, osVersion: a?.osVersion ?? null, arch: a?.arch ?? null,
+      elevated: !!this.elevationState.elevated, elevatedTask: !!this.elevationState.task,
+      features: a ? { ...a.features } : null,
+      elevationError: this.elevationState.error,
+    };
+  }
+
+  // The privacy curtain needs the app to keep its black windows out of the picture (Windows 10 2004+). An app that
+  // doesn't say (Perch's Mac app, older builds) can.
+  get curtainAvailable() { return this.appInfo?.features?.curtain !== false; }
+
   setSetupUrl(url) { this.setupUrl = url; this._changed(); }
   setFatal(text) { this.fatal = text; this._changed(); }
 
   // --- the app ---
 
+  // The app's HELLO. roost.exe says {os: "windows", osVersion, arch, permissions.elevated, features}; Perch's Mac app
+  // (and the tests written for it) says {macos} instead, which is still understood.
   handleHello(h) {
+    const f = h.features && typeof h.features === 'object' ? h.features : {};
+    const mac = typeof h.macos === 'string' && h.os === undefined;
     this.appInfo = {
       app: String(h.app ?? ''), version: typeof h.version === 'string' ? h.version : null,
-      macos: String(h.macos ?? ''), synthetic: !!h.synthetic, soundTap: h.soundTap === true,
+      os: mac ? 'macos' : str(h.os, 20), osVersion: mac ? str(h.macos, 40) : str(h.osVersion, 40),
+      arch: str(h.arch, 20), synthetic: !!h.synthetic, soundTap: h.soundTap === true,
+      features: {
+        // Only a plain false turns the curtain off: an app that doesn't say has one.
+        curtain: f.curtain !== false,
+        encoder: str(f.encoder, 80),
+        elevatedTask: f.elevatedTask === true,
+      },
     };
     if (h.permissions) this.permissions = { screen: !!h.permissions.screen, accessibility: !!h.permissions.accessibility };
+    this.elevationState = { elevated: h.permissions?.elevated === true, task: f.elevatedTask === true, error: null };
     this.displays = cleanDisplays(h.displays);
     if (h.loginItem && typeof h.loginItem === 'object') this.loginItemState = { on: !!h.loginItem.on, status: String(h.loginItem.status ?? 'unknown') };
-    this.log.info(`app ${this.appInfo.app} ${this.appInfo.version} on macOS ${this.appInfo.macos}${this.appInfo.synthetic ? ' (synthetic)' : ''}`);
+    const a = this.appInfo;
+    this.log.info(`app ${a.app} ${a.version} on ${a.os ?? 'an unknown system'} ${a.osVersion ?? ''}${a.arch ? ` (${a.arch})` : ''}` +
+      `${this.elevationState.elevated ? ', as administrator' : ''}${a.features.encoder ? `, encoder ${a.features.encoder}` : ''}` +
+      `${a.synthetic ? ' (synthetic)' : ''}`);
+    // The owner chose the curtain on a PC that can't keep it out of the picture (or a newer app can't any more).
+    if (this.store.settings.curtain && !this.curtainAvailable) this.log.warn('the privacy curtain is on but this PC can\'t hide it from the picture; it stays down');
     // The app starts with everything off; apply what the user chose.
     this.app.command('keep-awake', { on: !!this.store.settings.keepAwake });
     this.app.command('login-item', { on: !!this.store.settings.loginItem });
@@ -237,7 +279,7 @@ export class Controller {
       case 'permissions': {
         const hadScreen = this.permissions.screen;
         this.permissions = { screen: !!ev.screen, accessibility: !!ev.accessibility };
-        // Screen Recording was just allowed while someone is waiting for a picture: start it now.
+        // (macOS) Screen Recording was just allowed while someone is waiting for a picture: start it now.
         if (!hadScreen && this.permissions.screen && this.active) this._sendCapture(this.active);
         this.active?.sendStatus();
         break;
@@ -280,7 +322,7 @@ export class Controller {
         this.clipAsker = null;
         break;
       case 'clipboard-changed':
-        // Something was copied on the Mac: a viewer that asked for it gets it straight away.
+        // Something was copied on the PC: a viewer that asked for it gets it straight away.
         if (this.active && !this.active.guest && this.active.clipSync) {
           this.clipAsker = this.active;
           this.app.command('clipboard-get', { images: true, auto: true });
@@ -290,11 +332,11 @@ export class Controller {
         this.active?.sendClipSet(ev.ok === true);
         break;
       case 'text-focus':
-        // A click just put the Mac's focus in a text box (or out of one): a phone can bring up its keyboard.
+        // A click just put the PC's focus in a text box (or out of one): a phone can bring up its keyboard.
         this.active?.sendTextFocus(ev.editable === true, ev.secure === true);
         break;
       case 'audio-outputs':
-        // Where the viewer's voice can be played: the Mac's sound outputs, for the picker in Setup.
+        // Where the viewer's voice can be played: the PC's sound outputs, for the picker in Setup.
         this.audioOutputs = cleanOutputs(ev.list);
         this._changed();
         break;
@@ -311,19 +353,35 @@ export class Controller {
       case 'capture-error': {
         const code = CAPTURE_ERRORS.includes(ev.code) ? ev.code : 'capture-failed';
         this.log.warn(`capture error: ${code} ${ev.message ?? ''}`);
-        this.active?.sendError(code, typeof ev.message === 'string' ? ev.message.slice(0, 200) : 'The Mac could not capture the screen.');
+        this.active?.sendError(code, typeof ev.message === 'string' ? ev.message.slice(0, 200) : 'The PC could not capture the screen.');
         break;
       }
       case 'lock':
         this.locked = !!ev.locked;
         this.active?.sendStatus();
         break;
+      case 'elevation': {
+        // After HELLO, and in answer to the 'elevation' command (then with ok, and error when it failed: the owner
+        // said no to Windows' prompt, or the task couldn't be registered).
+        const was = this.elevationState;
+        const failed = ev.ok === false;
+        this.elevationState = {
+          elevated: ev.elevated === true, task: ev.task === true,
+          error: failed ? (str(ev.error, 200) || 'Windows didn’t allow it.') : null,
+        };
+        if (this.appInfo) this.appInfo.features.elevatedTask = this.elevationState.task;
+        if (failed) this.log.warn(`control admin apps: ${this.elevationState.error}`);
+        if (ev.ok === true && was.task !== this.elevationState.task) {
+          this.store.activity('settings', this.elevationState.task ? 'Control admin apps turned on' : 'Control admin apps turned off');
+        }
+        break;
+      }
       case 'login-item':
         this.loginItemState = { on: !!ev.on, status: String(ev.status ?? 'unknown'), ...(ev.error ? { error: String(ev.error) } : {}) };
         if (ev.error) this.log.warn(`login item: ${ev.error}`);
         break;
       case 'menu':
-        this._menu(ev.action).catch(e => this._notify('Perch', e.message));
+        this._menu(ev.action).catch(e => this._notify('Roost', e.message));
         return;
       case 'input-echo':
         if (this.config.test) {
@@ -362,7 +420,7 @@ export class Controller {
       case 'disconnect': return this.disconnect();
       case 'backup-on':
         if (!this.store.config.backup.record) {
-          this._notify('Backup sign-in', 'Choose a backup password in Setup first.');
+          this._notify('Backup sign-in', 'Choose a backup password in the Control Center first.');
           if (this.setupUrl) this.app.command('open-url', { url: this.setupUrl });
           return;
         }
@@ -374,10 +432,10 @@ export class Controller {
       case 'login-item-off': return this.updateSettings({ loginItem: false });
       case 'check-updates': {
         const u = await this.checkForUpdates();
-        return this._notify('Perch', u ? `Perch ${u.version} is available.` : 'Perch is up to date.');
+        return this._notify('Roost', u ? `Roost ${u.version} is available.` : 'Roost is up to date.');
       }
       case 'update': return this.installUpdate();
-      case 'restart': return this.relaunch('the menu bar');
+      case 'restart': return this.relaunch('the tray');
       case 'quit': return this.onQuit();
       default: this.log.debug(`menu action ${action} ignored`);
     }
@@ -401,7 +459,7 @@ export class Controller {
   }
 
   // Sessions still signing in, counted per topic ('host': passkey and pairing, 'name': backup), so strangers who only
-  // know the Mac's name can't fill the slots the owner's own devices need.
+  // know the PC's name can't fill the slots the owner's own devices need.
   unauthenticatedCount(kind) {
     let n = 0;
     for (const s of this.sessions) {
@@ -503,7 +561,7 @@ export class Controller {
     const display = this._display(old?.display);
     session.quality = quality;
     session.display = display.id;
-    this.app.command('session', { active: true, viewer: session.label, route: session.route, curtain: !!this.store.settings.curtain });
+    this.app.command('session', { active: true, viewer: session.label, route: session.route, curtain: this._curtain() });
     this._sendCapture(session);
     this._changed();
     return {
@@ -549,7 +607,7 @@ export class Controller {
     } else {
       this.app.command('keyframe', {});
     }
-    this._notify('Perch', `A guest is watching this Mac's screen (${session.label}).`);
+    this._notify('Roost', `A guest is watching this PC's screen (${session.label}).`);
     this._changed();
     return {
       display: { id: display.id, width: display.width, height: display.height },
@@ -557,7 +615,7 @@ export class Controller {
     };
   }
 
-  // Input reaches the app only from the active, signed-in viewer, and only if the Mac allows Perch to control it.
+  // Input reaches the app only from the active, signed-in viewer, and only if the PC allows Roost to control it.
   input(session, msg) {
     if (session !== this.active || !session.signedIn || !this.permissions.accessibility) return false;
     return this.app.input(msg) !== false;
@@ -565,7 +623,7 @@ export class Controller {
 
   sessionEnded(session, reason, wasReady) {
     this.sessions.delete(session);
-    // Whoever was talking through the Mac has gone: stop playing.
+    // Whoever was talking through the PC has gone: stop playing.
     if (session.micOn) { session.micOn = false; this.app.command('mic', { on: false }); }
     if (this.guests.delete(session)) {
       this.store.activity('guest', `A guest stopped watching: ${session.label}`);
@@ -602,7 +660,7 @@ export class Controller {
       this.capture = null;
       this.app.command('capture', { on: false });
       this.app.command('session', { active: false });
-      // Leave the Mac locked behind the viewer, if the owner asked for that (not when Perch itself is quitting or
+      // Leave the PC locked behind the viewer, if the owner asked for that (not when Roost itself is quitting or
       // another of their devices is taking over).
       if (wasReady && this.store.settings.lockOnDisconnect && reason !== 'quit' && reason !== 'signed-in-elsewhere') {
         this.app.command('lock', {});
@@ -701,9 +759,9 @@ export class Controller {
     this._changed();
   }
 
-  // --- sites this Mac accepts sign-ins from ---
+  // --- sites this PC accepts sign-ins from ---
 
-  // Adds a site (the address of its Perch connect page). Only the Mac's owner can, in Setup on the Mac itself.
+  // Adds a site (the address of its Roost connect page). Only the PC's owner can, in Setup on the PC itself.
   siteAdd(address) {
     let u;
     try { u = new URL(String(address ?? '').trim()); } catch { throw new Error('That doesn’t look like a web address. It should start with https://'); }
@@ -715,7 +773,7 @@ export class Controller {
       throw new Error('The address needs a domain name, like example.com.');
     }
     if (this.auth.siteFor(u.origin)) throw new Error('That site is already on the list.');
-    if (this.store.sites.length >= 8) throw new Error('That’s the most sites Perch keeps. Remove one first.');
+    if (this.store.sites.length >= 8) throw new Error('That’s the most sites Roost keeps. Remove one first.');
     u.hash = '';
     u.search = '';
     if (u.pathname.endsWith('/')) u.pathname += 'connect.html';
@@ -763,7 +821,7 @@ export class Controller {
   // Relay logins for an offer (signaling.mjs); [] without a relay.
   relayIceServers() { return this.relay.iceServers(); }
 
-  // Offered to viewers: one-tap sign-in needs the Mac's fixed DTLS certificate.
+  // Offered to viewers: one-tap sign-in needs the PC's fixed DTLS certificate.
   get caps() { return [...(this.store.dtlsKeys ? ['quick'] : []), 'fps60', 'view', 'window', 'mic', 'textfocus', 'clipboard', 'clipimg', 'levels']; }
 
   // The two sound levels as viewers and the app see them; `speakers` is only offered where the app can tap the sound.
@@ -813,7 +871,7 @@ export class Controller {
     });
   }
 
-  // The Worker relay is also a rendezvous broker: viewers whose network blocks the public brokers find the Mac there.
+  // The Worker relay is also a rendezvous broker: viewers whose network blocks the public brokers find the PC there.
   _useRelayBroker(previous = null) {
     if (previous) this.rendezvous.removeBroker?.(relayBroker(previous));
     if (this.workerRelay.base) this.rendezvous.addBroker?.(relayBroker(this.workerRelay.base));
@@ -829,14 +887,14 @@ export class Controller {
     this._useRelayBroker();
     if (!this.auth.siteFor(base)) {
       this.store.addSite({ origin: base, url: `${base}/connect` });
-      this.store.activity('settings', `Sign-ins are now accepted from ${base} (this Mac's backup relay)`);
+      this.store.activity('settings', `Sign-ins are now accepted from ${base} (this PC's backup relay)`);
     }
     this.store.activity('settings', 'Backup relay set up');
     this._changed();
     return { ok: true };
   }
 
-  // A relay on this Mac behind a Cloudflare Quick Tunnel: its address changes, so it gets no sign-in site or broker
+  // A relay on this PC behind a Cloudflare Quick Tunnel: its address changes, so it gets no sign-in site or broker
   // (devices sign in at the main relay's site, and only the connection itself goes through the tunnel).
   async workerRelayTunnelSet(local) {
     await this.workerRelay.saveTunnel(local);
@@ -866,12 +924,12 @@ export class Controller {
     const previous = this.workerRelay.base;
     await this.workerRelay.save(url);
     this._useRelayBroker(previous !== this.workerRelay.base ? previous : null);
-    // The relay serves the Perch site too: devices can sign in there (and new pairing links point there), on this
-    // Mac only. Nobody else's Mac uses it.
+    // The relay serves the Roost site too: devices can sign in there (and new pairing links point there), on this
+    // PC only. Nobody else's PC uses it.
     const base = this.workerRelay.base;
     if (base && !this.auth.siteFor(base)) {
       this.store.addSite({ origin: base, url: `${base}/connect` });
-      this.store.activity('settings', `Sign-ins are now accepted from ${base} (this Mac's relay)`);
+      this.store.activity('settings', `Sign-ins are now accepted from ${base} (this PC's relay)`);
     }
     this.store.activity('settings', replacing ? 'Worker relay replaced' : 'Worker relay for strict networks set up');
     this._changed();
@@ -908,11 +966,14 @@ export class Controller {
         case 'loginItem': case 'keepAwake': case 'backupOn': case 'paused': case 'lockOnDisconnect': case 'curtain':
         case 'autoUpdate':
           if (typeof v !== 'boolean') throw new Error(`${k} must be true or false.`);
+          if (k === 'curtain' && v && !this.curtainAvailable) {
+            throw new Error('This PC can’t keep the curtain out of the picture, so it can’t be used here. It needs Windows 10 version 2004 or later.');
+          }
           break;
         case 'macSpeakers': case 'streamVolume': {
           const top = k === 'macSpeakers' ? 1 : 1.5;
           if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > top) {
-            throw new Error(`${k === 'macSpeakers' ? 'The Mac speakers level' : 'The sent level'} must be from 0 to ${top * 100}%.`);
+            throw new Error(`${k === 'macSpeakers' ? 'The PC speakers level' : 'The sent level'} must be from 0 to ${top * 100}%.`);
           }
           patch[k] = Math.round(v * 100) / 100;
           break;
@@ -928,8 +989,8 @@ export class Controller {
           if (typeof v !== 'string' || !Object.hasOwn(QUALITY, v)) throw new Error(`Quality must be one of ${Object.keys(QUALITY).join(', ')}.`);
           break;
         case 'micOutput':
-          // '' is the Mac's own current output; otherwise one of the outputs the app listed.
-          if (typeof v !== 'string' || (v !== '' && !this.audioOutputs.some(d => d.uid === v))) throw new Error('Choose one of this Mac\'s sound outputs.');
+          // '' is the PC's own current output; otherwise one of the outputs the app listed.
+          if (typeof v !== 'string' || (v !== '' && !this.audioOutputs.some(d => d.uid === v))) throw new Error('Choose one of this PC\'s sound outputs.');
           break;
         default:
           throw new Error(`There is no setting called ${k}.`);
@@ -956,7 +1017,7 @@ export class Controller {
     }
     // The curtain can go up or down in the middle of a session.
     if ('curtain' in patch && this.active) {
-      this.app.command('session', { active: true, viewer: this.active.label, route: this.active.route, curtain: after.curtain });
+      this.app.command('session', { active: true, viewer: this.active.label, route: this.active.route, curtain: this._curtain() });
     }
     if ('loginItem' in patch) this.app.command('login-item', { on: after.loginItem });
     // Sound levels: straight to the app during a session, and to the owner's viewer so its sliders agree.
@@ -973,30 +1034,49 @@ export class Controller {
     return { ...after };
   }
 
+  // Windows has no Screen Recording or Accessibility permission (docs/WINDOWS-APP.md, "HELLO").
+  get _onWindows() { return this.appInfo?.os === 'windows'; }
+
+  // Whether the curtain goes up for the owner's viewer: chosen, and possible on this PC.
+  _curtain() { return !!this.store.settings.curtain && this.curtainAvailable; }
+
+  // "Control admin apps" (Windows): on registers a scheduled task that starts roost.exe as administrator and restarts
+  // it that way (Windows asks once); off removes it. The app answers with an 'elevation' event.
+  elevation(on) {
+    if (typeof on !== 'boolean') throw new Error('on must be true or false.');
+    if (this.appInfo && this.appInfo.os !== 'windows') throw new Error('Controlling admin apps is only needed on Windows.');
+    this.elevationState = { ...this.elevationState, error: null };
+    this.app.command('elevation', { on });
+    this._changed();
+    return { ok: true };
+  }
+
   disconnect() {
     this.active?.end('disconnected');
     this._changed();
   }
 
-  // A permission switched on in System Settings that Perch still sees as off: forget the old entry and ask again
-  // (permission-reset event), or restart Perch so macOS gives it a fresh answer.
+  // (macOS) A permission switched on in System Settings that the app still sees as off: forget the old entry and ask
+  // again (permission-reset event). Windows has no such permissions; roost.exe answers that it isn't needed.
   resetPermission(which) {
     if (which !== 'screen' && which !== 'accessibility') throw new Error('Unknown permission.');
+    if (this._onWindows) return { ok: false, error: 'Not needed on Windows.' };
     this.store.activity('settings', `${which === 'screen' ? 'Screen Recording' : 'Accessibility'} permission reset and asked for again`);
     this.app.command('reset-permission', { which });
     this._changed();
     return { ok: true };
   }
 
-  relaunch(from = 'Setup') {
-    this.store.activity('settings', this.installed ? `Perch restarted from ${from} to finish updating to ${this.installed.version}`
-      : `Perch restarted from ${from}`);
+  relaunch(from = 'the Control Center') {
+    this.store.activity('settings', this.installed ? `Roost restarted from ${from} to finish updating to ${this.installed.version}`
+      : `Roost restarted from ${from}`);
     this.app.command('relaunch', {});
     return { ok: true };
   }
 
   requestPermission(which) {
     if (which !== 'screen' && which !== 'accessibility') throw new Error('Permission must be screen or accessibility.');
+    if (this._onWindows) return; // nothing to ask for: both are always allowed there
     this.app.command('request-permission', { which });
   }
 
@@ -1011,7 +1091,7 @@ export class Controller {
     if (!CUSTOM_MAC_NAME_RE.test(clean)) {
       throw new Error('Use 4 to 40 letters or numbers, with single hyphens between words, like jordan-macbook.');
     }
-    if (clean === this.store.macName) throw new Error('That is already this Mac’s name.');
+    if (clean === this.store.macName) throw new Error('That is already this PC’s name.');
     return this._rename(clean);
   }
 
@@ -1019,7 +1099,7 @@ export class Controller {
     const hadBackup = !!this.store.config.backup.record;
     this._endSessions(s => s.route === 'backup', 'removed');
     this.store.setMacName(name);
-    this.store.activity('settings', `Mac renamed to ${name}${hadBackup ? '; the backup password was removed' : ''}`);
+    this.store.activity('settings', `PC renamed to ${name}${hadBackup ? '; the backup password was removed' : ''}`);
     await this._applyListening();
     this._changed();
     return name;
@@ -1036,7 +1116,7 @@ export class Controller {
     await this.store.reset();
     await this.auth.init();
     // The new identity needs its own connection certificate straight away: without one, new passkeys would carry no
-    // pin and one-tap sign-in would stay off until Perch was next restarted.
+    // pin and one-tap sign-in would stay off until Roost was next restarted.
     await ensureDtlsIdentity(this.store);
     this.relay.forget();
     this.workerRelay.lastError = this.workerRelay.lastOkAt = null; // Start over removed its secret with the rest
@@ -1044,7 +1124,7 @@ export class Controller {
     this._useRelayBroker(relayBefore);
     await this.signaling.setHost(this.store.hostId, this.store.sigKey);
     await this._applyListening();
-    this.store.activity('settings', 'Perch was reset: new name and keys, no paired devices');
+    this.store.activity('settings', 'Roost was reset: new name and keys, no paired devices');
     this._changed();
   }
 
@@ -1074,19 +1154,19 @@ export class Controller {
   }
 
   async installUpdate() {
-    if (!this.updater?.installUpdate) throw new Error('This copy of Perch can’t update itself.');
+    if (!this.updater?.installUpdate) throw new Error('This copy of Roost can’t update itself.');
     if (this.config.test) throw new Error('Updates are turned off in test mode.');
     const log = this.log.child('updater');
-    const started = this.updater.installUpdate({ log: m => log.info(m) });
-    // The install script quits Perch and opens the new one. Should that fail, the new copy is on disk while this one
-    // runs on: look a few times over the next minutes, so Setup and the menu bar can offer the restart soon.
+    const started = this.updater.installUpdate({ log: m => log.info(m), installDir: this.installDir });
+    // The install script quits Roost and opens the new one. Should that fail, the new copy is on disk while this one
+    // runs on: look a few times over the next minutes, so the Control Center and the tray can offer the restart soon.
     for (const s of [20, 45, 90, 180, 300]) setTimeout(() => this.refreshInstalled().catch(() => {}), s * 1000).unref?.();
     return started;
   }
 
   // --- finishing updates by itself ---
 
-  // Every half minute (main.mjs): looks at the Perch.app on disk and, once nobody has needed Perch for
+  // Every half minute (main.mjs): looks at the VERSION file of the installed copy and, once nobody has needed Roost for
   // IDLE_BEFORE_AUTO_MS, restarts into a newer copy that is already installed, or (when automatic updates are on)
   // installs a new release. Resolves to what it did: 'restart', 'update' or null.
   startMaintenance(everyMs = 30_000) {
@@ -1115,35 +1195,29 @@ export class Controller {
     return this.sessions.size > 0 || this.guests.size > 0 || !!this.auth.pairingInfo() || !!this.auth.guestInfo();
   }
 
-  // An update that replaced the files on disk but couldn't restart Perch leaves this (older) copy running, and macOS
-  // won't let a copy whose files are gone record the screen. Spot it, so Setup and the menu bar can say "restart to
-  // finish updating", and tick() can do it.
+  // An update that replaced the files on disk but couldn't restart Roost leaves this (older) copy running. Spot it
+  // (the installed VERSION file says something other than the version running), so the Control Center and the tray
+  // can say "restart to finish updating", and tick() can do it.
   async refreshInstalled() {
-    if (!this.appPath || !this.updater?.installedVersion) return this.installed;
-    const v = await this.updater.installedVersion(this.appPath);
+    if (!this.installDir || !this.updater?.installedVersion) return this.installed;
+    const v = await this.updater.installedVersion(this.installDir);
     if (v === null) return this.installed; // mid-install, or unreadable: keep what was known
     const running = this.hv;
     const next = v !== running ? v : null;
-    if (next !== (this.installed?.version ?? null) || (next && this.installed.sameSigner === false)) {
-      // Signed like this one? Screen Recording and Accessibility belong to the signer: a copy signed otherwise needs
-      // them given again, at the Mac.
-      const sameSigner = next && this.signer ? (await this.updater.signerOf?.(this.appPath)) === this.signer : null;
+    if (next !== (this.installed?.version ?? null)) {
       const was = this.installed;
-      this.installed = next ? { version: next, sameSigner } : null;
-      if (next && was?.version !== next) this.log.info(`Perch ${next} is installed but ${running} is running: restarting finishes the update`);
-      if (was?.version !== this.installed?.version || was?.sameSigner !== this.installed?.sameSigner) this._changed();
+      this.installed = next ? { version: next } : null;
+      if (next) this.log.info(`Roost ${next} is installed but ${running} is running: restarting finishes the update`);
+      if (was?.version !== this.installed?.version) this._changed();
     }
     return this.installed;
   }
 
   async _autoRestart() {
-    const { version, sameSigner } = this.installed;
-    // Only into a copy signed like this one, which keeps Screen Recording and Accessibility (they can't be given
-    // back from afar). Setup and the menu bar still offer the restart either way.
-    if (sameSigner !== true) return null;
+    const { version } = this.installed;
     if (this.store.autoTriedRecently('restart', version, AUTO_RESTART_RETRY_MS, this.now())) return null;
     this.store.noteAutoTry('restart', version, this.now());
-    this.store.activity('settings', `Perch restarted by itself to finish updating to ${version} (nobody was connected)`);
+    this.store.activity('settings', `Roost restarted by itself to finish updating to ${version} (nobody was connected)`);
     this.log.info(`restarting into ${version}`);
     this.app.command('relaunch', {});
     return 'restart';
@@ -1153,13 +1227,13 @@ export class Controller {
     if (!this.updater?.installUpdate || this.config.test) return null;
     if (this.store.autoTriedRecently('update', version, AUTO_UPDATE_RETRY_MS, this.now())) return null;
     this.store.noteAutoTry('update', version, this.now());
-    this.store.activity('settings', `Updating by itself to Perch ${version} (nobody was connected)`);
+    this.store.activity('settings', `Updating by itself to Roost ${version} (nobody was connected)`);
     await this.installUpdate();
     return 'update';
   }
 
-  // Before 0.3.2 one workers.dev relay was built in as a sign-in site for every Mac. Since then a Mac's own relay
-  // Worker becomes a sign-in site of that Mac only, when it is saved; a relay saved before that would stop accepting
+  // Before 0.3.2 one workers.dev relay was built in as a sign-in site for every PC. Since then a PC's own relay
+  // Worker becomes a sign-in site of that PC only, when it is saved; a relay saved before that would stop accepting
   // sign-ins after the update (and its devices paired there with it), so it is added here, once. If the owner then
   // removes it in Setup, it stays removed.
   _keepOwnRelaySite() {
@@ -1168,7 +1242,7 @@ export class Controller {
     const base = this.workerRelay.base;
     if (base && !this.auth.siteFor(base)) {
       s.addSite({ origin: base, url: `${base}/connect` });
-      s.activity('settings', `Sign-ins are still accepted from ${base} (this Mac's relay)`);
+      s.activity('settings', `Sign-ins are still accepted from ${base} (this PC's relay)`);
     }
     s.config.ownRelaySiteChecked = true;
     s.save();

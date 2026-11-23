@@ -121,7 +121,7 @@ export class FakeApp extends EventEmitter {
     child.stderr.on('data', d => {
       this.log += d;
       if (this.log.length > 4_000_000) this.log = this.log.slice(-2_000_000);
-      if (process.env.PERCH_TEST_ECHO_LOG) process.stderr.write(d);
+      if (process.env.ROOST_TEST_ECHO_LOG) process.stderr.write(d);
     });
     child.stdin.on('error', () => {});
     const rpc = child.stdio[3];
@@ -148,8 +148,11 @@ export class FakeApp extends EventEmitter {
 
   hello(extra = {}) {
     this._write(encodeJson(T.HELLO, {
-      app: 'Perch', version: '1.2.3', ipc: 1, macos: '15.0.0', synthetic: true,
-      permissions: this.permissions, displays: this.displays, loginItem: { on: false, status: 'not-found' }, ...extra,
+      // What roost.exe says (docs/WINDOWS-APP.md, "HELLO").
+      app: 'Roost', version: '1.2.3', ipc: 1, os: 'windows', osVersion: '10.0.22631', arch: 'x64', synthetic: true,
+      permissions: { elevated: false, ...this.permissions }, displays: this.displays,
+      loginItem: { on: false, status: 'not-found' },
+      features: { curtain: true, encoder: 'OpenH264', elevatedTask: false }, ...extra,
     }));
     this.event({ e: 'lock', locked: false });
   }
@@ -314,21 +317,21 @@ export class FakeApp extends EventEmitter {
   }
 }
 
-// Starts a host in test mode. `entry` may point at the bundle (dist/perch-host.mjs) instead of src/main.mjs.
+// Starts a host in test mode. `entry` may point at the bundle (dist/roost-host.mjs) instead of src/main.mjs.
 export async function startHost({
-  broker, home = null, entry = process.env.PERCH_TEST_HOST_ENTRY || MAIN, origin = TEST_ORIGIN, rpId = TEST_RP_ID,
+  broker, home = null, entry = process.env.ROOST_TEST_HOST_ENTRY || MAIN, origin = TEST_ORIGIN, rpId = TEST_RP_ID,
   site = TEST_SITE, env = {}, streamAlways = false, hello = true,
   permissions = { screen: true, accessibility: true }, displays = DISPLAYS, setupPort = '0', online = true,
 } = {}) {
   const ownHome = !home;
-  home ??= mkdtempSync(join(tmpdir(), 'perch-host-'));
+  home ??= mkdtempSync(join(tmpdir(), 'roost-host-'));
   const child = spawn(process.execPath, [entry], {
     stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
     env: {
       PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
-      PERCH_TEST: '1', PERCH_HOME: home, PERCH_SECRETS: 'file', PERCH_BROKERS: broker, PERCH_ICE: 'none',
-      PERCH_TEST_ORIGIN: origin, PERCH_RP_ID: rpId, PERCH_SITE: site, PERCH_SETUP_PORT: setupPort,
-      PERCH_TEST_RPC_FD: '3', PERCH_LOG: 'debug', ...env,
+      ROOST_TEST: '1', ROOST_HOME: home, ROOST_SECRETS: 'file', ROOST_BROKERS: broker, ROOST_ICE: 'none',
+      ROOST_TEST_ORIGIN: origin, ROOST_RP_ID: rpId, ROOST_SITE: site, ROOST_SETUP_PORT: setupPort,
+      ROOST_TEST_RPC_FD: '3', ROOST_LOG: 'debug', ...env,
     },
   });
   const app = new FakeApp({ child, home, ownHome, streamAlways, permissions, displays });

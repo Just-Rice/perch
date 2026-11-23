@@ -12,11 +12,11 @@ import { encodeJson, T } from '../src/ipc.mjs';
 const MAIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'main.mjs');
 
 function startBare() {
-  const home = mkdtempSync(join(tmpdir(), 'perch-life-'));
+  const home = mkdtempSync(join(tmpdir(), 'roost-life-'));
   const child = spawn(process.execPath, [MAIN], {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, PERCH_TEST: '1', PERCH_HOME: home,
-      PERCH_SECRETS: 'file', PERCH_BROKERS: 'ws://127.0.0.1:1/mqtt', PERCH_ICE: 'none', PERCH_LOG: 'debug' },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, ROOST_TEST: '1', ROOST_HOME: home,
+      ROOST_SECRETS: 'file', ROOST_BROKERS: 'ws://127.0.0.1:1/mqtt', ROOST_ICE: 'none', ROOST_LOG: 'debug' },
   });
   child.stdout.on('data', () => {});
   const exited = new Promise(r => child.once('exit', (code, signal) => r({ code, signal })));

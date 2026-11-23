@@ -1,7 +1,7 @@
-// The Mac's side of rendezvous: answering viewers' hellos with a WebRTC offer (or a refusal) and taking their
+// The PC's side of rendezvous: answering viewers' hellos with a WebRTC offer (or a refusal) and taking their
 // answers. See docs/PROTOCOL.md, "Rendezvous".
 //
-// The host topic (key from sigKey) is always listened to; the name topic (key from the Mac name) only while backup
+// The host topic (key from sigKey) is always listened to; the name topic (key from the PC name) only while backup
 // sign-in is on. Anyone can publish to a public broker, and the name key is guessable, so nothing here is trusted:
 // hellos are rate limited, at most a few sign-ins may be in progress, and the real checks happen later, over the
 // WebRTC connection itself (src/session.mjs).
@@ -136,7 +136,7 @@ export class Signaling {
       return;
     }
     const t = this.now();
-    // Each topic has its own budget: the name topic only needs the Mac's name, so a stranger flooding it must not use
+    // Each topic has its own budget: the name topic only needs the PC's name, so a stranger flooding it must not use
     // up what the owner's passkey devices (host topic, which needs the rendezvous key) rely on.
     const recent = (this.recentByKind[kind] ??= []).filter(x => t - x < 60000);
     this.recentByKind[kind] = recent;
@@ -190,7 +190,7 @@ export class Signaling {
     if (this.hub.relay?.active || ws) {
       this.log?.info(`offer ${sid.slice(0, 6)}: ${iceServers.length ? 'with TURN logins' : 'no TURN logins'}${ws ? ', with the Worker relay' : ''}`);
     }
-    // caps: what this Mac can do beyond protocol 1 ("quick" = one-tap passkey sign-in, see bind.js).
+    // caps: what this PC can do beyond protocol 1 ("quick" = one-tap passkey sign-in, see bind.js).
     entry.offer = { t: 'offer', pv: PROTO, minPv: MIN_PEER_PROTO, hv: this.hub.hv, sdp, ...(this.hub.caps?.length ? { caps: this.hub.caps } : {}),
       ...(iceServers.length ? { iceServers } : {}), ...(ws ? { ws } : {}), ...(early?.res ? { opaque2: early.res } : {}) };
     this.stats.offers++;

@@ -107,7 +107,8 @@ test('logging: levels, tags and errors, to stderr and a private file', () => {
     assert.match(stderr.lines[2], /ERROR \[rtc\] boom Error: bad thing/);
     const file = readFileSync(join(home, 'roost.log'), 'utf8');
     assert.equal(file, stderr.lines.join(''));
-    assert.equal(statSync(join(home, 'roost.log')).mode & 0o777, 0o600);
+    // Windows has no POSIX modes: there the files are private through %LOCALAPPDATA%'s per-user permissions.
+    if (process.platform !== 'win32') assert.equal(statSync(join(home, 'roost.log')).mode & 0o777, 0o600);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

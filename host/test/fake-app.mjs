@@ -246,7 +246,7 @@ export class FakeApp extends EventEmitter {
   call(method, ...args) {
     const id = ++this.rpcId;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.rpcWaiting.delete(id); reject(new Error(`no answer to ${method}`)); }, 20000);
+      const timer = setTimeout(() => { this.rpcWaiting.delete(id); reject(new Error(`no answer to ${method}; the host's log ends:\n${this.log.slice(-4000)}`)); }, 20000);
       this.rpcWaiting.set(id, {
         resolve: v => { clearTimeout(timer); resolve(v); },
         reject: e => { clearTimeout(timer); reject(e); },

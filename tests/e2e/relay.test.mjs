@@ -21,7 +21,8 @@ import { MqttClient } from '../../site/js/shared/mqtt.js';
 import { relayBroker } from '../../site/js/shared/wsrelay.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
-const WRANGLER = join(ROOT, 'relay/node_modules/.bin/wrangler');
+// wrangler's own entry point, run with this Node.js: the .bin shim is a shell script, which Windows can't spawn.
+const WRANGLER = join(ROOT, 'relay/node_modules/wrangler/bin/wrangler.js');
 // PERCH_E2E_RELAY=https://<a fresh, unclaimed deploy>.workers.dev runs these against a relay on Cloudflare itself.
 const DEPLOYED = process.env.PERCH_E2E_RELAY || null;
 // PERCH_E2E_RELAY_NODE=1 runs them against the plain Node.js relay (relay/node) instead of `wrangler dev`.
@@ -46,7 +47,7 @@ async function startRelay() {
   const proc = NODE_RELAY
     ? spawn(process.execPath, [join(ROOT, 'relay/node/server.mjs')], { stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', RELAY_DATA: state, RELAY_SECRET: '' } })
-    : spawn(WRANGLER, ['dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', state, '--log-level', 'warn'],
+    : spawn(process.execPath, [WRANGLER, 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', state, '--log-level', 'warn'],
     { cwd: join(ROOT, 'relay'), stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
   let output = '';
   proc.stdout.on('data', d => { output += d; });

@@ -18,8 +18,10 @@ test('a new store makes an identity and keeps it across reopening', async () => 
   assert.equal(a.sigKey.length, 32);
   assert.equal(a.userHandle.length, 48);
   assert.deepEqual(a.userHandle.subarray(0, 16), a.hostId);
-  assert.equal(statSync(join(home, 'config.json')).mode & 0o777, 0o600);
-  assert.equal(statSync(join(home, 'secrets.json')).mode & 0o777, 0o600);
+  // Windows has no POSIX modes: there the files are private through %LOCALAPPDATA%'s per-user permissions.
+  if (process.platform !== 'win32') assert.equal(statSync(join(home, 'config.json')).mode & 0o777, 0o600);
+  // Windows has no POSIX modes: there the files are private through %LOCALAPPDATA%'s per-user permissions.
+  if (process.platform !== 'win32') assert.equal(statSync(join(home, 'secrets.json')).mode & 0o777, 0o600);
   assert.ok(!readFileSync(join(home, 'config.json'), 'utf8').includes(a.secrets.sigKey), 'no secrets in config.json');
   const b = await Store.open({ home, secrets: 'file' });
   assert.equal(b.macName, a.macName);

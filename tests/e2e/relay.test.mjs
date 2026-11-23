@@ -23,10 +23,10 @@ import { relayBroker } from '../../site/js/shared/wsrelay.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
 // wrangler's own entry point, run with this Node.js: the .bin shim is a shell script, which Windows can't spawn.
 const WRANGLER = join(ROOT, 'relay/node_modules/wrangler/bin/wrangler.js');
-// PERCH_E2E_RELAY=https://<a fresh, unclaimed deploy>.workers.dev runs these against a relay on Cloudflare itself.
-const DEPLOYED = process.env.PERCH_E2E_RELAY || null;
-// PERCH_E2E_RELAY_NODE=1 runs them against the plain Node.js relay (relay/node) instead of `wrangler dev`.
-const NODE_RELAY = !!process.env.PERCH_E2E_RELAY_NODE;
+// ROOST_E2E_RELAY=https://<a fresh, unclaimed deploy>.workers.dev runs these against a relay on Cloudflare itself.
+const DEPLOYED = process.env.ROOST_E2E_RELAY || null;
+// ROOST_E2E_RELAY_NODE=1 runs them against the plain Node.js relay (relay/node) instead of `wrangler dev`.
+const NODE_RELAY = !!process.env.ROOST_E2E_RELAY_NODE;
 const skip = DEPLOYED || (NODE_RELAY ? existsSync(join(ROOT, 'relay/node/node_modules/ws')) : existsSync(WRANGLER)) ? false
   : `${NODE_RELAY ? 'relay/node' : 'relay'}/node_modules is missing: run \`npm ci\` there first`;
 
@@ -209,24 +209,24 @@ test('the relay is a rendezvous broker: Perch’s own MQTT client meets there, o
   await b.connect();
   const got = [];
   b.onmessage = (topic, payload) => got.push([topic, new TextDecoder().decode(payload)]);
-  await b.subscribe('perch/v1/h/test-topic');
-  a.publish('perch/v1/h/test-topic', 'sealed');
-  a.publish('perch/v1/h/other-topic', 'not for b');
+  await b.subscribe('roost/v1/h/test-topic');
+  a.publish('roost/v1/h/test-topic', 'sealed');
+  a.publish('roost/v1/h/other-topic', 'not for b');
   for (let i = 0; i < 50 && !got.length; i++) await sleep(100);
-  assert.deepEqual(got, [['perch/v1/h/test-topic', 'sealed']]);
+  assert.deepEqual(got, [['roost/v1/h/test-topic', 'sealed']]);
   // No wildcards (nobody can listen to everything) and nothing outside Perch's topics.
   const c = new MqttClient(url);
   await c.connect();
   const sniffed = [];
   c.onmessage = (topic) => sniffed.push(topic);
   c.subscribe('#').catch(() => {});
-  c.subscribe('perch/v1/#').catch(() => {});
+  c.subscribe('roost/v1/#').catch(() => {});
   await sleep(300);
-  a.publish('perch/v1/h/test-topic', 'sealed again');
+  a.publish('roost/v1/h/test-topic', 'sealed again');
   a.publish('other/topic', 'x');
   await sleep(700);
   assert.deepEqual(sniffed, [], 'a wildcard subscriber hears nothing');
-  assert.equal(got.length, 2, 'b got the second message and nothing outside perch/v1/');
+  assert.equal(got.length, 2, 'b got the second message and nothing outside roost/v1/');
   c.close();
   a.close();
   b.close();
@@ -240,7 +240,7 @@ test('where only the relay gets through: a page it serves pairs and signs in, fi
   const origin = DEPLOYED ? relayUrl : relayUrl.replace('127.0.0.1', 'localhost');
   const page0 = await fetch(`${origin}/connect.html`);
   assert.equal(page0.status, 200);
-  assert.match(await page0.text(), /Perch/);
+  assert.match(await page0.text(), /Roost/);
   // Locally both sites are on localhost, so the passkey from the tests above would count as this site's too ("already
   // paired"). On the real thing they are different addresses; forget the earlier device to model that.
   if (!DEPLOYED) await app.call('devicesRemoveAll');

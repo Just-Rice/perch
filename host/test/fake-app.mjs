@@ -6,6 +6,7 @@
 // The host runs in test mode against the given local broker, with its own temporary home, file secrets and no STUN.
 // A fourth pipe (fd 3) carries the test control channel (src/test-rpc.mjs), standing in for the Setup page.
 import { spawn } from 'node:child_process';
+import { createServer as createNetServer } from 'node:net';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -96,7 +97,7 @@ class Player {
 // --- the fake app ---
 
 export class FakeApp extends EventEmitter {
-  constructor({ child, home, ownHome, streamAlways, permissions, displays }) {
+  constructor({ child, home, ownHome, streamAlways, permissions, displays, rpcSocket }) {
     super();
     Object.assign(this, { child, home, ownHome, streamAlways, permissions, displays });
     this.commands = [];
@@ -124,7 +125,11 @@ export class FakeApp extends EventEmitter {
       if (process.env.ROOST_TEST_ECHO_LOG) process.stderr.write(d);
     });
     child.stdin.on('error', () => {});
-    const rpc = child.stdio[3];
+    // The control channel: the host connects to the test's localhost port (rpcSocket resolves when it has).
+    this.rpcReady = rpcSocket.then(rpc => { this.rpc = rpc; this._listenRpc(rpc); return rpc; });
+  }
+
+  _listenRpc(rpc) {
     rpc.setEncoding('utf8');
     rpc.on('data', d => {
       this.rpcBuf += d;
@@ -243,7 +248,11 @@ export class FakeApp extends EventEmitter {
   }
 
   // Calls a controller method in the host (src/test-rpc.mjs).
-  call(method, ...args) {
+  async call(method, ...args) {
+    // A host that died before connecting must fail the test, not hang it.
+    await Promise.race([this.rpcReady, this.exitPromise.then(e => {
+      throw new Error(`host exited (${JSON.stringify(e)}) before ${method}\n${this.log.slice(-3000)}`);
+    })]);
     const id = ++this.rpcId;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => { this.rpcWaiting.delete(id); reject(new Error(`no answer to ${method}; the host's log ends:\n${this.log.slice(-4000)}`)); }, 20000);
@@ -251,7 +260,7 @@ export class FakeApp extends EventEmitter {
         resolve: v => { clearTimeout(timer); resolve(v); },
         reject: e => { clearTimeout(timer); reject(e); },
       });
-      this.child.stdio[3].write(JSON.stringify({ id, method, args }) + '\n');
+      this.rpc.write(JSON.stringify({ id, method, args }) + '\n');
     });
   }
 
@@ -311,7 +320,7 @@ export class FakeApp extends EventEmitter {
         await this.exitPromise;
       }
     }
-    try { this.child.stdio[3].destroy(); } catch {}
+    try { this.rpc?.destroy(); this.rpcServer?.close(); } catch {}
     if (this.ownHome) rmSync(this.home, { recursive: true, force: true });
     return this.exited;
   }
@@ -325,16 +334,25 @@ export async function startHost({
 } = {}) {
   const ownHome = !home;
   home ??= mkdtempSync(join(tmpdir(), 'roost-host-'));
+  // The test control channel: a localhost port the host connects to (an extra pipe works on macOS and Linux, not
+  // reliably on Windows).
+  const rpcServer = createNetServer();
+  const rpcSocket = new Promise(r => rpcServer.once('connection', s => { rpcServer.close(); r(s); }));
+  await new Promise(r => rpcServer.listen(0, '127.0.0.1', r));
   const child = spawn(process.execPath, [entry], {
-    stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: {
       PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR,
+      // Windows needs these for sockets and temporary files.
+      ...(process.platform === 'win32' ? { SystemRoot: process.env.SystemRoot, TEMP: process.env.TEMP, TMP: process.env.TMP,
+        USERPROFILE: process.env.USERPROFILE, LOCALAPPDATA: process.env.LOCALAPPDATA } : {}),
       ROOST_TEST: '1', ROOST_HOME: home, ROOST_SECRETS: 'file', ROOST_BROKERS: broker, ROOST_ICE: 'none',
       ROOST_TEST_ORIGIN: origin, ROOST_RP_ID: rpId, ROOST_SITE: site, ROOST_SETUP_PORT: setupPort,
-      ROOST_TEST_RPC_FD: '3', ROOST_LOG: 'debug', ...env,
+      ROOST_TEST_RPC_PORT: String(rpcServer.address().port), ROOST_LOG: 'debug', ...env,
     },
   });
-  const app = new FakeApp({ child, home, ownHome, streamAlways, permissions, displays });
+  const app = new FakeApp({ child, home, ownHome, streamAlways, permissions, displays, rpcSocket });
+  app.rpcServer = rpcServer;
   if (streamAlways) app.player.start();
   if (hello) app.hello();
   // The control channel answers once the host is fully up. HELLO travels on another pipe, so on a slow machine the

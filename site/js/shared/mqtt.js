@@ -64,7 +64,7 @@ export class MqttClient {
       this.ws = ws;
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => {
-        const clientId = 'perch-' + toHex(randomBytes(8));
+        const clientId = 'roost-' + toHex(randomBytes(8));
         // Connect flags: clean session (0x02), plus username (0x80) and password (0x40) when given.
         const flags = 0x02 | (this.username != null ? 0x80 : 0) | (this.password != null ? 0x40 : 0);
         const body = concat(str('MQTT'), Uint8Array.of(4, flags), u16(this.keepalive), str(clientId),

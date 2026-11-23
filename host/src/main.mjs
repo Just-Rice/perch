@@ -174,9 +174,9 @@ async function main() {
     }
   }
 
-  if (config.test && config.testRpcFd !== null) {
+  if (config.test && (config.testRpcFd !== null || config.testRpcPort !== null)) {
     const { startTestRpc } = await import('./test-rpc.mjs');
-    startTestRpc(config.testRpcFd, controller, log.child('test'), {
+    startTestRpc(config.testRpcPort !== null ? { port: config.testRpcPort } : config.testRpcFd, controller, log.child('test'), {
       advanceClock: ms => { clockOffset += Math.max(0, Number(ms) || 0); return clockOffset; },
       setAuthTimeout: ms => { controller.authTimeoutMs = Math.max(100, Number(ms) || 0); return controller.authTimeoutMs; },
     });

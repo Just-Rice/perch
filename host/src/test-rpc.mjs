@@ -13,8 +13,9 @@ const METHODS = new Set([
   'requestPermission', 'resetPermission', 'newMacName', 'customMacName', 'reset', 'checkForUpdates', 'testInputEcho', 'testState', 'debug',
 ]);
 
-export function startTestRpc(fd, controller, log, extras = {}) {
-  const sock = new net.Socket({ fd, readable: true, writable: true });
+// `where` is a file descriptor number, or {port}: a localhost port the test is listening on.
+export function startTestRpc(where, controller, log, extras = {}) {
+  const sock = typeof where === 'object' ? net.connect(where.port, '127.0.0.1') : new net.Socket({ fd: where, readable: true, writable: true });
   sock.setEncoding('utf8');
   let buf = '';
   const reply = obj => { try { sock.write(JSON.stringify(obj) + '\n'); } catch {} };
@@ -46,6 +47,6 @@ export function startTestRpc(fd, controller, log, extras = {}) {
   sock.on('error', e => log.debug(`test rpc: ${e.message}`));
   // The test closing its end must not keep the host alive or crash it.
   sock.unref();
-  log.info(`test control channel on fd ${fd}`);
+  log.info(`test control channel on ${typeof where === 'object' ? `port ${where.port}` : `fd ${where}`}`);
   return sock;
 }

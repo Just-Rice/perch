@@ -74,9 +74,18 @@ export function loadConfig(env = process.env, platform = process.platform) {
     iceServers: iceNone ? [] : ICE_SERVERS,
     iceLoopback: iceNone,
     logLevel: ['debug', 'info', 'warn', 'error'].includes(env.ROOST_LOG) ? env.ROOST_LOG : (test ? 'debug' : 'info'),
-    // Host tests drive the controller over this extra file descriptor (src/test-rpc.mjs).
+    // Host tests drive the controller over an extra file descriptor, or (on every system, and the only way that
+    // works reliably on Windows) a localhost TCP port the test listens on (src/test-rpc.mjs).
     testRpcFd: testRpcFd(t('ROOST_TEST_RPC_FD')),
+    testRpcPort: testRpcPort(t('ROOST_TEST_RPC_PORT')),
   });
+}
+
+function testRpcPort(value) {
+  if (value === undefined) return null;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('ROOST_TEST_RPC_PORT must be a port number');
+  return port;
 }
 
 function testRpcFd(value) {

@@ -32,7 +32,7 @@ pub fn source(d: &DisplayInfo) -> Result<Box<dyn VideoSource>, String> {
 /// to "Default"; an elevated Roost can also see some it otherwise couldn't).
 fn follow_input_desktop() {
     unsafe {
-        if let Ok(d) = OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_ACCESS_FLAGS(0x0100 /* GENERIC_ALL-ish: DESKTOP_READOBJECTS */ | 0x0001)) {
+        if let Ok(d) = OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_ACCESS_FLAGS(0x1000_0000) /* GENERIC_ALL, which SetThreadDesktop needs */) {
             let _ = SetThreadDesktop(d);
             let _ = CloseDesktop(d);
         }

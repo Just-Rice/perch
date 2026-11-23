@@ -211,9 +211,16 @@ unsafe extern "system" fn main_proc(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -
 
 // ---- the tray icon -----------------------------------------------------------------------------------------------
 
+thread_local! { static ICONS: RefCell<Vec<(i32, u8, HICON)>> = const { RefCell::new(vec![]) }; }
+
+/// The icon at a size, made once and kept (the tray is updated often; icons aren't free).
 fn make_icon(size: i32, v: Variant) -> HICON {
+    let key = v as u8;
+    if let Some(h) = ICONS.with(|c| c.borrow().iter().find(|(s, k, _)| *s == size && *k == key).map(|(_, _, h)| *h)) { return h; }
     let png = icon::png(size as usize, v);
-    unsafe { CreateIconFromResourceEx(&png, true, 0x0003_0000, size, size, LR_DEFAULTCOLOR).unwrap_or_default() }
+    let h = unsafe { CreateIconFromResourceEx(&png, true, 0x0003_0000, size, size, LR_DEFAULTCOLOR).unwrap_or_default() };
+    ICONS.with(|c| c.borrow_mut().push((size, key, h)));
+    h
 }
 
 fn tray_size() -> i32 { unsafe { GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForSystem()).max(16) } }
@@ -527,7 +534,7 @@ fn wide(s: &str) -> Vec<u16> { s.encode_utf16().collect() }
 fn text_format(dw: &IDWriteFactory, size: f32, weight: DWRITE_FONT_WEIGHT, align: DWRITE_TEXT_ALIGNMENT) -> Option<IDWriteTextFormat> {
     let family = if super::build_number() >= 22000 { w!("Segoe UI Variable Text") } else { w!("Segoe UI") };
     unsafe {
-        let f = dw.CreateTextFormat(family, None, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, w!("")).ok()?;
+        let f = dw.CreateTextFormat(family, None, weight, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, size, w!("en-us")).ok()?;
         let _ = f.SetTextAlignment(align);
         let _ = f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         let _ = f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);

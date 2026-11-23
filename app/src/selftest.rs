@@ -3,10 +3,10 @@
 use crate::media::{h264::H264, opus::AudioPipeline, synthetic, yuv::I420};
 
 pub fn run() -> i32 {
-    let mut failed = 0;
-    let mut check = |name: &str, r: Result<String, String>| match r {
+    let failed = std::cell::Cell::new(0);
+    let check = |name: &str, r: Result<String, String>| match r {
         Ok(detail) => println!("ok   {name}{}", if detail.is_empty() { String::new() } else { format!(" ({detail})") }),
-        Err(e) => { failed += 1; println!("FAIL {name}: {e}"); }
+        Err(e) => { failed.set(failed.get() + 1); println!("FAIL {name}: {e}"); }
     };
     check("key map covers every required key", {
         let missing: Vec<String> = crate::keymap::required().into_iter().filter(|c| crate::keymap::lookup(c).is_none()).collect();
@@ -30,8 +30,9 @@ pub fn run() -> i32 {
     })());
     // CI machines run without a desktop or sound card: there the PC-specific checks are reported, not counted.
     let lenient = std::env::var("ROOST_SELFTEST_LENIENT").as_deref() == Ok("1");
-    let core_failed = failed;
+    let core_failed = failed.get();
     for (name, r) in crate::sys::selftest() { check(&name, r); }
+    let failed = failed.get();
     let counted = if lenient { core_failed } else { failed };
     if counted == 0 { println!("all checks passed{}", if lenient && failed > core_failed { " (PC-specific failures ignored)" } else { "" }); 0 } else { 1 }
 }

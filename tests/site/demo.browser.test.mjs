@@ -1,0 +1,1004 @@
+// Demo mode (connect.html?demo=1 on localhost): the viewer with a canvas test picture and no network. Real mouse,
+// touch and keyboard events (CDP Input.*) must turn into exactly the protocol's input messages.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { startStack, openPage, DESKTOP, PHONE, PHONE_LANDSCAPE, UA, sleep } from './lib/browser.mjs';
+import { toDisplay, followPan } from '../../site/js/viewer/coords.js';
+
+let stack;
+test.before(async () => { stack = await startStack({ broker: false }); });
+test.after(async () => { await stack?.close(); });
+test.afterEach(async () => { await stack?.closePages(); });
+
+const demoUrl = (params = {}) => `${stack.base}connect.html?${new URLSearchParams({ demo: '1', ...params })}`;
+
+// Messages the viewer sent since `from` (an index into the demo's list).
+const messages = (page, from = 0) => page.eval(`window.__perch.demoMessages.slice(${from})`);
+const count = page => page.eval('window.__perch.demoMessages.length');
+const without = (list, ...types) => list.filter(m => !types.includes(m.t));
+
+async function geometry(page) {
+  return page.eval(`(() => { const b = document.getElementById('surface').getBoundingClientRect(); const v = document.getElementById('video');
+    return { box: { left: b.left, top: b.top, width: b.width, height: b.height }, vw: v.videoWidth, vh: v.videoHeight,
+      view: window.__perch.viewer.view }; })()`);
+}
+
+// Where the page should say (x, y) is on the Mac, from its own geometry: an independent check of the mapping.
+async function expected(page, x, y) {
+  const g = await geometry(page);
+  return toDisplay(x, y, g.box, g.vw, g.vh, g.view);
+}
+
+// The tests of where things land on the Mac measure against the whole window: let the bar float over the picture.
+async function floatingBar(page) {
+  await page.eval(`(() => { const v = window.__perch.viewer; v.prefs.values.tbAutoHide = true; v._placeToolbar(); })()`);
+}
+
+async function ready(page) {
+  await page.waitFor(`(() => { const v = document.getElementById('video'); return !document.getElementById('viewer').hidden && v.videoWidth > 0 && v.readyState >= 2; })()`,
+    { what: 'the demo picture' });
+  const t0 = await page.eval(`document.getElementById('video').currentTime`);
+  await sleep(400);
+  assert.ok(await page.eval(`document.getElementById('video').currentTime`) > t0, 'the picture is moving');
+}
+
+test('desktop: the viewer shows the test picture, with the toolbar', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  assert.equal(await page.eval(`document.getElementById('app').hidden`), true, 'sign-in screens are gone');
+  assert.equal(await page.eval(`getComputedStyle(document.getElementById('video')).objectFit`), 'contain');
+  assert.equal(await page.eval(`document.getElementById('viewer').classList.contains('tb-on')`), true);
+  assert.equal(await page.text('#tbName'), 'demo-mac-0000');
+  assert.equal(await page.eval(`document.getElementById('tbDisplayWrap').hidden`), false, 'two displays: a picker');
+  assert.equal(await page.eval(`document.getElementById('tbKeyboard').hidden`), true, 'no keyboard button on a desktop');
+  assert.equal(await page.eval(`document.getElementById('kbdFab').hidden`), true, 'no floating keyboard button on a desktop');
+  assert.equal(await page.eval(`document.getElementById('swapWrap').hidden`), true, 'this Chrome says Mac: no Ctrl/⌘ swap');
+  await page.shot('viewer-demo-toolbar-desktop');
+  // By default the toolbar stays put at the top, and the picture sits below it rather than under it.
+  const tbBottom = await page.eval(`document.getElementById('toolbar').getBoundingClientRect().bottom`);
+  const surfTop = await page.eval(`document.getElementById('surface').getBoundingClientRect().top`);
+  assert.ok(Math.abs(tbBottom - surfTop) < 1.5, `picture starts below the bar (${tbBottom} vs ${surfTop})`);
+  // Chosen to hide itself, the toolbar tucks itself away, and comes back when the mouse touches the very top.
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.click('#optAutoHide');
+  await page.click('#tbMore');
+  assert.equal(await page.eval(`document.getElementById('surface').getBoundingClientRect().top`), 0, 'the picture fills the window again');
+  await page.eval(`document.getElementById('surface').focus()`); // as after a click on the picture
+  await page.mouse('mouseMoved', 640, 500);
+  await page.waitFor(`!document.getElementById('viewer').classList.contains('tb-on')`, { timeoutMs: 8000, what: 'toolbar hidden' });
+  await page.shot('viewer-demo-clean-desktop');
+  await page.mouse('mouseMoved', 640, 10);
+  await sleep(150);
+  assert.equal(await page.eval(`document.getElementById('viewer').classList.contains('tb-on')`), false, 'near the top is not enough');
+  await page.mouse('mouseMoved', 640, 1);
+  await page.waitFor(`document.getElementById('viewer').classList.contains('tb-on')`, { what: 'toolbar back' });
+  await page.eval(`localStorage.removeItem('perch.prefs.v1')`); // the next tests start from the usual
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('desktop: capturing the mouse, as games do: the Mac\u2019s pointer moves by how far the mouse goes', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  await floatingBar(page);
+  assert.equal(await page.eval(`document.getElementById('tbCapture').hidden`), false);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  // Start from a known place: the middle of the Mac's screen.
+  const mid = await page.eval(`(() => { const r = document.getElementById('surface').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: mid.x, y: mid.y });
+  await page.click('#tbCapture');
+  const real = await page.waitFor(`document.pointerLockElement === document.getElementById('surface')`, { what: 'pointer lock', timeoutMs: 3000 })
+    .then(() => true, () => false);
+  if (!real) {
+    // Headless Chrome may refuse pointer lock: play the browser's part (as it would report a lock).
+    await page.eval(`(() => { const s = document.getElementById('surface');
+      Object.defineProperty(document, 'pointerLockElement', { configurable: true, get: () => s });
+      document.dispatchEvent(new Event('pointerlockchange')); })()`);
+  }
+  // The browser announces the lock a moment after granting it.
+  await page.waitFor(`document.getElementById('viewer').classList.contains('captured')`, { what: 'the page noticing the capture' });
+  assert.equal(await page.eval(`document.getElementById('tbCapture').getAttribute('aria-pressed')`), 'true');
+  assert.ok(await page.eval(`!!document.querySelector('#banners [data-id="capture"]')`), 'the "Press Esc to let go" note');
+  const n = await count(page);
+  // Movement only: the page's pointer stays put while the Mac's moves. A tenth of the picture to the right, then a
+  // long way up past the top edge, where the position stops but the movement still counts.
+  const shown = await page.eval(`window.__perch.viewer.pointer.shownSize()`);
+  const move = (dx, dy) => page.eval(`document.getElementById('surface').dispatchEvent(new PointerEvent('pointermove',
+    { pointerType: 'mouse', bubbles: true, clientX: ${mid.x}, clientY: ${mid.y}, movementX: ${dx}, movementY: ${dy} }))`);
+  await move(shown[0] / 10, 0);
+  await sleep(80);
+  await move(0, -shown[1]);
+  await sleep(80);
+  await page.eval(`document.getElementById('surface').dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'mouse', bubbles: true, button: 0, buttons: 1, clientX: 5, clientY: 5 }))`);
+  await page.eval(`document.getElementById('surface').dispatchEvent(new PointerEvent('pointerup', { pointerType: 'mouse', bubbles: true, button: 0, clientX: 5, clientY: 5 }))`);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'the click' });
+  const sent = (await messages(page, n)).filter(m => m.t === 'm' || m.t === 'b');
+  const r = v => Math.round(v * 1000) / 1000;
+  const moves = sent.filter(m => m.t === 'm');
+  assert.deepEqual(moves.map(m => [r(m.x), r(m.y), r(m.dx), r(m.dy)]), [[0.6, 0.5, 0.1, 0], [0.6, 0, 0, -1]]);
+  const clicks = sent.filter(m => m.t === 'b');
+  assert.deepEqual(clicks.map(m => [r(m.x), r(m.y)]), [[0.6, 0], [0.6, 0]], 'clicks land where the Mac\u2019s pointer is, not under the hidden one');
+  // Too fast (or slow)? More has the captured mouse's speed: at half, the same movement goes half as far.
+  assert.equal(await page.eval(`document.getElementById('mouseSpeedWrap').hidden`), false);
+  await page.eval(`(() => { const s = document.getElementById('optMouseSpeed'); s.value = '0.5'; s.dispatchEvent(new Event('input')); })()`);
+  assert.equal(await page.text('#mouseSpeedValue'), '0.5×');
+  await page.eval(`window.__perch.viewer._toggleMenu(true)`);
+  await page.shot('viewer-mouse-speed-menu');
+  await page.eval(`window.__perch.viewer._toggleMenu(false)`);
+  const n2 = await count(page);
+  await move(shown[0] / 10, shown[1] / 10);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n2}).some(m => m.t === 'm')`, { what: 'a slower move' });
+  const slow = (await messages(page, n2)).find(m => m.t === 'm');
+  assert.deepEqual([r(slow.x), r(slow.y), r(slow.dx), r(slow.dy)], [0.65, 0.05, 0.05, 0.05]);
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).mouseSpeed`), 0.5, 'remembered');
+  if (real) {
+    await page.eval(`document.exitPointerLock()`);
+  } else {
+    await page.eval(`delete document.pointerLockElement; document.dispatchEvent(new Event('pointerlockchange'))`);
+  }
+  await page.waitFor(`!document.getElementById('viewer').classList.contains('captured')`, { what: 'let go' });
+  // Back to ordinary: positions follow the page's pointer again.
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('clipboard: paste this device’s text on the Mac, copy the Mac’s text here, and the fallback box', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  // A stand-in for this device's clipboard, so no real clipboard is read or written: it can say yes or no.
+  await page.eval(`(() => {
+    const c = window.__clip = { text: 'hello from this computer', refuse: false, written: [] };
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      readText: async () => { if (c.refuse) throw new DOMException('no', 'NotAllowedError'); return c.text; },
+      writeText: async t => { if (c.refuse) throw new DOMException('no', 'NotAllowedError'); c.written.push(t); },
+      write: async items => { if (c.refuse) throw new DOMException('no', 'NotAllowedError');
+        for (const i of items) c.written.push(await (await i.getType('text/plain')).text()); },
+    } });
+  })()`);
+  const menu = async id => { await page.eval(`window.__perch.viewer._showToolbar()`); await page.click('#tbMore'); await page.click(id); };
+  let n = await count(page);
+  await menu('#optPaste');
+  await page.waitFor(`window.__perch.demoSession.clipboard === 'hello from this computer'`, { what: 'the text on the Mac' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'clip-set').map(m => [m.text, m.paste]), [['hello from this computer', true]]);
+  await page.waitFor(`/Pasted on your Mac/.test(document.getElementById('banners').textContent)`, { what: '"Pasted on your Mac."' });
+
+  // The browser won't read its clipboard: the box to paste into comes up, with "only the clipboard" too.
+  await page.eval(`window.__clip.refuse = true`);
+  await menu('#optPaste');
+  await page.waitFor(`!document.getElementById('clipSheet').hidden`, { what: 'the paste box' });
+  assert.equal(await page.eval(`document.activeElement.id`), 'clipText');
+  await page.shot('viewer-demo-paste-box-desktop');
+  await page.eval(`document.getElementById('clipText').value = 'just keep this'`);
+  await page.click('#clipOnly');
+  await page.waitFor(`window.__perch.demoSession.clipboard === 'just keep this' && document.getElementById('clipSheet').hidden`, { what: 'clipboard only' });
+  assert.equal((await messages(page)).filter(m => m.t === 'clip-set').at(-1).paste, false);
+
+  // Copy from the Mac.
+  await page.eval(`window.__clip.refuse = false; window.__perch.demoSession.clipboard = 'copied on the Mac — café'`);
+  await menu('#optCopy');
+  await page.waitFor(`window.__clip.written.length === 1`, { what: 'the Mac’s text on this device' });
+  assert.deepEqual(await page.eval(`window.__clip.written`), ['copied on the Mac — café']);
+  await page.waitFor(`/Copied from your Mac/.test(document.getElementById('banners').textContent)`, { what: '"Copied from your Mac."' });
+  // ...and where the browser won't write it, the text is shown, selected, to copy by hand.
+  await page.eval(`window.__clip.refuse = true`);
+  await menu('#optCopy');
+  await page.waitFor(`!document.getElementById('clipSheet').hidden`, { what: 'the text shown to copy' });
+  assert.equal(await page.eval(`document.getElementById('clipText').value`), 'copied on the Mac — café');
+  assert.deepEqual(await page.eval(`[document.getElementById('clipText').readOnly, document.getElementById('clipGo').hidden]`), [true, true]);
+  await page.click('#clipClose');
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('clipboard: ⌘V pastes this device’s picture or text on the Mac, and what’s copied on the Mac comes here', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  await page.click(null, { x: 640, y: 400 });
+  assert.equal(await page.eval(`document.getElementById('clipSyncWrap').hidden`), false);
+  await page.waitFor(`window.__perch.demoSession.clipSync === true`, { what: 'the viewer asks for the Mac’s copies' });
+  await page.eval(`(() => {
+    const c = window.__clip = { written: [] };
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      write: async items => { for (const i of items) c.written.push(i.types.slice().sort()); },
+      writeText: async t => c.written.push(['text:' + t]),
+    } });
+    // ⌘V as the browser sees it, then (optionally) the browser's paste event with this device's clipboard.
+    window.__pasteKey = (fill) => {
+      const kd = new KeyboardEvent('keydown', { key: 'v', code: 'KeyV', metaKey: true, bubbles: true, cancelable: true });
+      document.body.dispatchEvent(kd);
+      if (fill) {
+        const dt = new DataTransfer();
+        fill(dt);
+        document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+      }
+      document.body.dispatchEvent(new KeyboardEvent('keyup', { key: 'v', code: 'KeyV', metaKey: true, bubbles: true, cancelable: true }));
+      return kd.defaultPrevented;
+    };
+  })()`);
+  const keys = async from => (await messages(page, from)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}${m.m}`);
+
+  // A picture (bigger than one piece) on this device's clipboard.
+  let n = await count(page);
+  const prevented = await page.eval(`window.__pasteKey(dt => {
+    const bytes = new Uint8Array(100 * 1024).map((_, i) => i % 251);
+    dt.items.add(new File([bytes], 'shot.png', { type: 'image/png' }));
+  })`);
+  assert.equal(prevented, false, 'the browser’s paste is let through');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 4`, { what: '⌘V on the Mac' });
+  const sent = await messages(page, n);
+  const parts = sent.filter(m => m.t === 'clip-part');
+  assert.equal(parts.length, 3);
+  assert.deepEqual(sent.filter(m => m.t === 'clip-set').map(m => [m.paste, m.text, m.img?.mime]), [[false, undefined, 'image/png']]);
+  assert.equal(await page.eval(`atob(window.__perch.demoSession.clipboardImage).length`), 100 * 1024);
+  assert.deepEqual(await keys(n), ['MetaLeft↓8', 'KeyV↓8', 'KeyV↑8', 'MetaLeft↑0'], 'pasted after the picture arrived, V never sent early');
+  await page.waitFor(`/Pasted on your Mac/.test(document.getElementById('banners').textContent)`, { what: '"Pasted on your Mac."' });
+
+  // Text.
+  n = await count(page);
+  await page.eval(`window.__pasteKey(dt => dt.setData('text/plain', 'from the Chromebook'))`);
+  await page.waitFor(`window.__perch.demoSession.clipboard === 'from the Chromebook'`, { what: 'the text on the Mac' });
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 4`, { what: '⌘V' });
+
+  // Nothing here, or no paste event at all: the Mac pastes its own clipboard.
+  for (const fill of ['dt => {}', 'null']) {
+    n = await count(page);
+    await page.eval(`window.__pasteKey(${fill})`);
+    await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 4`, { what: '⌘V' });
+    assert.deepEqual((await messages(page, n)).filter(m => m.t.startsWith('clip')), []);
+    assert.deepEqual(await keys(n), ['MetaLeft↓8', 'KeyV↓8', 'KeyV↑8', 'MetaLeft↑0']);
+  }
+
+  // Copied on the Mac (a picture and its text): onto this device's clipboard by itself.
+  await page.eval(`(() => {
+    const s = window.__perch.demoSession;
+    s.onmessage({ t: 'clip-part', id: 'm1', i: 0, n: 1, data: btoa('not really a png') });
+    s.onmessage({ t: 'clip', ok: true, text: 'caption', img: { id: 'm1', mime: 'image/png' }, auto: true });
+  })()`);
+  await page.waitFor(`window.__clip.written.length === 1`, { what: 'the Mac’s copy here' });
+  assert.deepEqual(await page.eval(`window.__clip.written[0]`), ['image/png', 'text/plain']);
+  await page.waitFor(`/Picture copied from your Mac/.test(document.getElementById('banners').textContent)`, { what: 'the note' });
+
+  // Turned off: the Mac is told.
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.click('#optClipSync');
+  await page.waitFor(`window.__perch.demoSession.clipSync === false`, { what: 'sharing off' });
+  await page.eval(`localStorage.clear()`);
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('desktop: mouse moves, clicks, double clicks, right clicks and scrolling', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  await floatingBar(page);
+  let n = await count(page);
+  await page.mouse('mouseMoved', 640, 400);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'm')`, { what: 'a pointer move' });
+  const move = (await messages(page, n)).find(m => m.t === 'm');
+  const want = await expected(page, 640, 400);
+  assert.equal(move.channel, 'pointer');
+  assert.deepEqual([move.x, move.y], [want.x, want.y]);
+  assert.ok(Math.abs(move.x - 0.5) < 0.001 && Math.abs(move.y - 0.5) < 0.001, 'the middle of the window is the middle of the Mac');
+
+  // A click near the left edge of the picture (inside the letterbox bars' neighbour).
+  const g = await geometry(page);
+  const pic = { x: g.box.left + (g.box.width - g.vw * Math.min(g.box.width / g.vw, g.box.height / g.vh)) / 2 };
+  const cx = pic.x + 30, cy = 300;
+  n = await count(page);
+  await page.click(null, { x: cx, y: cy });
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'button down and up' });
+  const w = await expected(page, cx, cy);
+  const clicks = (await messages(page, n)).filter(m => m.t === 'b');
+  assert.deepEqual(clicks.map(({ channel, t, b, d, n: c, x, y }) => ({ channel, t, b, d, n: c, x, y })), [
+    { channel: 'input', t: 'b', b: 0, d: true, n: 1, x: w.x, y: w.y },
+    { channel: 'input', t: 'b', b: 0, d: false, n: 1, x: w.x, y: w.y },
+  ]);
+
+  // Double click: the second press carries count 2.
+  n = await count(page);
+  await page.click(null, { x: 700, y: 450, clickCount: 1 });
+  await page.click(null, { x: 700, y: 450, clickCount: 2 });
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 4`, { what: 'double click' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'b').map(m => `${m.d ? '↓' : '↑'}${m.n}`), ['↓1', '↑1', '↓2', '↑2']);
+
+  // Right click: button 2, and the browser's own menu doesn't open.
+  n = await count(page);
+  await page.eval(`(() => { window.__menuPrevented = new Promise(r => document.getElementById('surface').addEventListener('contextmenu', e => r(e.defaultPrevented), { once: true })); })()`);
+  await page.click(null, { x: 500, y: 300, button: 'right' });
+  assert.equal(await page.eval(`window.__menuPrevented`), true);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'b').map(m => [m.b, m.d]), [[2, true], [2, false]]);
+
+  // Scrolling: pixel deltas, one message per frame.
+  n = await count(page);
+  await page.mouse('mouseWheel', 640, 400, { deltaX: 0, deltaY: 120 });
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'w')`, { what: 'a scroll' });
+  const wheel = (await messages(page, n)).find(m => m.t === 'w');
+  assert.equal(wheel.channel, 'input');
+  assert.equal(wheel.dy, 120);
+  assert.equal(wheel.dx, 0);
+  assert.ok(Math.abs(wheel.x - 0.5) < 0.001);
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('desktop: keys go to the Mac with the protocol\'s code, key and modifier bits; focus loss releases them', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  await page.click(null, { x: 640, y: 400 });
+  let n = await count(page);
+  await page.key('a', 'KeyA', { text: 'a' });
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 2`, { what: 'key a' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(({ t, c, k, d, m }) => ({ t, c, k, d, m })), [
+    { t: 'k', c: 'KeyA', k: 'a', d: true, m: 0 }, { t: 'k', c: 'KeyA', k: 'a', d: false, m: 0 }]);
+
+  // ⌘C on a Mac keyboard: CDP modifier 4 is Meta → protocol bit 8.
+  n = await count(page);
+  await page.keyDown('Meta', 'MetaLeft', 4);
+  await page.key('c', 'KeyC', { modifiers: 4 });
+  await page.keyUp('Meta', 'MetaLeft', 0);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 4`, { what: '⌘C' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}${m.m}`),
+    ['MetaLeft↓8', 'KeyC↓8', 'KeyC↑8', 'MetaLeft↑0']);
+
+  // Tab and Escape would move focus or leave full screen in the page; the Mac gets them instead.
+  // The viewer takes keys at the window in the capture phase and stops them there, so listen in that same phase.
+  // Set the listener up and wait until it is in place before pressing the key: started side by side, the key press
+  // sometimes got to the page first and the listener then waited for a key that had already gone by.
+  await page.eval(`(() => { window.__tabPrevented = new Promise(r => addEventListener('keydown', e => r(e.defaultPrevented), { once: true, capture: true })); })()`);
+  await page.key('Tab', 'Tab');
+  assert.equal(await page.eval(`window.__tabPrevented`), true);
+
+  // A key held when the window loses focus: the viewer tells the Mac to let go of everything.
+  n = await count(page);
+  await page.keyDown('Shift', 'ShiftLeft', 8);
+  await page.eval(`window.dispatchEvent(new Event('blur'))`);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'rel')`, { what: 'rel' });
+  await page.keyUp('Shift', 'ShiftLeft', 0);
+
+  // Our own controls keep their keys: typing in the quality menu sends nothing to the Mac.
+  await page.eval(`document.getElementById('tbQuality').focus()`);
+  n = await count(page);
+  await page.key('ArrowDown', 'ArrowDown');
+  await sleep(200);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k'), []);
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('desktop: sound levels — what is sent here and the Mac\'s speakers, set on the Mac from the More menu', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  const n = await count(page);
+  await page.click('#tbMore');
+  assert.equal(await page.eval(`document.getElementById('levelsWrap').hidden`), false, 'shown to the owner of a Mac that has them');
+  assert.equal(await page.text('#optStreamOut'), '100%');
+  assert.equal(await page.text('#optSpeakersOut'), '100%');
+  const slide = (id, v) => page.eval(`(() => { const s = document.getElementById('${id}'); s.value = '${v}';
+    s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+  await slide('optSpeakers', 0);
+  assert.equal(await page.text('#optSpeakersOut'), 'Silent');
+  await slide('optStream', 130);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'levels').length >= 2`, { what: 'levels sent' });
+  const last = (await messages(page, n)).filter(m => m.t === 'levels').at(-1);
+  assert.equal(last.channel, 'control');
+  assert.equal(last.speakers, 0);
+  assert.ok(Math.abs(last.stream - 1.3) < 1e-9, String(last.stream));
+  // The Mac's echo doesn't pull the sliders back.
+  await sleep(700);
+  assert.equal(await page.eval(`document.getElementById('optStream').value`), '130');
+  await page.shot('viewer-demo-sound-levels-desktop');
+});
+
+test('desktop: displays — the map, and holding the pointer at an edge moves to the display beyond it', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  const n = await count(page);
+  const shown = () => page.eval(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent`);
+
+  // The map: both displays, side by side (the demo Mac, like one before 0.3.3, doesn't say where they sit).
+  await page.click('#tbDisplayMap');
+  assert.equal(await page.eval(`document.getElementById('displayMap').hidden`), false);
+  assert.equal(await page.eval(`document.querySelectorAll('#displayMapArea .map-display').length`), 2);
+  const [a, b] = await page.eval(`[...document.querySelectorAll('#displayMapArea .map-display')].map(e => e.getBoundingClientRect().left)`);
+  assert.ok(a < b, 'the first display on the left');
+  await page.shot('viewer-demo-display-map-desktop');
+  await page.click('#displayMapArea .map-display:nth-child(2)');
+  assert.equal(await shown(), '2');
+  await page.mouse('mousePressed', 640, 400, { button: 'left', clickCount: 1 });
+  await page.mouse('mouseReleased', 640, 400, { button: 'left', clickCount: 1 });
+  assert.equal(await page.eval(`document.getElementById('displayMap').hidden`), true, 'a click on the picture closes it');
+
+  // The edge flip: display 2 has display 1 to its left. Resting at the left edge names it, then moves there.
+  const box = await page.eval(`(() => { const r = document.getElementById('surface').getBoundingClientRect(); return { l: r.left, r: r.right, y: (r.top + r.bottom) / 2 }; })()`);
+  await page.mouse('mouseMoved', box.l + 200, box.y);
+  await page.mouse('mouseMoved', box.l + 1, box.y);
+  await page.waitFor(`!document.getElementById('edgeHint').hidden`, { what: 'edge hint' });
+  assert.match(await page.text('#edgeHintText'), /^← Built-in/);
+  await page.shot('viewer-demo-edge-flip-desktop');
+  await page.waitFor(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent === '1'`, { what: 'flipped to display 1' });
+  assert.equal(await page.eval(`document.getElementById('edgeHint').hidden`), true);
+  // Still at the edge: it doesn't flip again until the pointer has moved away.
+  await sleep(700);
+  assert.equal(await shown(), '1');
+  await page.mouse('mouseMoved', box.r - 200, box.y);
+  await page.mouse('mouseMoved', box.r - 1, box.y);
+  await page.waitFor(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent === '2'`, { what: 'and on to display 2' });
+  const ids = (await messages(page, n)).filter(m => m.t === 'display').map(m => m.id);
+  assert.deepEqual(ids, [2, 1, 2]);
+});
+
+test('desktop: toolbar controls — quality, display, stats, keys bar, more menu, full screen, sound, disconnect', async () => {
+  const page = await openPage(stack, demoUrl({ sound: 'blocked' }));
+  await ready(page);
+  assert.equal(await page.eval(`!document.getElementById('soundPrompt').hidden`), true, '"Tap for sound" when sound was blocked');
+  await page.shot('viewer-demo-tap-for-sound-desktop');
+  let n = await count(page);
+  await page.click('#soundPrompt');
+  await page.waitFor(`document.getElementById('soundPrompt').hidden && !document.getElementById('video').muted`, { what: 'sound on' });
+
+  await page.eval(`(() => { const s = document.getElementById('tbQuality'); s.value = 'sharp'; s.dispatchEvent(new Event('change')); })()`);
+  assert.equal(await page.eval(`document.querySelectorAll('#tbDisplays .tb-chip').length`), 2, 'a button for each display');
+  assert.equal(await page.eval(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent`), '1');
+  await page.click('#tbDisplays .tb-chip:nth-child(2)');
+  assert.equal(await page.eval(`document.querySelector('#tbDisplays .tb-chip[aria-pressed=true]').textContent`), '2');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'display')`);
+  const ctl = (await messages(page, n)).filter(m => m.channel === 'control' && m.t !== 'ping');
+  assert.deepEqual(ctl.map(m => ({ t: m.t, preset: m.preset, id: m.id })),
+    [{ t: 'quality', preset: 'sharp', id: undefined }, { t: 'display', preset: undefined, id: 2 }]);
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).quality`), 'sharp', 'remembered');
+
+  // Connection details: the demo answers pings, so the round trip shows.
+  await page.click('#tbStats');
+  await page.waitFor(`/Round trip\\s*\\d+ ms/.test(document.getElementById('stats').textContent)`, { what: 'stats with RTT' });
+  assert.match(await page.text('#stats'), /Picture/);
+  assert.ok((await messages(page)).some(m => m.t === 'ping' && m.channel === 'control'), 'pings every 2 s');
+
+  // Keys bar: sticky ⌘ then Tab is ⌘Tab; Mission Control is Control+Up.
+  await page.click('#tbKeys');
+  assert.equal(await page.eval(`document.getElementById('keysBar').hidden`), false);
+  n = await count(page);
+  await page.click('#keysBar [data-mod="8"]');
+  assert.equal(await page.eval(`document.querySelector('#keysBar [data-mod="8"]').getAttribute('aria-pressed')`), 'true');
+  await page.shot('viewer-demo-keysbar-desktop');
+  await page.click('#keysBar [data-key="tab"]');
+  await page.click('#keysBar [data-key="missionControl"]');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 8`);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}${m.m}`), [
+    'MetaLeft↓8', 'Tab↓8', 'Tab↑8', 'MetaLeft↑0', 'ControlLeft↓2', 'ArrowUp↓2', 'ArrowUp↑2', 'ControlLeft↑0']);
+  assert.equal(await page.eval(`document.querySelector('#keysBar [data-mod="8"]').getAttribute('aria-pressed')`), 'false', 'sticky key used up');
+
+  await page.click('#tbMore');
+  assert.equal(await page.eval(`document.getElementById('moreMenu').hidden`), false);
+  await page.shot('viewer-demo-more-menu-desktop');
+  n = await count(page);
+  await page.click('#optKeyframe');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'keyframe')`);
+  assert.equal(await page.eval(`document.getElementById('moreMenu').hidden`), true);
+
+  await page.click('#tbFull');
+  await page.waitFor(`!!document.fullscreenElement`, { what: 'full screen' });
+  // fullscreenchange (which relabels the button) comes a frame after fullscreenElement is set.
+  await page.waitFor(`document.getElementById('tbFull').getAttribute('aria-label') === 'Leave full screen'`, { what: 'button relabelled' });
+  await page.click('#tbFull');
+  await page.waitFor(`!document.fullscreenElement`, { what: 'left full screen' });
+
+  await page.click('#tbBye');
+  await page.waitFor(`!document.getElementById('ended').hidden`, { what: 'ended card' });
+  await page.shot('viewer-demo-ended-desktop');
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('desktop: show one window, fit it to this screen, and go back to the whole screen', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  await floatingBar(page);
+  const pick = v => page.eval(`(() => { const s = document.getElementById('optWindow'); s.value = ${JSON.stringify(v)}; s.dispatchEvent(new Event('change')); })()`);
+  const size = () => page.eval(`[document.getElementById('video').videoWidth, document.getElementById('video').videoHeight]`);
+  const n = await count(page);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.waitFor(`document.getElementById('optWindow').options.length === 3`, { what: 'the list of windows' });
+  assert.deepEqual(await page.eval(`[...document.getElementById('optWindow').options].map(o => o.textContent)`),
+    ['The whole screen', 'Notes: Shopping list', 'Safari: Perch']);
+  assert.equal(await page.eval(`document.getElementById('optFit').hidden`), true, 'nothing to fit yet');
+
+  await pick('11');
+  await page.waitFor(`document.getElementById('video').videoWidth === 900`, { what: 'the picture in the window\'s shape' });
+  assert.deepEqual(await size(), [900, 620]);
+  assert.equal(await page.eval(`document.getElementById('optFit').hidden`), false);
+  await page.shot('viewer-demo-one-window-desktop');
+
+  // Fit: the window takes this screen's shape, so the picture fills it.
+  await page.click('#optFit');
+  await page.waitFor(`(() => { const v = document.getElementById('video'); return Math.abs(v.videoWidth / v.videoHeight - innerWidth / innerHeight) < 0.01; })()`,
+    { what: 'a picture the shape of this screen' });
+  assert.equal(await page.eval(`document.getElementById('moreMenu').hidden`), true);
+  const ctl = (await messages(page, n)).filter(m => m.channel === 'control' && ['windows', 'window', 'fit'].includes(m.t));
+  assert.deepEqual(ctl.map(m => [m.t, m.id ?? null]), [['windows', null], ['window', 11], ['fit', null]]);
+  assert.deepEqual([ctl[2].w, ctl[2].h], await page.eval(`[innerWidth, innerHeight]`));
+
+  // The Mac says the window has gone (it was closed): the picker goes back to the whole screen by itself.
+  await sleep(1600);
+  await page.eval(`window.__perch.demoSession.onmessage({ t: 'status', window: null })`);
+  assert.equal(await page.eval(`document.getElementById('optWindow').value`), '');
+  assert.equal(await page.eval(`document.getElementById('optFit').hidden`), true);
+
+  // Choosing "The whole screen" asks for it.
+  await pick('12');
+  await page.waitFor(`document.getElementById('video').videoWidth === 1200`, { what: 'the second window' });
+  await pick('');
+  await page.waitFor(`document.getElementById('video').videoWidth === 756`, { what: 'the whole screen again' });
+  assert.equal((await messages(page, n)).filter(m => m.t === 'window').at(-1).id, null);
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('the bar: hide it with one click, move it to the side from the menu; Force Quit from the menu', async () => {
+  const page = await openPage(stack, demoUrl({ log: '0' }));
+  await ready(page);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  assert.equal(await page.eval(`document.querySelector('#moreMenu .menu-head').textContent`), 'This bar', 'the bar\u2019s settings come first');
+  // Hide: gone at once, and from then on it tucks itself away; a note says how to get it back (once).
+  await page.click('#tbHide');
+  await page.waitFor(`!document.getElementById('viewer').classList.contains('tb-on')`, { what: 'the bar hidden' });
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).tbAutoHide`), true);
+  assert.match(await page.text('#banners'), /The bar is hidden/);
+  // Move it to the left side from the menu.
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.eval(`(() => { const s = document.getElementById('optEdge'); s.value = 'left'; s.dispatchEvent(new Event('change')); })()`);
+  await page.waitFor(`document.getElementById('viewer').classList.contains('tb-left') && document.getElementById('viewer').classList.contains('tb-vertical')`, { what: 'the bar on the left' });
+  const r = await page.eval(`(() => { const b = document.getElementById('toolbar').getBoundingClientRect(); return { left: b.left, h: b.height, w: b.width }; })()`);
+  assert.ok(r.left <= 1 && r.h > r.w, `a tall bar at the left edge: ${JSON.stringify(r)}`);
+  await page.shot('viewer-bar-left');
+  // Force Quit: the Mac's Force Quit window, ⌘⌥Esc.
+  const n = await count(page);
+  await page.eval(`window.__perch.viewer._toggleMenu(true)`);
+  await page.click('#optForceQuit');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 6`, { what: 'the keys' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '\u2193' : '\u2191'}${m.m}`),
+    ['MetaLeft\u21938', 'AltLeft\u219312', 'Escape\u219312', 'Escape\u219112', 'AltLeft\u21918', 'MetaLeft\u21910']);
+  assert.ok(await page.eval(`!!document.querySelector('#keysBar [data-key="forceQuit"]')`), 'Force Quit on the keys bar too');
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('status notes: locked, view only, slow link, no screen permission', async () => {
+  const page = await openPage(stack, demoUrl({ locked: '1', viewonly: '1' }));
+  await ready(page);
+  const ids = () => page.eval(`[...document.querySelectorAll('#banners .banner')].map(b => b.dataset.id)`);
+  assert.deepEqual(await ids(), ['locked', 'viewonly']);
+  assert.match(await page.text('#banners'), /Your Mac is locked/);
+  assert.match(await page.text('#banners'), /View only/);
+  // View only: clicks send nothing.
+  const n = await count(page);
+  await page.click(null, { x: 640, y: 420 });
+  await sleep(200);
+  assert.deepEqual(without(await messages(page, n), 'ping'), []);
+  await page.eval(`window.__perch.demoSession.onmessage({ t: 'status', link: 'slow' })`);
+  await page.eval(`window.__perch.demoSession.onmessage({ t: 'error', code: 'no-screen-permission', message: 'x' })`);
+  assert.deepEqual(await ids(), ['locked', 'viewonly', 'slow', 'error']);
+  assert.match(await page.text('#banners'), /Screen & System Audio Recording/);
+  await page.shotAll('viewer-banners', { views: { desktop: DESKTOP }, schemes: ['dark'] });
+  // "Use Smooth" on the slow note switches quality.
+  const m0 = await count(page);
+  await page.click('#banners [data-id="slow"] .btn');
+  await page.waitFor(`window.__perch.demoMessages.slice(${m0}).some(m => m.t === 'quality' && m.preset === 'smooth')`);
+  await page.eval(`window.__perch.demoSession.onmessage({ t: 'status', locked: false, input: true, link: 'good' })`);
+  assert.deepEqual(await ids(), ['error']);
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('Windows keyboard: "Ctrl acts as ⌘" is on by default and swaps Control and ⌘', async () => {
+  const page = await openPage(stack, demoUrl(), { ua: UA.windowsChrome });
+  await ready(page);
+  assert.equal(await page.eval(`document.getElementById('swapWrap').hidden`), false);
+  assert.equal(await page.eval(`document.getElementById('optSwap').checked`), true);
+  await page.click(null, { x: 640, y: 400 });
+  let n = await count(page);
+  await page.keyDown('Control', 'ControlLeft', 2);
+  await page.key('c', 'KeyC', { modifiers: 2 });
+  await page.keyUp('Control', 'ControlLeft', 0);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 4`);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}${m.m}`),
+    ['MetaLeft↓8', 'KeyC↓8', 'KeyC↑8', 'MetaLeft↑0'], 'Ctrl+C arrives as ⌘C');
+  // Turn it off in the More menu: Control is Control again.
+  await page.click('#tbMore');
+  await page.click('#optSwap');
+  await page.click(null, { x: 640, y: 400 });
+  n = await count(page);
+  await page.keyDown('Control', 'ControlLeft', 2);
+  await page.keyUp('Control', 'ControlLeft', 0);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 2`);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}${m.m}`),
+    ['ControlLeft↓2', 'ControlLeft↑0']);
+  await page.close();
+});
+
+test('phone: tapping a text box on the Mac brings up the keyboard (Android) or asks for one tap (iPhone)', async () => {
+  // The demo's pretend text box is the top half of the Mac's screen; the picture fills the middle of the phone.
+  const pic = async () => page.eval(`(() => { const r = document.getElementById('video').getBoundingClientRect();
+    const v = document.getElementById('video'); const s = Math.min(r.width / v.videoWidth, r.height / v.videoHeight);
+    const h = v.videoHeight * s; const top = r.top + (r.height - h) / 2; return { top, h }; })()`);
+  let page = await openPage(stack, demoUrl({ log: '0' }), { view: PHONE, ua: UA.android, name: 'android-kbd' });
+  await ready(page);
+  let p = await pic();
+  await page.tap(195, p.top + p.h * 0.2);
+  await page.waitFor(`document.activeElement === document.getElementById('softkbd')`, { what: 'the keyboard, by itself' });
+  assert.equal(await page.eval(`document.getElementById('kbdFab').classList.contains('open')`), true);
+  // A tap outside any text box puts it away again, because it came up by itself.
+  await sleep(300);
+  await page.tap(195, p.top + p.h * 0.9);
+  await page.waitFor(`document.activeElement !== document.getElementById('softkbd')`, { what: 'the keyboard put away' });
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+
+  page = await openPage(stack, demoUrl({ log: '0' }), { view: PHONE, ua: UA.iphone, name: 'iphone-kbd' });
+  await ready(page);
+  p = await pic();
+  await page.tap(195, p.top + p.h * 0.2);
+  await page.waitFor(`document.getElementById('kbdFab').classList.contains('invite')`, { what: 'the "Tap to type" button' });
+  assert.equal(await page.text('#kbdFabLabel'), 'Tap to type');
+  assert.notEqual(await page.eval(`document.activeElement?.id`), 'softkbd', 'not opened without a tap of its own');
+  await page.shot('viewer-demo-tap-to-type-phone');
+  const fab = await page.eval(`(() => { const r = document.getElementById('kbdFab').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+  await page.tap(fab.x, fab.y);
+  await page.waitFor(`document.activeElement === document.getElementById('softkbd')`, { what: 'the keyboard after one tap' });
+  assert.equal(await page.eval(`document.getElementById('kbdFab').classList.contains('invite')`), false);
+  // A locked Mac: the button asks for the password, and stays until it's tapped.
+  await page.eval(`document.getElementById('softkbd').blur()`);
+  await page.eval(`window.__perch.demoSession.onmessage({ t: 'status', locked: true })`);
+  assert.equal(await page.text('#kbdFabLabel'), 'Tap to type the password');
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('phone: touchpad mode moves the Mac\u2019s pointer by how far the finger goes, and taps click where it is', async () => {
+  const page = await openPage(stack, demoUrl({ log: '0' }), { view: PHONE, ua: UA.iphone, name: 'touchpad' });
+  await ready(page);
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  assert.equal(await page.eval(`document.getElementById('touchpadWrap').hidden`), false);
+  await page.click('#optTouchpad');
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).touchpad`), true, 'remembered');
+  await page.eval(`window.__perch.viewer._toggleMenu(false)`);
+  const [sw] = await page.eval(`window.__perch.viewer.pointer.shownSize()`);
+  // Wherever the finger is, the Mac's pointer starts from where it was (the middle) and moves by the same amount.
+  let n = await count(page);
+  await page.touch('touchStart', [{ x: 60, y: 500 }]);
+  for (let x = 70; x <= 110; x += 10) { await page.touch('touchMove', [{ x, y: 500 }]); await sleep(20); }
+  await page.touch('touchEnd', []);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'm')`, { what: 'pointer moves' });
+  await sleep(100);
+  const last = (await messages(page, n)).filter(m => m.t === 'm').at(-1);
+  assert.ok(Math.abs(last.x - (0.5 + 50 * 1.6 / sw)) < 0.01, `pointer at ${last.x}`);
+  assert.ok(Math.abs(last.y - 0.5) < 0.01);
+  // A tap far away clicks where the Mac's pointer is.
+  await sleep(500);
+  n = await count(page);
+  await page.tap(300, 1500 / 2);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'the click' });
+  const clicks = (await messages(page, n)).filter(m => m.t === 'b');
+  assert.ok(clicks.every(c => Math.abs(c.x - last.x) < 1e-9 && Math.abs(c.y - last.y) < 1e-9), JSON.stringify(clicks));
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('phone: taps, double taps, long press, two-finger scroll, pinch zoom, the phone keyboard', async () => {
+  const page = await openPage(stack, demoUrl(), { view: PHONE, ua: UA.iphone });
+  await ready(page);
+  assert.equal(await page.eval(`document.getElementById('viewer').classList.contains('touch')`), true);
+  assert.equal(await page.eval(`document.getElementById('tbKeyboard').hidden`), false, 'keyboard button on a phone');
+  await page.shot('viewer-demo-toolbar-phone');
+
+  // Tap in the middle of the picture → a left click there.
+  let n = await count(page);
+  await page.tap(195, 422);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'tap' });
+  let want = await expected(page, 195, 422);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'b').map(({ b, d, n: c, x, y }) => ({ b, d, n: c, x, y })), [
+    { b: 0, d: true, n: 1, x: want.x, y: want.y }, { b: 0, d: false, n: 1, x: want.x, y: want.y }]);
+
+  // Double tap → the second click has count 2.
+  await sleep(500);
+  n = await count(page);
+  await page.tap(150, 400);
+  await sleep(60);
+  await page.tap(153, 402);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 4`, { what: 'double tap' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'b').map(m => `${m.d ? '↓' : '↑'}${m.n}`), ['↓1', '↑1', '↓2', '↑2']);
+
+  // Long press → right click while the finger is still down.
+  await sleep(500);
+  n = await count(page);
+  await page.touch('touchStart', [{ x: 250, y: 380 }]);
+  await sleep(800);
+  await page.touch('touchEnd', []);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'long press' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'b').map(m => [m.b, m.d]), [[2, true], [2, false]]);
+
+  // Two fingers moving up → scroll the Mac (positive dy).
+  n = await count(page);
+  await page.touch('touchStart', [{ x: 150, y: 450, id: 0 }, { x: 240, y: 450, id: 1 }]);
+  for (let i = 1; i <= 6; i++) {
+    await page.touch('touchMove', [{ x: 150, y: 450 - 12 * i, id: 0 }, { x: 240, y: 450 - 12 * i, id: 1 }]);
+    await sleep(20);
+  }
+  await page.touch('touchEnd', []);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'w')`, { what: 'two-finger scroll' });
+  const scrolled = (await messages(page, n)).filter(m => m.t === 'w').reduce((s, m) => s + m.dy, 0);
+  assert.ok(scrolled > 40, `scrolled ${scrolled}`);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'b'), [], 'no clicks from scrolling');
+
+  // Pinch out → local zoom only (nothing sent), and taps then map through the zoom.
+  await sleep(400);
+  n = await count(page);
+  await page.touch('touchStart', [{ x: 160, y: 420, id: 0 }, { x: 230, y: 420, id: 1 }]);
+  for (let i = 1; i <= 6; i++) {
+    await page.touch('touchMove', [{ x: 160 - 10 * i, y: 420, id: 0 }, { x: 230 + 10 * i, y: 420, id: 1 }]);
+    await sleep(20);
+  }
+  await page.touch('touchEnd', []);
+  await page.waitFor(`document.getElementById('viewer').classList.contains('zoomed')`, { what: 'zoomed in' });
+  const view = (await geometry(page)).view;
+  assert.ok(view.scale > 1.5, `zoom ${view.scale}`);
+  assert.match(await page.eval(`document.getElementById('zoom').style.transform`), /scale\(/);
+  assert.deepEqual(without(await messages(page, n), 'ping', 'm'), [], 'zooming sends nothing to the Mac');
+  await page.shot('viewer-demo-zoomed-phone');
+  await sleep(500);
+  n = await count(page);
+  await page.tap(100, 300);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`);
+  want = await expected(page, 100, 300);
+  const zoomedTap = (await messages(page, n)).find(m => m.t === 'b');
+  assert.deepEqual([zoomedTap.x, zoomedTap.y], [want.x, want.y]);
+  const unzoomed = toDisplay(100, 300, (await geometry(page)).box, 756, 491);
+  assert.notDeepEqual([zoomedTap.x, zoomedTap.y], [unzoomed.x, unzoomed.y], 'the zoom changed where the tap lands');
+  // Two-finger double tap → whole screen again.
+  for (let i = 0; i < 2; i++) {
+    await page.touch('touchStart', [{ x: 150, y: 400, id: 0 }, { x: 230, y: 400, id: 1 }]);
+    await sleep(40);
+    await page.touch('touchEnd', []);
+    await sleep(80);
+  }
+  await page.waitFor(`!document.getElementById('viewer').classList.contains('zoomed')`, { what: 'zoom reset' });
+
+  // The keyboard button focuses the hidden text box; what the phone keyboard types arrives as text. The toolbar has
+  // tucked itself away during the gestures above, so bring it back with its handle first, as a person would.
+  if (!(await page.eval(`document.getElementById('viewer').classList.contains('tb-on')`))) {
+    await page.tap(...Object.values(await page.center('#handle')).slice(0, 2));
+    await page.waitFor(`document.getElementById('viewer').classList.contains('tb-on')`, { what: 'toolbar back' });
+    await sleep(300); // its slide-in
+  }
+  await page.tap(...Object.values(await page.center('#tbKeyboard')).slice(0, 2));
+  await page.waitFor(`document.activeElement === document.getElementById('softkbd')`, { what: 'soft keyboard focus' });
+  n = await count(page);
+  await page.type('héllo 👋');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'txt')`, { what: 'typed text' });
+  assert.equal((await messages(page, n)).filter(m => m.t === 'txt').map(m => m.s).join(''), 'héllo 👋');
+  n = await count(page);
+  await page.key('Backspace', 'Backspace');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'k' && m.c === 'Backspace')`, { what: 'backspace' });
+  // The keyboard button that is always on screen: its text box takes the tap itself (what iPhones need to open the
+  // keyboard), the special keys come up with the keyboard, and a second tap closes both.
+  await page.eval(`document.getElementById('softkbd').blur()`);
+  await page.waitFor(`!document.getElementById('kbdFab').hidden && !document.getElementById('kbdFab').classList.contains('open')`,
+    { what: 'keyboard button, closed' });
+  assert.equal(await page.eval(`document.getElementById('keysBar').hidden`), true, 'special keys went away with the keyboard');
+  await page.tap(...Object.values(await page.center('#kbdFab')).slice(0, 2));
+  await page.waitFor(`document.activeElement === document.getElementById('softkbd')`, { what: 'keyboard opened from the button' });
+  assert.equal(await page.eval(`document.getElementById('kbdFab').classList.contains('open')`), true);
+  assert.equal(await page.eval(`document.getElementById('keysBar').hidden`), false, 'special keys come up with the keyboard');
+  n = await count(page);
+  await page.type('ok');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'txt')`, { what: 'typed text from the button' });
+  // Tapping the Mac's picture (to put the cursor in a text field there) must not close the keyboard.
+  n = await count(page);
+  await page.tap(195, 300);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'b').length >= 2`, { what: 'the tap as a click' });
+  assert.equal(await page.eval(`document.activeElement === document.getElementById('softkbd')`), true, 'keyboard still open after a tap');
+  await page.shot('viewer-demo-keysbar-phone');
+  await page.setView({ view: PHONE_LANDSCAPE });
+  await page.shot('viewer-demo-keysbar-phone-landscape');
+  await page.setView({ view: PHONE });
+  await page.tap(...Object.values(await page.center('#kbdFab')).slice(0, 2));
+  await page.waitFor(`document.activeElement !== document.getElementById('softkbd')`, { what: 'keyboard closed by a second tap' });
+  assert.equal(await page.eval(`document.getElementById('keysBar').hidden`), true, 'special keys go away with it');
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+test('desktop: the toolbar on any edge, chosen keys, swipes, a hidden pointer and the Mac’s very edge', async () => {
+  const page = await openPage(stack, demoUrl());
+  await ready(page);
+  const rect = sel => page.eval(`(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height }; })()`);
+  const win = await page.eval(`({ w: innerWidth, h: innerHeight })`);
+  await page.eval(`(() => { const v = window.__perch.viewer; v.prefs.set('tbAutoHide', false); v.prefs.set('tbEdge', 'top'); v._placeToolbar(); })()`);
+
+  // Drag the grip to the bottom left: the bar goes to the bottom edge, and the picture sits above it.
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  const grip = await page.center('#tbGrip');
+  await page.mouse('mouseMoved', grip.x, grip.y);
+  await page.mouse('mousePressed', grip.x, grip.y, { button: 'left', clickCount: 1 });
+  await page.mouse('mouseMoved', 300, win.h - 300, { buttons: 1 });
+  await page.mouse('mouseMoved', 200, win.h - 5, { buttons: 1 });
+  await page.mouse('mouseReleased', 200, win.h - 5, { button: 'left', clickCount: 1 });
+  let tb = await rect('#toolbar'), surf = await rect('#surface');
+  assert.ok(Math.abs(tb.bottom - win.h) < 1.5, 'on the bottom edge');
+  assert.ok(tb.left < 200 && tb.right > 200 || tb.left === 0, 'where it was dropped along the edge');
+  assert.ok(Math.abs(surf.bottom - tb.top) < 1.5, 'the picture ends where the bar starts');
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).tbEdge`), 'bottom', 'remembered');
+  await page.shot('viewer-toolbar-bottom');
+
+  // The right edge: standing up, the picture beside it.
+  await page.eval(`(() => { const s = document.getElementById('optEdge'); s.value = 'right'; s.dispatchEvent(new Event('change')); })()`);
+  tb = await rect('#toolbar'); surf = await rect('#surface');
+  assert.ok(tb.height > tb.width, 'vertical');
+  assert.ok(Math.abs(tb.right - win.w) < 1.5 && Math.abs(surf.right - tb.left) < 1.5, 'picture to its left');
+  await page.shot('viewer-toolbar-right');
+  await page.eval(`(() => { const s = document.getElementById('optEdge'); s.value = 'top'; s.dispatchEvent(new Event('change')); })()`);
+
+  // The very bottom row of the picture is the Mac's very bottom (where the Dock waits).
+  surf = await rect('#surface');
+  const pic = await page.eval(`(() => { const v = document.getElementById('video'); return { w: v.videoWidth, h: v.videoHeight }; })()`);
+  const scale = Math.min(surf.width / pic.w, surf.height / pic.h);
+  const picBottom = surf.top + (surf.height + pic.h * scale) / 2;
+  let n = await count(page);
+  await page.mouse('mouseMoved', surf.left + surf.width / 2, Math.floor(picBottom) - 1);
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'm')`);
+  assert.equal((await messages(page, n)).filter(m => m.t === 'm').at(-1).y, 1);
+
+  // Choose keys: F5 onto the bar (Force Quit is there already), and a homemade one.
+  await page.click('#tbKeys');
+  await page.click('#keysEdit');
+  assert.equal(await page.eval(`document.getElementById('keysEditor').hidden`), false);
+  await page.shot('viewer-keys-editor');
+  await page.eval(`(() => { for (const l of document.querySelectorAll('#keysGroups .ke-item')) {
+    const b = l.querySelector('b').textContent; if (b === 'F5') l.querySelector('input').click(); } })()`);
+  await page.eval(`(() => { document.getElementById('keOwnKey').value = 'KeyK'; })()`);
+  await page.click('#keOwnAdd');
+  await page.click('#keysEditorDone');
+  assert.equal(await page.eval(`document.getElementById('keysEditor').hidden`), true);
+  n = await count(page);
+  await page.click('#keysBar [data-key="forceQuit"]');
+  await page.click('#keysBar [data-key="f5"]');
+  await page.click('#keysBar [data-key="c:⌘KeyK"]');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'k').length >= 10`);
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}${m.m}`), [
+    'MetaLeft↓8', 'AltLeft↓12', 'Escape↓12', 'Escape↑12', 'AltLeft↑8', 'MetaLeft↑0',
+    'F5↓0', 'F5↑0', 'MetaLeft↓8', 'KeyK↓8', 'KeyK↑8', 'MetaLeft↑0']);
+  await page.shot('viewer-keysbar-chosen');
+
+  // The Mac's own controls: brightness and the keyboard light go as special keys, not shortcuts (no sound keys).
+  await page.click('#keysEdit');
+  assert.ok(await page.eval(`[...document.querySelectorAll('#keysGroups h3, #keysGroups legend, #keysGroups .ke-group')].some(e => /Mac controls/.test(e.textContent))`),
+    'a "Mac controls" group in the chooser');
+  await page.eval(`(() => { for (const l of document.querySelectorAll('#keysGroups .ke-item')) {
+    const b = l.querySelector('b').textContent; if (b === 'Bright +' || b === 'Keys light +') l.querySelector('input').click(); } })()`);
+  await page.click('#keysEditorDone');
+  n = await count(page);
+  await page.click('#keysBar [data-key="brightnessUp"]');
+  await page.click('#keysBar [data-key="keyboardLightUp"]');
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).filter(m => m.t === 'sys').length >= 2`, { what: 'special keys' });
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'sys' || m.t === 'k').map(m => m.t === 'sys' ? m.k : m.c), ['brightnessUp', 'keyboardLightUp']);
+  assert.ok(!(await page.eval(`[...document.querySelectorAll('#keysGroups .ke-item b')].some(b => /Vol|Mute|⏯|⏭|⏮/.test(b.textContent))`)),
+    'no volume, mute or media keys to choose');
+
+  // A two-finger swipe sideways on a touchpad: ⌘ held, Tab pressed (the app switcher), ⌘ let go a moment later.
+  n = await count(page);
+  const mid = { x: surf.left + surf.width / 2, y: surf.top + surf.height / 2 };
+  for (let i = 0; i < 8; i++) { await page.mouse('mouseWheel', mid.x, mid.y, { deltaX: 40, deltaY: 0 }); await sleep(16); }
+  await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'k' && m.c === 'MetaLeft' && !m.d)`, { what: '⌘ let go', timeoutMs: 3000 });
+  const sw = (await messages(page, n)).filter(m => m.t === 'k' || m.t === 'w');
+  assert.deepEqual(sw.map(m => m.t === 'w' ? 'w' : `${m.c}${m.d ? '↓' : '↑'}`), ['MetaLeft↓', 'Tab↓', 'Tab↑', 'MetaLeft↑'], 'a swipe, not a scroll');
+
+  // Hide this computer's pointer; Esc twice brings it back (the first Esc still reaches the Mac).
+  await page.eval(`window.__perch.viewer._showToolbar()`);
+  await page.click('#tbMore');
+  await page.click('#optHideCursor');
+  await page.click('#tbMore');
+  assert.equal(await page.eval(`getComputedStyle(document.getElementById('surface')).cursor`), 'none');
+  await page.eval(`document.getElementById('surface').focus()`);
+  n = await count(page);
+  await page.key('Escape', 'Escape');
+  await page.key('Escape', 'Escape');
+  assert.notEqual(await page.eval(`getComputedStyle(document.getElementById('surface')).cursor`), 'none');
+  assert.deepEqual((await messages(page, n)).filter(m => m.t === 'k').map(m => `${m.c}${m.d ? '↓' : '↑'}`), ['Escape↓', 'Escape↑']);
+  await page.eval(`localStorage.removeItem('perch.prefs.v1')`); // the next tests start from the usual
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});
+
+// The picture's shape: on a screen of another shape (here 4:3, the demo Mac is about 3:2), "fill" covers the window and
+// slides after the pointer so every edge of the Mac can still be reached; "stretch" squeezes it to the window.
+test('picture shape: whole, fill (slides after the pointer) and stretch, on a 4:3 screen and a phone', async () => {
+  const page = await openPage(stack, demoUrl(), { view: { width: 1024, height: 768, mobile: false } });
+  await ready(page);
+  await floatingBar(page);
+  const fit = () => page.eval(`getComputedStyle(document.getElementById('video')).objectFit`);
+  const choose = shape => page.eval(`(() => { const s = document.getElementById('optShape'); s.value = '${shape}'; s.dispatchEvent(new Event('change')); })()`);
+  const moveTo = async (x, y) => {
+    const n = await count(page);
+    await page.mouse('mouseMoved', x, y);
+    await page.waitFor(`window.__perch.demoMessages.slice(${n}).some(m => m.t === 'm')`, { what: 'a pointer move' });
+    return (await messages(page, n)).filter(m => m.t === 'm').pop();
+  };
+  assert.equal(await fit(), 'contain', 'whole screen by default');
+
+  await choose('fill');
+  assert.equal(await fit(), 'cover');
+  assert.match(await page.text('#shapeHelp'), /off the sides/);
+  const g = await geometry(page);
+  const { left, top, width, height } = g.box;
+  // The window's edges are the Mac's edges, and the middle its middle; the picture slid to show each.
+  const l = await moveTo(left + 1, top + height / 2);
+  assert.deepEqual([l.x, l.y], [0, 0.5]);
+  assert.match(await page.eval(`document.getElementById('video').style.objectPosition`), /^0\.\d+% 50(\.00)?%$/);
+  const r = await moveTo(left + width - 1, top + height / 2);
+  assert.equal(r.x, 1);
+  const at = [left + width * 0.3, top + height * 0.2];
+  const m = await moveTo(...at);
+  const want = toDisplay(at[0], at[1], g.box, g.vw, g.vh, g.view, 0, { shape: 'fill', pan: followPan(at[0], at[1], g.box) });
+  assert.deepEqual([m.x, m.y], [want.x, want.y]);
+  assert.ok(Math.abs(m.x - 0.3) < 0.002 && Math.abs(m.y - 0.2) < 0.002, `fill: ${m.x}, ${m.y}`);
+  await page.shot('viewer-shape-fill-4x3');
+
+  await choose('stretch');
+  assert.equal(await fit(), 'fill');
+  assert.match(await page.text('#shapeHelp'), /squeezed by about \d+%/);
+  const s = await moveTo(left + width * 0.25, top + height * 0.75);
+  assert.ok(Math.abs(s.x - 0.25) < 0.002 && Math.abs(s.y - 0.75) < 0.002, `stretch: ${s.x}, ${s.y}`);
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.prefs.v1')).shape`), 'stretch', 'remembered');
+
+  // A phone held upright: "fill" crops the sides; two fingers drag the picture sideways instead of scrolling the Mac.
+  const phone = await openPage(stack, demoUrl(), { view: PHONE, ua: UA.iphone, name: 'phone' });
+  await ready(phone);
+  await phone.eval(`(() => { const s = document.getElementById('optShape'); s.value = 'fill'; s.dispatchEvent(new Event('change')); })()`);
+  assert.equal(await phone.eval(`getComputedStyle(document.getElementById('video')).objectFit`), 'cover');
+  const before = await phone.eval('window.__perch.viewer.pan.x');
+  const n = await count(phone);
+  await phone.touch('touchStart', [{ x: 150, y: 450, id: 0 }, { x: 240, y: 450, id: 1 }]);
+  for (let i = 1; i <= 6; i++) {
+    await phone.touch('touchMove', [{ x: 150 + 15 * i, y: 450, id: 0 }, { x: 240 + 15 * i, y: 450, id: 1 }]);
+    await sleep(20);
+  }
+  await phone.touch('touchEnd', []);
+  await sleep(200);
+  assert.ok(await phone.eval('window.__perch.viewer.pan.x') < before, 'dragged right: the left part comes into view');
+  assert.deepEqual((await messages(phone, n)).filter(m => m.t === 'w' || m.t === 'b'), [], 'no scrolling or clicks on the Mac');
+});
+
+// A bar at the bottom that hides itself: it comes back only when the mouse touches the very edge, with no tab in the
+// way of clicks, and with the keys bar showing it sits on top of the keys bar rather than over it.
+test('the bar at the bottom, hiding itself: back at the very edge only, and above the keys bar', async () => {
+  const page = await openPage(stack, demoUrl({ log: '0' }));
+  await ready(page);
+  const on = () => page.eval(`document.getElementById('viewer').classList.contains('tb-on')`);
+  await page.eval(`(() => { const v = window.__perch.viewer; v.prefs.set('tbEdge', 'bottom'); v.prefs.set('tbAutoHide', true);
+    document.getElementById('optEdge').value = 'bottom'; v._placeToolbar(); v._showToolbar(); })()`);
+  await page.click('#tbKeys');
+  await page.waitFor(`!document.getElementById('keysBar').hidden`, { what: 'the keys bar' });
+  await sleep(300);
+  const rect = id => page.eval(`(() => { const b = document.getElementById('${id}').getBoundingClientRect(); return { top: b.top, bottom: b.bottom }; })()`);
+  const tb = await rect('toolbar'), keys = await rect('keysBar');
+  assert.ok(tb.bottom <= keys.top + 1, `the bar sits above the keys bar: ${JSON.stringify({ tb, keys })}`);
+  assert.equal(await page.eval(`getComputedStyle(document.getElementById('handle')).display`), 'none', 'no tab with a mouse');
+  await page.shot('viewer-bar-bottom-keys');
+  // Hidden: the mouse near (but not at) the bottom leaves it hidden; the very edge brings it back.
+  await page.eval(`window.__perch.viewer._hideToolbar(true)`);
+  assert.equal(await on(), false);
+  const H = await page.eval('innerHeight');
+  await page.mouse('mouseMoved', 640, H - 30);
+  await sleep(150);
+  assert.equal(await on(), false, '30px from the edge: still hidden');
+  await page.mouse('mouseMoved', 640, H - 1);
+  await page.waitFor(`document.getElementById('viewer').classList.contains('tb-on')`, { what: 'the bar back at the edge' });
+  assert.deepEqual(page.problems(), []);
+  await page.close();
+});

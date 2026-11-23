@@ -1,0 +1,15 @@
+{
+  "name": "perch-relay",
+  "version": "0.3.0",
+  "private": true,
+  "description": "Perch's Worker relay: passes end-to-end encrypted bytes between a Mac and a viewer when WebRTC can't connect.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.160.1"
+  }
+}

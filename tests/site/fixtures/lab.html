@@ -1,0 +1,25 @@
+<!doctype html>
+<!-- Test page in the style of About:Blank Lab: opens an about:blank tab and builds a full-size frame with DOM calls
+     (sandboxed, but with allow-same-origin), or a blob: tab holding the frame. Same origin as Perch, so allowed. -->
+<meta charset="utf-8"><title>lab</title>
+<script>
+function frameInto(doc, src) {
+  doc.title = 'Google Docs';
+  const st = doc.createElement('style');
+  st.textContent = 'html,body{margin:0;height:100%;overflow:hidden}iframe{position:fixed;inset:0;border:0;width:100%;height:100%}';
+  doc.head.append(st);
+  const f = doc.createElement('iframe');
+  f.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads');
+  f.setAttribute('allow', 'fullscreen; autoplay; publickey-credentials-get; publickey-credentials-create; clipboard-write');
+  f.src = src;
+  doc.body.append(f);
+}
+window.openLab = src => { const w = window.open('about:blank', '_blank'); frameInto(w.document, src); return !!w; };
+window.openBlob = src => {
+  const html = '<!doctype html><meta charset="utf-8"><title>blob</title><style>html,body{margin:0;height:100%}' +
+    'iframe{position:fixed;inset:0;border:0;width:100%;height:100%}</style>' +
+    '<iframe allow="publickey-credentials-get; publickey-credentials-create; autoplay; fullscreen" src="' + src + '"></iframe>';
+  const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+  return !!window.open(url, '_blank');
+};
+</script>

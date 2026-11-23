@@ -1,4 +1,4 @@
-// Constants shared by the website and the Mac host. docs/PROTOCOL.md explains each one.
+// Constants shared by the website and the Roost host on the PC. docs/PROTOCOL.md explains each one.
 
 // Wire protocol version. Bump PROTO for any incompatible change; MIN_PEER_PROTO is the oldest peer still served.
 export const PROTO = 1;
@@ -6,10 +6,10 @@ export const MIN_PEER_PROTO = 1;
 
 // Where the real website lives. Passkeys are made for RP_ID, and the Mac only accepts sign-ins from APP_ORIGIN
 // (plus a localhost origin when it runs in test mode).
-export const APP_ORIGIN = 'https://just-rice.github.io';
-export const RP_ID = 'just-rice.github.io';
-export const SITE_URL = 'https://just-rice.github.io/perch/';
-export const CONNECT_URL = 'https://just-rice.github.io/perch/connect.html';
+export const APP_ORIGIN = 'https://faarisaahmed.github.io';
+export const RP_ID = 'faarisaahmed.github.io';
+export const SITE_URL = 'https://faarisaahmed.github.io/roost/';
+export const CONNECT_URL = 'https://faarisaahmed.github.io/roost/connect.html';
 
 // Free public MQTT-over-WebSocket brokers from four separate operators, all used at once. They only carry sealed
 // rendezvous messages, which stay under 32 KB (the smallest limit seen on public brokers is about 48 KB). Node's
@@ -29,7 +29,8 @@ export const ICE_SERVERS = [
   { urls: 'stun:stun.cloudflare.com:3478' },
 ];
 
-export const TOPIC_PREFIX = 'perch/v1/';
+// Roost's own meeting points: a Roost viewer and a Perch Mac never find each other by accident.
+export const TOPIC_PREFIX = 'roost/v1/';
 export const ENVELOPE_MAX_BYTES = 64 * 1024;
 export const ENVELOPE_MAX_SKEW_MS = 5 * 60 * 1000;
 

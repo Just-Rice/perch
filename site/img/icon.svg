@@ -1,10 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0f766e"/>
-  <rect x="11" y="25" width="42" height="27" rx="4.5" fill="none" stroke="#fff" stroke-width="4"/>
-  <path d="M25 52h14" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
-  <path d="M31.5 18.5 25 15.5l2.6 6.4z" fill="#fff"/>
-  <ellipse cx="38.5" cy="19.6" rx="7.6" ry="5.6" fill="#fff"/>
-  <circle cx="44.2" cy="14.6" r="4.3" fill="#fff"/>
-  <path d="m47.8 13.2 4.2 1.4-4.2 1.4z" fill="#fff"/>
-  <circle cx="45.2" cy="13.9" r="1.1" fill="#0f766e"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Roost">
+  <defs>
+    <linearGradient id="roost-ember" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF6A2E"/>
+      <stop offset="1" stop-color="#FFC15E"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#roost-ember)"/>
+  <!-- the bird: round head, plump body, short tail, sitting on the branch -->
+  <path d="M24 41c-3.6-1.2-6-4.5-6-8.4 0-5.1 4.1-9.2 9.2-9.2h1.3c.9-4 4.4-6.9 8.6-6.9 4.9 0 8.8 3.9 8.8 8.8v2.2c0 7.5-6.1 13.5-13.6 13.5H24z" fill="#fff"/>
+  <path d="M45.9 25.1l5.1 1.9-5.1 2z" fill="#fff"/>
+  <circle cx="39.2" cy="24.6" r="1.7" fill="#2A1408"/>
+  <path d="M18.4 33.5l-6.2 3.9 7.4.4" fill="#fff"/>
+  <!-- the branch and its feet -->
+  <path d="M10 46.5h44" stroke="#2A1408" stroke-width="3.2" stroke-linecap="round"/>
+  <path d="M28 41v5.5M34 41v5.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
 </svg>

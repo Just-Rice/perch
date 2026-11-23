@@ -1,4 +1,4 @@
-// Status notes over the Mac's picture: "Your Mac is locked", "View only", "The connection is slow"… One per id, so a
+// Status notes over the PC's picture: "Your PC is locked", "View only", "The connection is slow"… One per id, so a
 // status message that repeats every few seconds updates its note instead of piling up new ones.
 import { icon } from '../ui/icons.js';
 

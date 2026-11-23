@@ -1,10 +1,10 @@
-// Opens Perch inside an about:blank tab, the same way About:Blank Lab does: an empty tab whose address bar says
+// Opens Roost inside an about:blank tab, the same way About:Blank Lab does: an empty tab whose address bar says
 // about:blank, holding a full-size frame of the real page. The blank tab belongs to this site, so passkeys, sound and
 // full screen keep working in the frame; connect.html refuses to run inside any other site's frame.
 //
 // The tab is filled with DOM calls, not document.open()/write(): document.open() gives the document the opener's
 // address (HTML spec, "document open steps"), so the tab would stop being about:blank.
-export function openInBlankTab(target = new URL('connect.html', location.href).href, title = 'Perch') {
+export function openInBlankTab(target = new URL('connect.html', location.href).href, title = 'Roost') {
   const tab = window.open('about:blank', '_blank');
   if (!tab) return { ok: false, reason: 'blocked' };
   const allow = 'fullscreen; autoplay; publickey-credentials-get; publickey-credentials-create; ' +

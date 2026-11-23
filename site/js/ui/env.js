@@ -19,9 +19,9 @@ export function pageEnv(loc = globalThis.location) {
     test,
     demo: local && q.get('demo') === '1',
     brokers,
-    // In tests the Mac and the browser are on the same computer; no public STUN server is needed (or wanted).
+    // In tests the PC and the browser are on the same computer; no public STUN server is needed (or wanted).
     iceServers: test ? [] : ICE_SERVERS,
-    // Tests: always use the Mac's Worker relay (when it has one), and accept a relay on this computer.
+    // Tests: always use the PC's Worker relay (when it has one), and accept a relay on this computer.
     transport: test && q.get('transport') === 'relay' ? 'relay' : 'auto',
     allowLocalRelay: test,
     // Passkeys belong to the real site's domain; a local copy can only use its own hostname.

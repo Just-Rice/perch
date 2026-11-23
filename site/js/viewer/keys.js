@@ -1,4 +1,4 @@
-// Keyboard messages for the Mac: `{t:"k", c, k, d, m}` with the DOM `code` (which physical key, US layout positions),
+// Keyboard messages for the PC: `{t:"k", c, k, d, m}` with the DOM `code` (which physical key, US layout positions),
 // the DOM `key`, down or up, and a modifier bitmask (docs/PROTOCOL.md, "Input and pointer channels").
 // Pure functions only, so they can be tested in Node; viewer/keyboard.js attaches them to the page.
 
@@ -21,10 +21,11 @@ const MODIFIER_CODES = new Set([
 export const isModifierCode = code => MODIFIER_CODES.has(code);
 
 // Turns a keydown/keyup event (anything with code, key, type and the modifier flags) into a message, or null for
-// events the Mac shouldn't get: keys typed into an input method (Japanese, Chinese, phone keyboards), whose result
+// events the PC shouldn't get: keys typed into an input method (Japanese, Chinese, phone keyboards), whose result
 // arrives as text instead, and events with no physical key at all.
-// `swapCtrlCmd`: on Windows, Linux and ChromeOS keyboards Control sits where ⌘ is on a Mac and people expect Ctrl+C to
-// copy, so Control and ⌘ trade places (on by default there, off for Apple devices; see ui/prefs.js).
+// `swapCtrlCmd` ("⌘ is Ctrl"): on an Apple keyboard ⌘ sits where Ctrl is on a PC's and people expect ⌘C to copy, so
+// ⌘ and Control trade places: ⌘ goes to the PC as Ctrl, and Control as the Windows key (on by default for Apple
+// devices, off elsewhere; see ui/prefs.js). Meta is the Windows key on the PC.
 export function keyMessage(e, { swapCtrlCmd = false } = {}) {
   if (e.isComposing || e.keyCode === 229 || e.key === 'Process') return null;
   let code = CODE_ALIASES[e.code] || e.code;
@@ -39,14 +40,15 @@ export function keyMessage(e, { swapCtrlCmd = false } = {}) {
   return { t: 'k', c: code, k: key, d: e.type === 'keydown', m };
 }
 
-// Remembers which keys the Mac currently thinks are held, to fix two things browsers get wrong:
+// Remembers which keys the PC currently thinks are held, to fix two things browsers get wrong:
 // - on a Mac viewer, macOS never sends keyup for a key pressed while ⌘ is held (⌘C gives "C down" only), which would
-//   leave C stuck down on the remote Mac; so letting go of ⌘ also lets go of everything pressed with it;
-// - a keyup for a key the Mac never saw go down (pressed before the viewer had focus) is dropped.
+//   leave C stuck down on the PC; so letting go of ⌘ also lets go of everything pressed with it (with "⌘ is Ctrl" on,
+//   ⌘ arrives here as Control: `physicalMeta` says it was ⌘ all the same);
+// - a keyup for a key the PC never saw go down (pressed before the viewer had focus) is dropped.
 export class HeldKeys {
   constructor() { this.held = new Map(); } // code -> key
   // Returns the messages to send for one key message.
-  handle(msg) {
+  handle(msg, { physicalMeta = false } = {}) {
     if (msg.d) {
       this.held.set(msg.c, msg.k);
       return [msg];
@@ -54,7 +56,7 @@ export class HeldKeys {
     if (!this.held.has(msg.c)) return [];
     this.held.delete(msg.c);
     const out = [msg];
-    if (msg.c === 'MetaLeft' || msg.c === 'MetaRight') {
+    if (msg.c === 'MetaLeft' || msg.c === 'MetaRight' || physicalMeta) {
       for (const [code, key] of this.held) {
         if (isModifierCode(code)) continue;
         this.held.delete(code);
@@ -63,12 +65,12 @@ export class HeldKeys {
     }
     return out;
   }
-  // Forget everything (after sending {t:"rel"}, which makes the Mac let go of every key and button).
+  // Forget everything (after sending {t:"rel"}, which makes the PC let go of every key and button).
   clear() { this.held.clear(); }
   get size() { return this.held.size; }
 }
 
-// --- presses made by the keys bar and the phone keyboard ---
+// --- presses made by the Key deck and the phone keyboard ---
 
 const MOD_KEYS = [
   [META, 'MetaLeft', 'Meta'],
@@ -96,7 +98,7 @@ export function pressMessages(code, key, m = 0) {
   return out;
 }
 
-// The keys bar's special keys and shortcuts (always Mac keys: ⌘ is ⌘ whatever keyboard the viewer has).
+// The Key deck's special keys and shortcuts (always the PC's keys: Win is Win whatever keyboard the viewer has).
 export const SHORTCUTS = {
   esc: { code: 'Escape', key: 'Escape', m: 0 },
   tab: { code: 'Tab', key: 'Tab', m: 0 },
@@ -106,14 +108,16 @@ export const SHORTCUTS = {
   right: { code: 'ArrowRight', key: 'ArrowRight', m: 0 },
   delete: { code: 'Backspace', key: 'Backspace', m: 0 },
   enter: { code: 'Enter', key: 'Enter', m: 0 },
-  cmdTab: { code: 'Tab', key: 'Tab', m: META },
-  missionControl: { code: 'ArrowUp', key: 'ArrowUp', m: CTRL },
-  spotlight: { code: 'Space', key: ' ', m: META },
-  cmdQ: { code: 'KeyQ', key: 'q', m: META },
-  cmdW: { code: 'KeyW', key: 'w', m: META },
+  start: { code: 'MetaLeft', key: 'Meta', m: 0 },
+  altTab: { code: 'Tab', key: 'Tab', m: ALT },
+  taskView: { code: 'Tab', key: 'Tab', m: META },
+  showDesktop: { code: 'KeyD', key: 'd', m: META },
+  closeApp: { code: 'F4', key: 'F4', m: ALT },
+  taskManager: { code: 'Escape', key: 'Escape', m: CTRL | SHIFT },
+  paste: { code: 'KeyV', key: 'v', m: CTRL },
 };
 
-// US-layout position of a typed character, for shortcuts made with the sticky modifiers (⌘ then "c" on a phone
+// US-layout position of a typed character, for shortcuts made with the sticky modifiers (Ctrl then "c" on a phone
 // keyboard must press the C key, not type the letter). Returns {code, key, shift} or null.
 const PUNCT = {
   ' ': ['Space', false], '-': ['Minus', false], '_': ['Minus', true], '=': ['Equal', false], '+': ['Equal', true],

@@ -153,17 +153,32 @@ test('lastUsedText', () => {
 });
 
 test('Prefs: defaults depend on the keyboard; saved values are checked', () => {
-  assert.equal(defaultPrefs({ apple: true }).swapCtrlCmd, false);
-  assert.equal(defaultPrefs({ apple: false }).swapCtrlCmd, true);
+  // "⌘ is Ctrl": on for Apple keyboards, off for PC ones.
+  assert.equal(defaultPrefs({ apple: true }).swapCtrlCmd, true);
+  assert.equal(defaultPrefs({ apple: false }).swapCtrlCmd, false);
   const st = memStorage();
   st.setItem(PREFS_KEY, JSON.stringify({ quality: 'ultra', swapCtrlCmd: 'yes', volume: 7, muted: true, backupName: 'x'.repeat(99) }));
   const p = new Prefs({ storage: st, apple: false });
   assert.equal(p.get('quality'), 'balanced', 'unknown preset ignored');
-  assert.equal(p.get('swapCtrlCmd'), true, 'non-boolean ignored');
+  assert.equal(p.get('swapCtrlCmd'), false, 'non-boolean ignored');
   assert.equal(p.get('volume'), 1, 'clamped');
   assert.equal(p.get('muted'), true);
   assert.equal(p.get('backupName').length, 40);
   p.set('quality', 'sharp');
   assert.equal(new Prefs({ storage: st }).get('quality'), 'sharp');
   assert.doesNotThrow(() => new Prefs({ storage: memStorage({ throwOn: 'getset' }) }).set('volume', 0.5));
+  assert.equal(PREFS_KEY, 'roost.prefs.v1');
+});
+
+test('Prefs: the Dock\'s place and habits are checked when loaded', () => {
+  const st = memStorage();
+  st.setItem(PREFS_KEY, JSON.stringify({ dockAt: 'middle', dockIdle: 'vanish', dockRoom: 'yes', dockOrb: true }));
+  const p = new Prefs({ storage: st });
+  assert.equal(p.get('dockAt'), null, 'unknown place: the device decides');
+  assert.equal(p.get('dockIdle'), null);
+  assert.equal(p.get('dockRoom'), null);
+  assert.equal(p.get('dockOrb'), true);
+  st.setItem(PREFS_KEY, JSON.stringify({ dockAt: 'bottom-right', dockIdle: 'orb', dockRoom: false }));
+  const q = new Prefs({ storage: st });
+  assert.deepEqual([q.get('dockAt'), q.get('dockIdle'), q.get('dockRoom')], ['bottom-right', 'orb', false]);
 });

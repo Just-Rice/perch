@@ -2,7 +2,7 @@
 // Pure functions: they take the plain stats objects, so tests can feed them made-up reports.
 import { routeOf, ROUTE_WORDS } from '../shared/route.js';
 
-// Picks the few numbers Perch shows out of a stats report (anything iterable of stats objects, or a Map).
+// Picks the few numbers Roost shows out of a stats report (anything iterable of stats objects, or a Map).
 export function readStats(report) {
   const snap = { t: 0, video: null, audio: null, rttMs: null };
   for (const s of (report.values ? report.values() : report)) {
@@ -63,7 +63,7 @@ export function summarize(prev, cur) {
   return out;
 }
 
-// good / fair / poor, from what this browser measures and what the Mac reports (`status.link`).
+// good / fair / poor, from what this browser measures and what the PC reports (`status.link`).
 export function linkQuality({ rttMs = null, lossPct = null, macSaysSlow = false } = {}) {
   if ((lossPct != null && lossPct > 8) || (rttMs != null && rttMs > 400)) return 'poor';
   if (macSaysSlow || (lossPct != null && lossPct > 2) || (rttMs != null && rttMs > 150)) return 'fair';

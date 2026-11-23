@@ -1,10 +1,10 @@
-// Keys and typing → the Mac. Three sources:
-//   - a real keyboard while the Mac's picture has focus (keydown/keyup → {t:"k"});
+// Keys and typing → the PC. Three sources:
+//   - a real keyboard while the PC's picture has focus (keydown/keyup → {t:"k"});
 //   - a phone or tablet keyboard, which types into an invisible text box (→ {t:"txt"}, plus key presses for
 //     Backspace, Enter, Tab and arrows);
-//   - the keys bar: sticky ⌘ ⌥ ⌃ ⇧, Esc, Tab, arrows and a few Mac shortcuts.
-// Our own controls (the toolbar, its menus) keep their keys.
-import { keyMessage, HeldKeys, pressMessages, SHORTCUTS, charToKey, textMessages, SHIFT, META } from './keys.js';
+//   - the Key deck: sticky Win, Ctrl, Alt and Shift, Esc, Tab, arrows and Windows shortcuts.
+// Our own controls (the Dock, the Command palette, Tweaks) keep their keys.
+import { keyMessage, HeldKeys, pressMessages, SHORTCUTS, charToKey, textMessages, SHIFT, CTRL } from './keys.js';
 
 const OWN_KEYS = new Set(['Backspace', 'Enter', 'Tab', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Delete', 'Home', 'End', 'PageUp', 'PageDown']);
 
@@ -12,15 +12,15 @@ const OWN_KEYS = new Set(['Backspace', 'Enter', 'Tab', 'Escape', 'ArrowLeft', 'A
 const SENTINEL = ' ';
 
 export class KeyboardInput {
-  // shortcut(id): what a keys bar button with data-key="id" presses ({code, key, m}), or null.
-  // onPasteKey(): ⌘V (Ctrl+V with the keys swapped) was pressed; true means the viewer pastes this device's clipboard
-  // on the Mac itself, so the key is held back and the browser's own paste event is let through.
+  // shortcut(id): what a Key deck button with data-key="id" presses ({code, key, m}), or null.
+  // onPasteKey(): Ctrl+V (⌘V with "⌘ is Ctrl") was pressed; true means the viewer pastes this device's clipboard on
+  // the PC itself, so the key is held back and the browser's own paste event is let through.
   constructor({ surface, softkbd, keysBar, session, swapCtrlCmd, enabled = () => true, onActivity = () => {}, shortcut = id => SHORTCUTS[id],
     onPasteKey = () => false }) {
     Object.assign(this, { surface, softkbd, keysBar, session, swapCtrlCmd, enabled, onActivity, shortcut, onPasteKey });
     this.heldBackV = false;
     this.held = new HeldKeys();
-    this.sticky = 0;       // modifier bits latched on the keys bar
+    this.sticky = 0;       // modifier bits latched on the Key deck
     this.composing = false;
     this.listeners = [];
   }
@@ -44,7 +44,7 @@ export class KeyboardInput {
     });
     on(t, 'focus', () => this._resetBox());
 
-    // Keys bar buttons must not take focus away from the phone keyboard's text box (that would close the keyboard).
+    // Key deck buttons must not take focus away from the phone keyboard's text box (that would close the keyboard).
     on(this.keysBar, 'pointerdown', e => { if (e.target.closest('button')) e.preventDefault(); });
     on(this.keysBar, 'click', e => this._keysBarClick(e));
   }
@@ -70,7 +70,7 @@ export class KeyboardInput {
 
   get softKeyboardOpen() { return document.activeElement === this.softkbd; }
 
-  // Lets go of every key and button on the Mac (the viewer lost focus, so it would never see them come back up).
+  // Lets go of every key and button on the PC (the viewer lost focus, so it would never see them come back up).
   releaseAll() {
     if (this.held.size || this.sticky) this.session.sendInput({ t: 'rel' });
     this.held.clear();
@@ -91,7 +91,7 @@ export class KeyboardInput {
     const msg = keyMessage(e, { swapCtrlCmd: this.swapCtrlCmd() });
     if (!msg) return;
     // Paste: the browser's paste event (with this device's clipboard, pictures too) follows, if not prevented.
-    if (msg.c === 'KeyV' && msg.d && msg.m === META && !inSoft && !this.sticky && (e.ctrlKey || e.metaKey) && !e.altKey &&
+    if (msg.c === 'KeyV' && msg.d && msg.m === CTRL && !inSoft && !this.sticky && (e.ctrlKey || e.metaKey) && !e.altKey &&
         this.onPasteKey()) {
       this.onActivity(e);
       this.heldBackV = true;
@@ -112,7 +112,8 @@ export class KeyboardInput {
       return;
     }
     if (this.sticky && !msg.d && !isModifier(msg.c)) return; // its press already went out with the sticky keys
-    for (const m of this.held.handle(msg)) this.session.sendInput(m);
+    const physicalMeta = /^(Meta|OS)(Left|Right)$/.test(e.code);
+    for (const m of this.held.handle(msg, { physicalMeta })) this.session.sendInput(m);
   }
 
   // --- phone keyboard ---
@@ -149,7 +150,7 @@ export class KeyboardInput {
   _text(s) {
     this.onActivity();
     if (this.sticky) {
-      // ⌘ then "c" means the shortcut ⌘C, not the letter c.
+      // Ctrl then "c" means the shortcut Ctrl+C, not the letter c.
       for (const ch of s) {
         const k = charToKey(ch);
         if (k) for (const m of pressMessages(k.code, k.key, this.sticky | (k.shift ? SHIFT : 0))) this.session.sendInput(m);
@@ -160,7 +161,7 @@ export class KeyboardInput {
     for (const m of textMessages(s)) this.session.sendInput(m);
   }
 
-  // --- keys bar ---
+  // --- the Key deck ---
 
   _keysBarClick(e) {
     const b = e.target.closest('button');
@@ -174,17 +175,18 @@ export class KeyboardInput {
     if (s) this._press(s);
   }
 
-  // ⌘V on the Mac: just V if ⌘ is still held down there (the person hasn't let go of it), otherwise the whole press.
+  // Ctrl+V on the PC: just V if Ctrl is still held down there (the person hasn't let go of it), otherwise the whole
+  // press.
   pasteKey() {
-    const metaHeld = ['MetaLeft', 'MetaRight'].some(c => this.held.held.has(c));
-    const msgs = metaHeld
-      ? [{ t: 'k', c: 'KeyV', k: 'v', d: true, m: META }, { t: 'k', c: 'KeyV', k: 'v', d: false, m: META }]
-      : pressMessages('KeyV', 'v', META);
+    const ctrlHeld = ['ControlLeft', 'ControlRight'].some(c => this.held.held.has(c));
+    const msgs = ctrlHeld
+      ? [{ t: 'k', c: 'KeyV', k: 'v', d: true, m: CTRL }, { t: 'k', c: 'KeyV', k: 'v', d: false, m: CTRL }]
+      : pressMessages('KeyV', 'v', CTRL);
     for (const m of msgs) this.session.sendInput(m);
   }
 
   _press(s) {
-    // One of the Mac's special keys (volume, brightness, media): the Mac app presses it itself.
+    // One of the PC's special keys (brightness): the Roost app presses it itself.
     if (s.sys) this.session.sendInput({ t: 'sys', k: s.sys });
     else for (const m of pressMessages(s.code, s.key, s.m | this.sticky)) this.session.sendInput(m);
     this._setSticky(0);

@@ -1,7 +1,7 @@
-// Where a finger or the mouse is on the Mac's screen.
+// Where a finger or the mouse is on the PC's screen.
 //
 // The picture's shape on this screen ("shape"): "fit" shows it whole with `object-fit: contain`, so a picture with a
-// different shape from the window gets black bars (letterboxing) and only the middle part is the Mac's screen; "fill"
+// different shape from the window gets black bars (letterboxing) and only the middle part is the PC's screen; "fill"
 // covers the window (`object-fit: cover`) and slides to show the part that doesn't fit (`object-position`, the "pan",
 // 0..1 each way); "stretch" squeezes it to the window's shape (`object-fit: fill`). On top of that the viewer can zoom in locally
 // (pinch on a phone): the box is moved and scaled with a CSS transform `translate(x, y) scale(s)` whose origin is the
@@ -29,8 +29,8 @@ export function pictureRect(width, height, videoWidth, videoHeight, shape = 'fit
 
 export const containRect = (width, height, videoWidth, videoHeight) => pictureRect(width, height, videoWidth, videoHeight);
 
-// "fill": where the picture should slide so the spot under the pointer is that same fraction of the Mac's screen as of
-// the window: the pointer at the window's edge is at the Mac's edge, and nothing is out of reach. Undoes the zoom.
+// "fill": where the picture should slide so the spot under the pointer is that same fraction of the PC's screen as of
+// the window: the pointer at the window's edge is at the PC's edge, and nothing is out of reach. Undoes the zoom.
 export function followPan(clientX, clientY, box, view = IDENTITY) {
   if (!(box.width > 0 && box.height > 0)) return CENTER;
   const lx = (clientX - box.left - view.x) / view.scale, ly = (clientY - box.top - view.y) / view.scale;
@@ -47,7 +47,7 @@ export function shownScale(width, height, videoWidth, videoHeight, shape = 'fit'
 // getBoundingClientRect() gives for the element that holds the zoomed wrapper), `view` the local zoom and pan.
 // Returns {x, y, inside}: x and y are clamped to 0..1 so a drag that leaves the picture still ends on the edge.
 // `edgePx`: within this many page pixels of the picture's edge counts as the edge itself. The page's pointer can't go
-// past the last row of pixels, which (with the Mac's screen shrunk to fit) is a little short of the Mac's last row, so
+// past the last row of pixels, which (with the PC's screen shrunk to fit) is a little short of the PC's last row, so
 // the Dock or a full-screen app's menu bar, which wait for the pointer at the very edge, would never come.
 // `layout`: the picture's shape and, for "fill", where it has slid to ({shape, pan}).
 export function toDisplay(clientX, clientY, box, videoWidth, videoHeight, view = IDENTITY, edgePx = 0, layout = FIT) {

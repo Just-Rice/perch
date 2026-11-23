@@ -1,85 +1,92 @@
-// The keys bar's buttons: a catalog of Mac keys and shortcuts to choose from, the person's own shortcuts, and which
-// of them are on the bar. Pure functions only (tested in Node); viewer/viewer.js draws the bar and the editor.
+// The Key deck's buttons: a catalog of the PC's keys and Windows shortcuts to choose from, the person's own shortcuts,
+// and which of them are on the deck. Pure functions only (tested in Node); viewer/viewer.js draws the deck, the
+// editor and the Command palette's "Press …" entries from the same list.
 import { SHIFT, CTRL, ALT, META } from './keys.js';
 
 const k = (id, label, title, code, key, m = 0, group = 'Keys') => ({ id, label, title, code, key, m, group });
 
-export const GROUPS = ['Keys', 'Switching', 'Editing', 'Browser', 'System', 'Mac controls', 'Function keys'];
-// The Mac's special keys (sound, brightness, media): not shortcuts but keys of their own, pressed by the Mac app.
-const mk = (id, label, title, sys) => ({ id, label, title, sys, code: '', key: '', m: 0, group: 'Mac controls' });
+export const GROUPS = ['Keys', 'Windows', 'Editing', 'Browser', 'System', 'PC controls', 'Function keys'];
+// The PC's special keys: not shortcuts but keys of their own, pressed by the Roost app (only brightness on Windows:
+// a viewer never makes the PC itself play sound, so no volume or media keys).
+const sys = (id, label, title, key) => ({ id, label, title, sys: key, code: '', key: '', m: 0, group: 'PC controls' });
 
 export const CATALOG = [
-  k('esc', 'esc', 'Escape', 'Escape', 'Escape'),
-  k('tab', 'tab', 'Tab', 'Tab', 'Tab'),
+  k('esc', 'Esc', 'Escape', 'Escape', 'Escape'),
+  k('tab', 'Tab', 'Tab', 'Tab', 'Tab'),
   k('left', '←', 'Left arrow', 'ArrowLeft', 'ArrowLeft'),
   k('up', '↑', 'Up arrow', 'ArrowUp', 'ArrowUp'),
   k('down', '↓', 'Down arrow', 'ArrowDown', 'ArrowDown'),
   k('right', '→', 'Right arrow', 'ArrowRight', 'ArrowRight'),
-  k('delete', '⌫', 'Delete', 'Backspace', 'Backspace'),
-  k('fwdDelete', '⌦', 'Forward delete', 'Delete', 'Delete'),
-  k('enter', 'return', 'Return', 'Enter', 'Enter'),
-  k('space', 'space', 'Space bar', 'Space', ' '),
-  k('home', 'home', 'Home', 'Home', 'Home'),
-  k('end', 'end', 'End', 'End', 'End'),
-  k('pageUp', 'pg up', 'Page up', 'PageUp', 'PageUp'),
-  k('pageDown', 'pg dn', 'Page down', 'PageDown', 'PageDown'),
+  k('delete', '⌫', 'Backspace', 'Backspace', 'Backspace'),
+  k('fwdDelete', 'Del', 'Delete', 'Delete', 'Delete'),
+  k('enter', 'Enter', 'Enter', 'Enter', 'Enter'),
+  k('space', 'Space', 'Space bar', 'Space', ' '),
+  k('home', 'Home', 'Home', 'Home', 'Home'),
+  k('end', 'End', 'End', 'End', 'End'),
+  k('pageUp', 'PgUp', 'Page up', 'PageUp', 'PageUp'),
+  k('pageDown', 'PgDn', 'Page down', 'PageDown', 'PageDown'),
+  k('insert', 'Ins', 'Insert', 'Insert', 'Insert'),
+  k('printScreen', 'PrtSc', 'Print Screen', 'PrintScreen', 'PrintScreen'),
 
-  k('cmdTab', '⌘ Tab', 'Switch apps', 'Tab', 'Tab', META, 'Switching'),
-  k('cmdShiftTab', '⌘⇧ Tab', 'Switch apps, backwards', 'Tab', 'Tab', META | SHIFT, 'Switching'),
-  k('nextWindow', '⌘`', 'Next window of this app', 'Backquote', '`', META, 'Switching'),
-  k('prevWindow', '⌘⇧`', 'Previous window of this app', 'Backquote', '~', META | SHIFT, 'Switching'),
-  k('spaceLeft', '⌃←', 'Desktop or full-screen app to the left', 'ArrowLeft', 'ArrowLeft', CTRL, 'Switching'),
-  k('spaceRight', '⌃→', 'Desktop or full-screen app to the right', 'ArrowRight', 'ArrowRight', CTRL, 'Switching'),
-  k('missionControl', 'Mission Control', 'Mission Control (⌃↑)', 'ArrowUp', 'ArrowUp', CTRL, 'Switching'),
-  k('appWindows', 'App windows', "All of this app's windows (⌃↓)", 'ArrowDown', 'ArrowDown', CTRL, 'Switching'),
-  k('showDesktop', 'Desktop', 'Show the desktop (F11)', 'F11', 'F11', 0, 'Switching'),
-  k('dock', 'Dock', 'Show the Dock (⌃F3)', 'F3', 'F3', CTRL, 'Switching'),
-  k('minimize', '⌘M', 'Minimize window', 'KeyM', 'm', META, 'Switching'),
-  k('hide', '⌘H', 'Hide this app', 'KeyH', 'h', META, 'Switching'),
-  k('fullScreenApp', '⌃⌘F', 'Full screen on or off', 'KeyF', 'f', META | CTRL, 'Switching'),
-  k('cmdW', '⌘W', 'Close window or tab', 'KeyW', 'w', META, 'Switching'),
-  k('cmdQ', '⌘Q', 'Quit app', 'KeyQ', 'q', META, 'Switching'),
+  k('start', 'Start', 'Start menu (Win)', 'MetaLeft', 'Meta', 0, 'Windows'),
+  k('altTab', 'Alt+Tab', 'Switch apps', 'Tab', 'Tab', ALT, 'Windows'),
+  k('altShiftTab', 'Alt+Shift+Tab', 'Switch apps, backwards', 'Tab', 'Tab', ALT | SHIFT, 'Windows'),
+  k('taskView', 'Task View', 'Task View (Win+Tab)', 'Tab', 'Tab', META, 'Windows'),
+  k('showDesktop', 'Desktop', 'Show the desktop (Win+D)', 'KeyD', 'd', META, 'Windows'),
+  k('desktopLeft', 'Desktop ←', 'Virtual desktop to the left (Win+Ctrl+←)', 'ArrowLeft', 'ArrowLeft', META | CTRL, 'Windows'),
+  k('desktopRight', 'Desktop →', 'Virtual desktop to the right (Win+Ctrl+→)', 'ArrowRight', 'ArrowRight', META | CTRL, 'Windows'),
+  k('snapLeft', 'Snap ←', 'Snap window left (Win+←)', 'ArrowLeft', 'ArrowLeft', META, 'Windows'),
+  k('snapRight', 'Snap →', 'Snap window right (Win+→)', 'ArrowRight', 'ArrowRight', META, 'Windows'),
+  k('maximize', 'Maximize', 'Maximize window (Win+↑)', 'ArrowUp', 'ArrowUp', META, 'Windows'),
+  k('minimize', 'Minimize', 'Minimize window (Win+↓)', 'ArrowDown', 'ArrowDown', META, 'Windows'),
+  k('minimizeAll', 'Win+M', 'Minimize all windows', 'KeyM', 'm', META, 'Windows'),
+  k('closeApp', 'Alt+F4', 'Close the app', 'F4', 'F4', ALT, 'Windows'),
+  k('closeTab', 'Ctrl+W', 'Close window or tab', 'KeyW', 'w', CTRL, 'Windows'),
+  k('explorer', 'Win+E', 'File Explorer', 'KeyE', 'e', META, 'Windows'),
 
-  k('copy', '⌘C', 'Copy', 'KeyC', 'c', META, 'Editing'),
-  k('paste', '⌘V', 'Paste', 'KeyV', 'v', META, 'Editing'),
-  k('cut', '⌘X', 'Cut', 'KeyX', 'x', META, 'Editing'),
-  k('undo', '⌘Z', 'Undo', 'KeyZ', 'z', META, 'Editing'),
-  k('redo', '⌘⇧Z', 'Redo', 'KeyZ', 'Z', META | SHIFT, 'Editing'),
-  k('selectAll', '⌘A', 'Select all', 'KeyA', 'a', META, 'Editing'),
-  k('find', '⌘F', 'Find', 'KeyF', 'f', META, 'Editing'),
-  k('save', '⌘S', 'Save', 'KeyS', 's', META, 'Editing'),
-  k('emoji', 'Emoji', 'Emoji & symbols (⌃⌘Space)', 'Space', ' ', META | CTRL, 'Editing'),
+  k('copy', 'Ctrl+C', 'Copy', 'KeyC', 'c', CTRL, 'Editing'),
+  k('paste', 'Ctrl+V', 'Paste', 'KeyV', 'v', CTRL, 'Editing'),
+  k('cut', 'Ctrl+X', 'Cut', 'KeyX', 'x', CTRL, 'Editing'),
+  k('undo', 'Ctrl+Z', 'Undo', 'KeyZ', 'z', CTRL, 'Editing'),
+  k('redo', 'Ctrl+Y', 'Redo', 'KeyY', 'y', CTRL, 'Editing'),
+  k('selectAll', 'Ctrl+A', 'Select all', 'KeyA', 'a', CTRL, 'Editing'),
+  k('find', 'Ctrl+F', 'Find', 'KeyF', 'f', CTRL, 'Editing'),
+  k('save', 'Ctrl+S', 'Save', 'KeyS', 's', CTRL, 'Editing'),
+  k('clipHistory', 'Win+V', 'Clipboard history', 'KeyV', 'v', META, 'Editing'),
+  k('emoji', 'Emoji', 'Emoji and symbols (Win+.)', 'Period', '.', META, 'Editing'),
 
-  k('nextTab', 'Tab →', 'Next tab (⌃Tab)', 'Tab', 'Tab', CTRL, 'Browser'),
-  k('prevTab', '← Tab', 'Previous tab (⌃⇧Tab)', 'Tab', 'Tab', CTRL | SHIFT, 'Browser'),
-  k('newTab', '⌘T', 'New tab', 'KeyT', 't', META, 'Browser'),
-  k('reopenTab', '⌘⇧T', 'Reopen closed tab', 'KeyT', 'T', META | SHIFT, 'Browser'),
-  k('newWindow', '⌘N', 'New window', 'KeyN', 'n', META, 'Browser'),
-  k('reload', '⌘R', 'Reload', 'KeyR', 'r', META, 'Browser'),
-  k('back', '⌘[', 'Back', 'BracketLeft', '[', META, 'Browser'),
-  k('forward', '⌘]', 'Forward', 'BracketRight', ']', META, 'Browser'),
-  k('address', '⌘L', 'Address bar', 'KeyL', 'l', META, 'Browser'),
+  k('nextTab', 'Tab →', 'Next tab (Ctrl+Tab)', 'Tab', 'Tab', CTRL, 'Browser'),
+  k('prevTab', '← Tab', 'Previous tab (Ctrl+Shift+Tab)', 'Tab', 'Tab', CTRL | SHIFT, 'Browser'),
+  k('newTab', 'Ctrl+T', 'New tab', 'KeyT', 't', CTRL, 'Browser'),
+  k('reopenTab', 'Ctrl+Shift+T', 'Reopen closed tab', 'KeyT', 'T', CTRL | SHIFT, 'Browser'),
+  k('newWindow', 'Ctrl+N', 'New window', 'KeyN', 'n', CTRL, 'Browser'),
+  k('reload', 'F5', 'Reload', 'F5', 'F5', 0, 'Browser'),
+  k('back', 'Alt+←', 'Back', 'ArrowLeft', 'ArrowLeft', ALT, 'Browser'),
+  k('forward', 'Alt+→', 'Forward', 'ArrowRight', 'ArrowRight', ALT, 'Browser'),
+  k('address', 'Ctrl+L', 'Address bar', 'KeyL', 'l', CTRL, 'Browser'),
 
-  k('forceQuit', 'Force Quit', 'Force Quit menu (⌘⌥Esc)', 'Escape', 'Escape', META | ALT, 'System'),
-  k('spotlight', 'Spotlight', 'Spotlight (⌘ Space)', 'Space', ' ', META, 'System'),
-  k('screenshot', '⌘⇧4', 'Screenshot of an area', 'Digit4', '$', META | SHIFT, 'System'),
-  k('screenshotTool', '⌘⇧5', 'Screenshot and recording tools', 'Digit5', '%', META | SHIFT, 'System'),
-  k('lock', 'Lock', 'Lock the screen (⌃⌘Q)', 'KeyQ', 'q', META | CTRL, 'System'),
-  k('settings', '⌘,', "This app's settings", 'Comma', ',', META, 'System'),
+  // Ctrl+Alt+Del and Win+L can't be pressed by any program (Windows keeps them for itself): Task Manager stands in.
+  k('taskManager', 'Task Manager', 'Task Manager (Ctrl+Shift+Esc)', 'Escape', 'Escape', CTRL | SHIFT, 'System'),
+  k('search', 'Search', 'Search (Win+S)', 'KeyS', 's', META, 'System'),
+  k('run', 'Run', 'Run a command (Win+R)', 'KeyR', 'r', META, 'System'),
+  k('settings', 'Settings', 'Windows Settings (Win+I)', 'KeyI', 'i', META, 'System'),
+  k('snip', 'Snip', 'Snipping Tool: screenshot of an area (Win+Shift+S)', 'KeyS', 'S', META | SHIFT, 'System'),
+  k('quickLink', 'Win+X', 'Quick Link menu', 'KeyX', 'x', META, 'System'),
+  k('notifications', 'Win+N', 'Notifications', 'KeyN', 'n', META, 'System'),
+  k('quickSettings', 'Win+A', 'Quick Settings', 'KeyA', 'a', META, 'System'),
+  k('contextMenu', 'Menu', 'Right-click menu (Shift+F10)', 'F10', 'F10', SHIFT, 'System'),
 
-  mk('brightnessUp', 'Bright +', 'Screen brighter', 'brightnessUp'),
-  mk('brightnessDown', 'Bright −', 'Screen dimmer', 'brightnessDown'),
-  mk('keyboardLightUp', 'Keys light +', 'Keyboard backlight brighter', 'keyboardLightUp'),
-  mk('keyboardLightDown', 'Keys light −', 'Keyboard backlight dimmer', 'keyboardLightDown'),
+  sys('brightnessUp', 'Bright +', 'Screen brighter', 'brightnessUp'),
+  sys('brightnessDown', 'Bright −', 'Screen dimmer', 'brightnessDown'),
 
   ...Array.from({ length: 12 }, (_, i) => k(`f${i + 1}`, `F${i + 1}`, `F${i + 1}`, `F${i + 1}`, `F${i + 1}`, 0, 'Function keys')),
 ];
 
 const BY_ID = new Map(CATALOG.map(s => [s.id, s]));
 
-// What the bar shows until the person changes it (what it always showed).
-export const DEFAULT_BAR = ['esc', 'tab', 'left', 'up', 'down', 'right', 'delete', 'cmdTab', 'missionControl', 'spotlight', 'cmdW', 'cmdQ',
-  'forceQuit'];
+// What the deck shows until the person changes it.
+export const DEFAULT_BAR = ['esc', 'tab', 'left', 'up', 'down', 'right', 'delete', 'start', 'altTab', 'taskView', 'showDesktop',
+  'closeApp', 'taskManager'];
 export const FUNCTION_KEYS = CATALOG.filter(s => s.group === 'Function keys').map(s => s.id);
 
 // Keys a homemade shortcut can press, as [code, key, label].
@@ -87,19 +94,19 @@ export const CUSTOM_KEYS = [
   ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(c => [`Key${c}`, c.toLowerCase(), c]),
   ...'0123456789'.split('').map(c => [`Digit${c}`, c, c]),
   ...Array.from({ length: 20 }, (_, i) => [`F${i + 1}`, `F${i + 1}`, `F${i + 1}`]),
-  ['Escape', 'Escape', 'esc'], ['Tab', 'Tab', 'tab'], ['Space', ' ', 'space'], ['Enter', 'Enter', 'return'],
-  ['Backspace', 'Backspace', '⌫'], ['Delete', 'Delete', '⌦'],
+  ['Escape', 'Escape', 'Esc'], ['Tab', 'Tab', 'Tab'], ['Space', ' ', 'Space'], ['Enter', 'Enter', 'Enter'],
+  ['Backspace', 'Backspace', '⌫'], ['Delete', 'Delete', 'Del'], ['Insert', 'Insert', 'Ins'], ['PrintScreen', 'PrintScreen', 'PrtSc'],
   ['ArrowLeft', 'ArrowLeft', '←'], ['ArrowRight', 'ArrowRight', '→'], ['ArrowUp', 'ArrowUp', '↑'], ['ArrowDown', 'ArrowDown', '↓'],
-  ['Home', 'Home', 'home'], ['End', 'End', 'end'], ['PageUp', 'PageUp', 'pg up'], ['PageDown', 'PageDown', 'pg dn'],
+  ['Home', 'Home', 'Home'], ['End', 'End', 'End'], ['PageUp', 'PageUp', 'PgUp'], ['PageDown', 'PageDown', 'PgDn'],
   ['Backquote', '`', '`'], ['Minus', '-', '-'], ['Equal', '=', '='], ['BracketLeft', '[', '['], ['BracketRight', ']', ']'],
   ['Backslash', '\\', '\\'], ['Semicolon', ';', ';'], ['Quote', "'", "'"], ['Comma', ',', ','], ['Period', '.', '.'],
   ['Slash', '/', '/'],
 ];
 const CUSTOM_BY_CODE = new Map(CUSTOM_KEYS.map(c => [c[0], c]));
 
-// ⌃⌥⇧⌘ in the order Macs write them.
+// "Win+Ctrl+Alt+Shift+", in the order Windows writes them.
 export function modLabel(m) {
-  return (m & CTRL ? '⌃' : '') + (m & ALT ? '⌥' : '') + (m & SHIFT ? '⇧' : '') + (m & META ? '⌘' : '');
+  return (m & META ? 'Win+' : '') + (m & CTRL ? 'Ctrl+' : '') + (m & ALT ? 'Alt+' : '') + (m & SHIFT ? 'Shift+' : '');
 }
 
 // A homemade shortcut from the editor's choices, or null if it isn't one (no such key).
@@ -107,7 +114,7 @@ export function makeCustom(code, m, label = '') {
   const c = CUSTOM_BY_CODE.get(code);
   if (!c || !Number.isInteger(m) || m < 0 || m > 15) return null;
   const name = String(label).trim().slice(0, 16);
-  const combo = modLabel(m) + (c[2].length > 1 && m ? ' ' : '') + c[2];
+  const combo = modLabel(m) + c[2];
   return { id: `c:${modLabel(m)}${code}`, name, label: name || combo, title: name ? `${name} (${combo})` : combo, code, key: c[1], m, group: 'Yours' };
 }
 
@@ -141,13 +148,13 @@ export function toggleOnBar(bar, id, on) {
   return on ? [...rest, id] : rest;
 }
 
-// --- swipes: a swipe sideways (two fingers on a touchpad, three on a touch screen) switches things on the Mac ---
+// --- swipes: a swipe sideways (two fingers on a touchpad, three on a touch screen) switches things on the PC ---
+// (Up and down: Task View and the desktop, in viewer.js.)
 
 export const SWIPE_ACTIONS = {
-  apps: { label: 'Switch apps (⌘Tab)' },
-  spaces: { label: 'Switch desktops and full-screen apps (⌃← ⌃→)', next: 'spaceRight', prev: 'spaceLeft' },
-  windows: { label: "Switch this app's windows (⌘`)", next: 'nextWindow', prev: 'prevWindow' },
-  tabs: { label: 'Switch browser tabs (⌃Tab)', next: 'nextTab', prev: 'prevTab' },
+  apps: { label: 'Switch apps (Alt+Tab)' },
+  desktops: { label: 'Switch virtual desktops (Win+Ctrl+← →)', next: 'desktopRight', prev: 'desktopLeft' },
+  tabs: { label: 'Switch browser tabs (Ctrl+Tab)', next: 'nextTab', prev: 'prevTab' },
   off: { label: 'Nothing (scroll sideways)' },
 };
 export const DEFAULT_SWIPE = 'apps';

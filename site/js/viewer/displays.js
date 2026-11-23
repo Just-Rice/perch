@@ -1,9 +1,9 @@
-// The Mac's displays as they sit on the desk, for the display picker's map and for the edge flip: holding the pointer
+// The PC's displays as they sit on the desk, for the display picker's map and for the edge flip: holding the pointer
 // at an edge of the picture (or pushing a captured mouse past it) moves the view to the display beyond that edge, as
-// the pointer would move at the Mac. Pure: no page, no clock of its own.
+// the pointer would move at the PC. Pure: no page, no clock of its own.
 //
-// Displays are {id, name, width, height, x?, y?, main} in points; x and y are the top-left corner in the Mac's
-// arrangement (System Settings › Displays). A Mac from before 0.3.3 doesn't send them: its displays are then taken to
+// Displays are {id, name, width, height, x?, y?, main} in points; x and y are the top-left corner in the PC's
+// arrangement (System Settings › Displays). A PC from before 0.3.3 doesn't send them: its displays are then taken to
 // sit side by side, left to right, in the order listed.
 
 export const EDGE_DWELL_MS = 400;   // resting at the edge this long flips
@@ -12,7 +12,7 @@ const TOUCH_PT = 2;                 // how close two edges count as touching, in
 
 const placed = (displays) => displays.length > 0 && displays.every(d => Number.isFinite(d.x) && Number.isFinite(d.y));
 
-// Every display with a position: the Mac's own, or side by side.
+// Every display with a position: the PC's own, or side by side.
 export function arrangement(displays) {
   if (placed(displays)) return displays.map(d => ({ ...d }));
   let x = 0;

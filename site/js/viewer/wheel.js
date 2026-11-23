@@ -1,4 +1,4 @@
-// Scrolling: the Mac wants DOM WheelEvent deltas in CSS pixels (docs/PROTOCOL.md, `{t:"w"}`), positive dy meaning the
+// Scrolling: the PC wants DOM WheelEvent deltas in CSS pixels (docs/PROTOCOL.md, `{t:"w"}`), positive dy meaning the
 // page moves up (what scrolling down does). Most browsers already report pixels; Firefox with a mouse wheel reports
 // lines (deltaMode 1), and some settings report whole pages (deltaMode 2), so those get converted here.
 

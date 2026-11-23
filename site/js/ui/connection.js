@@ -1,15 +1,15 @@
-// One connection to a Mac, from "hello" on the public message services to a signed-in WebRTC session.
+// One connection to a PC, from "hello" on the public message services to a signed-in WebRTC session.
 //
-// 1. Rendezvous (docs/PROTOCOL.md, "Rendezvous"): listen on our own reply topic, say hello on the Mac's topic, wait for
+// 1. Rendezvous (docs/PROTOCOL.md, "Rendezvous"): listen on our own reply topic, say hello on the PC's topic, wait for
 //    its offer (or a refusal).
 // 2. WebRTC: answer the offer once ICE gathering finishes (or after 3 s), send the complete answer back.
-// 3. The Mac opens the control channel and says hi with a fresh nonce; both sides compute `bind` from the nonce and the
+// 3. The PC opens the control channel and says hi with a fresh nonce; both sides compute `bind` from the nonce and the
 //    two SDP texts *exactly as sent and received* (shared/bind.js). Every sign-in proof is made over it.
 //
 // After that, control messages are handed out with next(types): the sign-in steps in ui/signin.js read them one at a
 // time, and once signed in everything goes to onmessage for the viewer.
 //
-// When the Mac's owner set up a Worker relay (docs/PROTOCOL.md, "Worker relay") the offer also carries a relay offer.
+// When the PC's owner set up a Worker relay (docs/PROTOCOL.md, "Worker relay") the offer also carries a relay offer.
 // On a network that blocks WebRTC (no public address found for this browser), or when asked to (`transport: 'relay'`),
 // step 2 answers that instead: the same channels, then run over an encrypted WebSocket through the owner's Worker,
 // and the binding is made over the relay offer and answer texts. Video and sound arrive as whole frames and are
@@ -37,10 +37,10 @@ const POINTER_BACKLOG = 64 * 1024;     // drop pointer moves while this much is 
 // Every way a connection can fail, with a `kind` that ui/messages.js turns into words.
 //   brokers, timeout, refuse {reason, retryAfter}, old-mac, webrtc, lost, bye {reason}, denied {reason, retryAfter,
 //   final}, cancelled, protocol, plus sign-in kinds from ui/signin.js.
-export class PerchError extends Error {
+export class RoostError extends Error {
   constructor(kind, info = {}) {
     super(info.message || kind);
-    this.name = 'PerchError';
+    this.name = 'RoostError';
     this.kind = kind;
     Object.assign(this, info);
   }
@@ -51,7 +51,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // An answer with no public (server-reflexive) or relay candidate, though STUN servers were asked: UDP is blocked, so a
 // direct connection can't work from here.
 // How many addresses of each kind an SDP offers (host: this device's own; srflx: as a STUN server saw it; relay: a
-// TURN server's), for the Mac's log when the viewer goes by the relay Worker instead.
+// TURN server's), for the PC's log when the viewer goes by the relay Worker instead.
 export function candidateCounts(sdp) {
   const out = { host: 0, srflx: 0, relay: 0 };
   for (const m of String(sdp ?? '').matchAll(/ typ (host|srflx|relay)\b/g)) out[m[1]]++;
@@ -89,14 +89,14 @@ class RelayDataChannel {
 }
 
 export class Connection {
-  // pin: the Mac's certificate pin (16 bytes), when known; certificate: an RTCCertificate to use (one-tap sign-in).
+  // pin: the PC's certificate pin (16 bytes), when known; certificate: an RTCCertificate to use (one-tap sign-in).
   // transport: 'auto' (WebRTC, or the Worker relay when this network blocks WebRTC) or 'relay' (always the relay, when
-  // the Mac has one). allowLocalRelay: accept a loopback relay address (tests on this computer only).
+  // the PC has one). allowLocalRelay: accept a loopback relay address (tests on this computer only).
   constructor({ route, hostId, sigKey, macName, pairId, guestId = null, guestSecret = null, label, brokers, iceServers, pin = null,
     certificate = null, log = () => {}, onStage = () => {}, PeerConnection = globalThis.RTCPeerConnection,
     transport = 'auto', allowLocalRelay = false, WebSocketImpl = globalThis.WebSocket, early = null }) {
     // early: {hello(), offer(first)} for a sign-in that starts at the meeting point (signin.js backupEarly): more for the
-    // hello, and a look at the offer before connecting that may throw (a wrong password), which cancels with the Mac.
+    // hello, and a look at the offer before connecting that may throw (a wrong password), which cancels with the PC.
     Object.assign(this, { route, hostId, sigKey, macName, pairId, guestId, guestSecret, label, brokers, iceServers, pin, certificate,
       log, onStage, PeerConnection, transport, allowLocalRelay, WebSocketImpl, early });
     this.sid = toB64url(randomBytes(16));
@@ -122,7 +122,7 @@ export class Connection {
     this.audioLine = null;
     this.micTrack = null;
     this.micSource = null;      // tests: a function giving a MediaStream to use instead of the real microphone
-    this.onclose = () => {};   // (PerchError) once, when the connection ends for any reason but close()
+    this.onclose = () => {};   // (RoostError) once, when the connection ends for any reason but close()
     this.onlink = () => {};    // ('connected' | 'disconnected')
     let rejectFailed;
     this.failed = new Promise((_, reject) => { rejectFailed = reject; });
@@ -131,7 +131,7 @@ export class Connection {
     this._lostTimer = null;
   }
 
-  // Runs steps 1–3. Resolves to the Mac's hi message, with this.bind ready.
+  // Runs steps 1–3. Resolves to the PC's hi message, with this.bind ready.
   async open() {
     const { route } = this;
     this.onStage('finding');
@@ -144,10 +144,10 @@ export class Connection {
     try {
       await this.rdv.start(10000);
     } catch {
-      throw this._fail(new PerchError('brokers'));
+      throw this._fail(new RoostError('brokers'));
     }
     this._check();
-    // A hello only reaches the Mac through services both sides are connected to. Give the slower ones a moment.
+    // A hello only reaches the PC through services both sides are connected to. Give the slower ones a moment.
     for (let t = 0; t < BROKER_GRACE_MS && this.rdv.connectedCount < this.brokers.length; t += 100) await sleep(100);
     this._check();
 
@@ -155,10 +155,10 @@ export class Connection {
     const reply = new Promise(resolve => { gotReply = resolve; });
     await this.rdv.listen(replyTopic(topic, this.sid), key, msg => {
       if (msg.sid !== this.sid || (msg.t !== 'offer' && msg.t !== 'refuse')) return;
-      // With a pin, only the Mac holding that certificate counts: anyone else who can seal messages for this topic
-      // (an old pairing link, a removed device) is ignored, and we keep waiting for the real Mac.
+      // With a pin, only the PC holding that certificate counts: anyone else who can seal messages for this topic
+      // (an old pairing link, a removed device) is ignored, and we keep waiting for the real PC.
       if (this.pin && msg.t === 'offer' && !offerMatchesPin(msg.sdp, this.pin)) {
-        this.log('ignored an offer that is not from this Mac (certificate pin mismatch)');
+        this.log('ignored an offer that is not from this PC (certificate pin mismatch)');
         return;
       }
       gotReply(msg);
@@ -168,18 +168,18 @@ export class Connection {
       ...(this.pairId ? { pairId: toB64url(this.pairId) } : {}),
       ...(this.early?.hello?.() ?? {}),
     });
-    const first = await this._race(reply, OFFER_TIMEOUT_MS, () => new PerchError('timeout'));
+    const first = await this._race(reply, OFFER_TIMEOUT_MS, () => new RoostError('timeout'));
     if (first.t === 'refuse') {
-      throw this._fail(new PerchError('refuse', { reason: first.reason, retryAfter: first.retryAfter, hv: first.hv }));
+      throw this._fail(new RoostError('refuse', { reason: first.reason, retryAfter: first.retryAfter, hv: first.hv }));
     }
-    if (!(Number(first.pv) >= MIN_PEER_PROTO) || typeof first.sdp !== 'string') throw this._fail(new PerchError('old-mac'));
+    if (!(Number(first.pv) >= MIN_PEER_PROTO) || typeof first.sdp !== 'string') throw this._fail(new RoostError('old-mac'));
     if (this.early) {
       try {
         await this.early.offer(first);
       } catch (e) {
-        // Wrong (the password): say so to the Mac, which frees the place this sign-in held, and stop before connecting.
+        // Wrong (the password): say so to the PC, which frees the place this sign-in held, and stop before connecting.
         await this.rdv.send(topic, key, { t: 'cancel', sid: this.sid, reason: e?.kind ?? 'cancelled' }).catch(() => {});
-        throw this._fail(e instanceof PerchError ? e : new PerchError('unexpected', { message: e?.message }));
+        throw this._fail(e instanceof RoostError ? e : new RoostError('unexpected', { message: e?.message }));
       }
     }
     this.hv = first.hv;
@@ -187,7 +187,7 @@ export class Connection {
 
     this.onStage('connecting');
     this.offerSdp = first.sdp;
-    // The Mac's own relay (if its owner set one up), for networks that block direct connections.
+    // The PC's own relay (if its owner set one up), for networks that block direct connections.
     this.relayServers = cleanIceServers(first.iceServers);
     this.relayOffer = typeof first.ws === 'string' && relayMediaSupported() ? first.ws : null;
     if (this.relayOffer && this.transport === 'relay') {
@@ -197,7 +197,7 @@ export class Connection {
       await this._answer();
       if (this.relayOffer && this.transport === 'auto' && looksBlocked(this.answerSdp, this.iceServers)) {
         // Not even a STUN server answered: this network blocks what WebRTC needs. Don't wait for it to fail.
-        this.log('this network seems to block direct connections: using the Mac’s Worker relay');
+        this.log('this network seems to block direct connections: using the PC’s Worker relay');
         this.relayWhy = { reason: 'blocked', cands: candidateCounts(this.answerSdp) };
         this._dropPeerConnection();
         await this._answerRelay();
@@ -212,9 +212,9 @@ export class Connection {
     // The rendezvous has done its job; don't keep three WebSockets open for the whole session.
     this.rdv.close();
     this.rdv = null;
-    if (typeof hi.nonce !== 'string') throw this._fail(new PerchError('protocol', { message: 'hi without nonce' }));
+    if (typeof hi.nonce !== 'string') throw this._fail(new RoostError('protocol', { message: 'hi without nonce' }));
     let nonce;
-    try { nonce = fromB64url(hi.nonce); } catch { throw this._fail(new PerchError('protocol', { message: 'bad nonce' })); }
+    try { nonce = fromB64url(hi.nonce); } catch { throw this._fail(new RoostError('protocol', { message: 'bad nonce' })); }
     this.bind = await bindingHash(nonce, this.offerSdp, this.answerSdp);
     this.hi = hi;
     return hi;
@@ -222,7 +222,7 @@ export class Connection {
 
   // The next control message whose type is in `types`. Rejects if the connection ends first, or after `timeoutMs`.
   next(types, timeoutMs = 30000, timeoutKind = 'lost') {
-    if (this.closed) return Promise.reject(this._closedError || new PerchError('cancelled'));
+    if (this.closed) return Promise.reject(this._closedError || new RoostError('cancelled'));
     const i = this.mailbox.findIndex(m => types.includes(m.t));
     if (i >= 0) return Promise.resolve(this.mailbox.splice(i, 1)[0]);
     return new Promise((resolve, reject) => {
@@ -230,7 +230,7 @@ export class Connection {
       if (timeoutMs) {
         w.timer = setTimeout(() => {
           this.waiters = this.waiters.filter(x => x !== w);
-          reject(this._fail(new PerchError(timeoutKind)));
+          reject(this._fail(new RoostError(timeoutKind)));
         }, timeoutMs);
       }
       this.waiters.push(w);
@@ -265,8 +265,8 @@ export class Connection {
 
   async getStats() { return this.pc ? this.pc.getStats() : (this.media?.statsReport() ?? new Map()); }
 
-  // Ends the connection from this side. With bye, tells the Mac first so it can tidy up straight away.
-  // --- the viewer's microphone, played on the Mac ---
+  // Ends the connection from this side. With bye, tells the PC first so it can tidy up straight away.
+  // --- the viewer's microphone, played on the PC ---
 
   get canMic() { return !!this.audioLine && !!navigator.mediaDevices?.getUserMedia && !!this.caps?.includes('mic'); }
 
@@ -309,7 +309,7 @@ export class Connection {
       for (let i = 0; i < 10 && ctl.bufferedAmount > 0; i++) await sleep(20);
       await sleep(50);
     }
-    this._shutdown(new PerchError('cancelled'));
+    this._shutdown(new RoostError('cancelled'));
   }
 
   // --- internals ---
@@ -322,7 +322,7 @@ export class Connection {
         ...(this.certificate ? { certificates: [this.certificate] } : {}),
       });
     } catch (e) {
-      throw this._fail(new PerchError('webrtc', { message: e.message }));
+      throw this._fail(new RoostError('webrtc', { message: e.message }));
     }
     pc.ontrack = ev => {
       // A remote desktop wants the newest picture now, not a smooth one a little later: ask the browser to keep
@@ -340,14 +340,14 @@ export class Connection {
     try {
       await pc.setRemoteDescription({ type: 'offer', sdp: this.offerSdp });
       // Be ready to send a microphone back on the sound line. Nothing is sent until the viewer turns it on
-      // (startMic); with a Mac that only sends sound, the answer simply stays receive-only.
+      // (startMic); with a PC that only sends sound, the answer simply stays receive-only.
       try {
         this.audioLine = pc.getTransceivers().find(t => t.receiver?.track?.kind === 'audio') ?? null;
         if (this.audioLine) this.audioLine.direction = 'sendrecv';
       } catch { this.audioLine = null; }
       await pc.setLocalDescription(await pc.createAnswer());
     } catch (e) {
-      throw this._fail(new PerchError('webrtc', { message: e.message }));
+      throw this._fail(new RoostError('webrtc', { message: e.message }));
     }
     this._check();
     // No trickle ICE: the answer has to carry every candidate, so wait for gathering (but never too long).
@@ -365,7 +365,7 @@ export class Connection {
 
   // --- the Worker relay ---
 
-  // Answers the Mac's relay offer: checks it (with a pin, it must be signed by the pinned Mac), makes this side's key
+  // Answers the PC's relay offer: checks it (with a pin, it must be signed by the pinned PC), makes this side's key
   // and the session keys, and readies the channels. The answer text becomes answerSdp: the binding is made over the
   // relay texts, exactly as sent and received.
   async _answerRelay() {
@@ -376,7 +376,7 @@ export class Connection {
       this.answerSdp = makeAnswer({ sid: this.sid, eph: pub });
       keys = await sessionKeys(privateKey, offer.eph, this.relayOffer, this.answerSdp, 'viewer');
     } catch (e) {
-      throw this._fail(new PerchError('webrtc', { message: `relay: ${e.message}` }));
+      throw this._fail(new RoostError('webrtc', { message: `relay: ${e.message}` }));
     }
     this._check();
     this.via = 'relay';
@@ -401,7 +401,7 @@ export class Connection {
         const ch = byType[type];
         if (ch?.readyState === 'open') ch.onmessage?.({ data: fromUtf8(payload) });
       },
-      onError: e => { this.log(`relay: ${e.message}`); this._shutdown(new PerchError(this.live ? 'lost' : 'webrtc')); },
+      onError: e => { this.log(`relay: ${e.message}`); this._shutdown(new RoostError(this.live ? 'lost' : 'webrtc')); },
     });
   }
 
@@ -410,11 +410,11 @@ export class Connection {
     try {
       ws = this.relaySocket = new this.WebSocketImpl(this.relayUrl);
     } catch (e) {
-      throw this._fail(new PerchError('webrtc', { message: `relay: ${e.message}` }));
+      throw this._fail(new RoostError('webrtc', { message: `relay: ${e.message}` }));
     }
     ws.binaryType = 'arraybuffer';
     this._relayGiveUp = setTimeout(() => {
-      if (!this.relayPeer) this._shutdown(new PerchError('webrtc', { message: 'relay: the Mac never arrived' }));
+      if (!this.relayPeer) this._shutdown(new RoostError('webrtc', { message: 'relay: the PC never arrived' }));
     }, RELAY_PEER_TIMEOUT_MS);
     ws.onmessage = ev => {
       if (typeof ev.data === 'string') {
@@ -432,7 +432,7 @@ export class Connection {
     ws.onclose = () => {
       if (this.closed) return;
       for (const ch of Object.values(this.channels)) ch.readyState = 'closed';
-      this._shutdown(new PerchError(this.live ? 'lost' : 'webrtc'));
+      this._shutdown(new RoostError(this.live ? 'lost' : 'webrtc'));
     };
     ws.onerror = () => {}; // onclose follows
   }
@@ -458,7 +458,7 @@ export class Connection {
       try { msg = JSON.parse(ev.data); } catch { return; }
       if (msg && typeof msg === 'object' && typeof msg.t === 'string') this._dispatch(msg);
     };
-    ch.onclose = () => { if (!this.closed) this._shutdown(new PerchError(this.live ? 'lost' : 'webrtc')); };
+    ch.onclose = () => { if (!this.closed) this._shutdown(new RoostError(this.live ? 'lost' : 'webrtc')); };
   }
 
   _dispatch(msg) {
@@ -470,7 +470,7 @@ export class Connection {
       return;
     }
     if (msg.t === 'bye') {
-      this._shutdown(new PerchError('bye', { reason: msg.reason }), msg);
+      this._shutdown(new RoostError('bye', { reason: msg.reason }), msg);
       return;
     }
     if (this.live) {
@@ -478,8 +478,8 @@ export class Connection {
       return;
     }
     if (msg.t === 'denied' && msg.final !== false) {
-      // The Mac gave up on this sign-in while we were waiting for the user (e.g. the 2-minute limit).
-      this._shutdown(new PerchError('denied', { reason: msg.reason, retryAfter: msg.retryAfter, final: true }));
+      // The PC gave up on this sign-in while we were waiting for the user (e.g. the 2-minute limit).
+      this._shutdown(new RoostError('denied', { reason: msg.reason, retryAfter: msg.retryAfter, final: true }));
       return;
     }
     if (this.mailbox.length < 50) this.mailbox.push(msg);
@@ -493,9 +493,9 @@ export class Connection {
       this.onlink('connected');
     } else if (state === 'disconnected') {
       this.onlink('disconnected');
-      if (!this._lostTimer) this._lostTimer = setTimeout(() => this._shutdown(new PerchError(this.live ? 'lost' : 'webrtc')), LOST_AFTER_MS);
+      if (!this._lostTimer) this._lostTimer = setTimeout(() => this._shutdown(new RoostError(this.live ? 'lost' : 'webrtc')), LOST_AFTER_MS);
     } else if (state === 'failed') {
-      this._shutdown(new PerchError(this.live ? 'lost' : 'webrtc'));
+      this._shutdown(new RoostError(this.live ? 'lost' : 'webrtc'));
     }
   }
 
@@ -512,7 +512,7 @@ export class Connection {
   }
 
   _check() {
-    if (this.closed) throw this._closedError || new PerchError('cancelled');
+    if (this.closed) throw this._closedError || new RoostError('cancelled');
   }
 
   _fail(err) {

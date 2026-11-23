@@ -174,8 +174,12 @@ you a fresh one.</p>
 
   // --- the controller, safely ---
 
+  // Every snapshot carries a number that only goes up, in the order the snapshots were taken: an action's answer can
+  // reach the page after a newer live update, and the page keeps whichever is newer (setup/setup.js, apply).
+  let rev = 0;
   async function currentState() {
-    return await controller.state();
+    const s = await controller.state();
+    return s && typeof s === 'object' ? { ...s, rev: ++rev } : s;
   }
 
   async function stateOrNull() {

@@ -1,4 +1,4 @@
-// The connect page refuses to run inside another website's frame, and keeps working in Perch's own about:blank and
+// The connect page refuses to run inside another website's frame, and keeps working in Roost's own about:blank and
 // blob: tabs (js/blank.js, the front page, About:Blank Lab-style launchers). Headless Chrome, real clicks.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -46,13 +46,13 @@ test('opened directly: runs', async () => {
   await page.close();
 });
 
-test('inside a frame on another website: refused, with a link to open Perch directly', async () => {
+test('inside a frame on another website: refused, with a link to open Roost directly', async () => {
   const src = stack.connectUrl();
   const page = await openPage(stack, `${stack.otherOrigin}__test/framer.html?src=${encodeURIComponent(src)}`);
   const st = await frameState(page, '/connect.html');
   assert.equal(st.refused, true, JSON.stringify(st));
   assert.equal(st.home, false);
-  assert.match(st.text, /^Perch can't run inside another website\. Open it directly:/);
+  assert.match(st.text, /^Roost can't run inside another website\. Open it directly:/);
   assert.equal(st.link, src.split('#')[0]);
   await page.shot('frame-guard-refused-desktop-light');
   await page.close();
@@ -104,7 +104,7 @@ test('"Open in an about:blank tab" on the connect page: works in the new tab', a
   assert.equal(st.refused, false, JSON.stringify(st));
   assert.equal(st.home, true);
   assert.equal(st.top, false);
-  assert.match(await page.text('#blankStatus'), /Opened Perch in a new about:blank tab/);
+  assert.match(await page.text('#blankStatus'), /Opened Roost in a new about:blank tab/);
   await page.close();
   await stack.cdp.send('Target.closeTarget', { targetId: popup.targetId }).catch(() => {});
 });
@@ -114,7 +114,7 @@ test('"Open in an about:blank tab" on the front page: works too', async () => {
   const popup = await popupAfter(() => page.click('#openBlank'));
   const st = await waitFramed(popup);
   assert.equal(st.tab, 'about:blank');
-  assert.equal(st.title, 'Perch');
+  assert.equal(st.title, 'Roost');
   assert.equal(st.refused, false, JSON.stringify(st));
   assert.equal(st.home, true);
   assert.deepEqual(page.problems(), []);

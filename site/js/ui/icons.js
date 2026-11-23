@@ -29,18 +29,43 @@ const PATHS = {
   zoom: 'M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM21 21l-5-5M8 11h6',
   blank: 'M5 3h10l4 4v14H5zM15 3v4h4',
   tab: 'M3 7h18v13H3zM3 7l3-4h6l2 4',
+  pc: 'M4 4h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM9 20h6M12 16v4',
+  phone: 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM11 18h2',
+  search: 'M11 4a7 7 0 1 1 0 14 7 7 0 0 1 0-14zM20 20l-4-4',
+  sliders: 'M4 7h10M18 7h2M4 17h4M12 17h8M16 5v4M10 15v4',
+  keys: 'M3 7h8v8H3zM13 7h8v8h-8zM5 18h4M15 18h4M6 10l1 2 1-2M16 10.5h2',
+  orb: 'M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM4 12a8 8 0 0 0 16 0',
+  collapse: 'M12 9a3 3 0 1 1 0 6 3 3 0 0 1 0-6zM4 4l4 4M20 4l-4 4M4 20l4-4M20 20l-4-4',
+  shield: 'M12 3l8 3v6c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V6l8-3zM9 12l2 2 4-4',
+  bolt: 'M13 2 4 14h7l-1 8 9-12h-7l1-8z',
+  window: 'M3 5h18v14H3zM3 9h18',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
+  wifi: 'M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01',
+  check: 'M5 12l5 5 9-10',
+  plus: 'M12 5v14M5 12h14',
+  grip: 'M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01',
+  touch: 'M9 11V5a2 2 0 0 1 4 0v5M13 10a2 2 0 0 1 4 0v2M17 12a2 2 0 0 1 4 0v3a7 7 0 0 1-7 7h-1a7 7 0 0 1-6-3.4L4 15a2 2 0 0 1 3.4-2L9 15',
+  clipboard: 'M9 4h6v3H9zM8 5H5v16h14V5h-3',
+  dock: 'M3 15h18v4H3zM6 17h.01M10 17h.01M14 17h.01M3 5h18v7H3z',
+  windows: 'M4 5l7-1v7.5H4zM13 3.7 20 3v8.5h-7zM4 12.5h7V20l-7-1zM13 12.5h7V21l-7-1z',
+  globe: 'M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zM3 12h18M12 3c2.5 2.5 3.5 5.5 3.5 9s-1 6.5-3.5 9c-2.5-2.5-3.5-5.5-3.5-9s1-6.5 3.5-9z',
+  server: 'M4 4h16v6H4zM4 14h16v6H4zM8 7h.01M8 17h.01',
+  user: 'M12 4a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM4 21a8 8 0 0 1 16 0',
+  download: 'M12 3v12M7 10l5 5 5-5M4 20h16',
+  arrows: 'M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3',
+  speaker: 'M6 3h12v18H6zM12 7h.01M12 11a3 3 0 1 1 0 6 3 3 0 0 1 0-6z',
 };
 
 const NS = 'http://www.w3.org/2000/svg';
 
-export function icon(name, { size = 22, label } = {}) {
+export function icon(name, { size = 20, label } = {}) {
   const svg = document.createElementNS(NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('width', size);
   svg.setAttribute('height', size);
   svg.setAttribute('fill', 'none');
   svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', name === 'more' ? '3' : '2');
+  svg.setAttribute('stroke-width', name === 'more' || name === 'grip' ? '3' : '1.75');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
   svg.setAttribute('class', 'icon');

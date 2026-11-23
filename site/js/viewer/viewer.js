@@ -1,32 +1,51 @@
-// The signed-in screen: the Mac's picture and sound filling the window, an auto-hiding toolbar, status notes, the
-// keys bar and connection details. Input goes through viewer/pointer.js and viewer/keyboard.js.
+// The signed-in screen: the PC's picture and sound filling the window, and Roost's controls floating over it:
+//   - the Dock (a pill that snaps to any edge or corner, and shrinks to an orb; viewer/dock.js says where it can go);
+//   - the Command palette (every action and setting, searchable; viewer/palette.js);
+//   - Tweaks (a slide-over panel of settings);
+//   - the Key deck (Win, Ctrl, Alt, Shift and chosen keys, for phones above all; viewer/shortcuts.js).
+// Input goes through viewer/pointer.js and viewer/keyboard.js.
 //
 // `session` is a ui/connection.js Connection (or the demo's stand-in, ui/demo.js) with send(), sendInput(),
 // sendPointer(), getStats(), stream and the onstream / onmessage / onlink hooks.
 import { PointerInput } from './pointer.js';
 import { KeyboardInput } from './keyboard.js';
 import { Banners } from './banners.js';
+import { Palette } from './palette.js';
+import { ANCHORS, nearestAnchor, stepAnchor, isVertical, anchorEdge, onRight } from './dock.js';
 import { readStats, summarize, linkQuality, QUALITY_WORDS, statsLines, selectedRoute } from './stats.js';
 import { IDENTITY, isZoomed, viewTransform, clampView, SHAPES, CENTER, shownScale } from './coords.js';
 import { arrangement, neighbour, entryPoint, EdgeFlip, EDGE_DWELL_MS } from './displays.js';
 import { errorMessage } from '../ui/messages.js';
 import { fillIcons, setIcon } from '../ui/icons.js';
 import { QUALITY } from '../shared/proto.js';
-import { pressMessages, SHIFT, META } from './keys.js';
+import { pressMessages, SHIFT, ALT } from './keys.js';
 import {
   GROUPS, CATALOG, DEFAULT_BAR, FUNCTION_KEYS, CUSTOM_KEYS, SWIPE_ACTIONS, makeCustom, cleanCustom, cleanBar, findShortcut, toggleOnBar,
 } from './shortcuts.js';
 
-const HIDE_AFTER_MS = 3500;  // the toolbar tucks itself away after this long without being used
-const EDGE_ZONE_PX = 6;      // a hidden bar comes back when the mouse touches its edge (this close to it), and only then
-const EDGES = ['top', 'bottom', 'left', 'right'];
+const IDLE_AFTER_MS = 3500;  // the Dock shrinks or tucks itself away after this long without being used (if chosen)
+const EDGE_ZONE_PX = 6;      // a tucked-away Dock comes back when the mouse touches its edge (this close to it), and only then
+const DRAG_PX = 5;           // a press on the Dock's grip that moves further than this is a drag
 const DOUBLE_ESC_MS = 600;   // Esc twice within this brings back a hidden pointer
 const PING_MS = 2000;
-const MAX_CLIP = 30000; // clipboard text, either way (the Mac has the same limit)
-const MAX_CLIP_IMAGE = 20 * 1024 * 1024; // clipboard pictures, either way (the Mac has the same limit)
+const MAX_CLIP = 30000; // clipboard text, either way (the PC has the same limit)
+const MAX_CLIP_IMAGE = 20 * 1024 * 1024; // clipboard pictures, either way (the PC has the same limit)
 const CLIP_PART = 48 * 1024;             // base64 characters per piece of a picture
 const CLIP_BACKLOG = 2 * 1024 * 1024;    // pieces wait while this much is still queued on the connection
-const PASTE_WAIT_MS = 400;               // after ⌘V, how long the browser's paste event gets before the Mac pastes its own
+const PASTE_WAIT_MS = 400;               // after Ctrl+V, how long the browser's paste event gets before the PC pastes its own
+
+const QUALITY_TEXT = {
+  smooth: ['Smooth', 'Less data, a softer picture'],
+  balanced: ['Balanced', 'Sharp enough, moves well'],
+  sharp: ['Sharp', 'Small text stays crisp'],
+  fast: ['60 frames a second', 'For fast links and games'],
+};
+const SHAPE_TEXT = { fit: 'Whole screen', fill: 'Fill this screen', stretch: 'Stretch to fill' };
+const ANCHOR_TEXT = {
+  'top-left': 'top left', top: 'top', 'top-right': 'top right', left: 'left', right: 'right',
+  'bottom-left': 'bottom left', bottom: 'bottom', 'bottom-right': 'bottom right',
+};
+const IDLE_TEXT = { stay: 'Stay as it is', orb: 'Shrink to an orb', hide: 'Tuck away at the edge' };
 
 export class Viewer {
   constructor({ root, session, hi, ready, prefs, env, apple, touchFirst, log = () => {}, onLeave, onReconnect, onHome }) {
@@ -44,13 +63,15 @@ export class Viewer {
     this.guest = ready.guest === true;   // watching through a guest link: never any control
     this.inputAllowed = !this.guest && ready.input !== false;
     this.display = { ...(ready.display || {}) };
-    this.hideTimer = null;
+    this.windows = [];
+    this.idleTimer = null;
   }
 
   mount() {
     const { root, session } = this;
     root.hidden = false;
     root.classList.toggle('touch', !!this.touchFirst);
+    root.classList.toggle('guest', this.guest);
     document.body.classList.add('viewing');
     fillIcons(root);
     this.video = this.$('video');
@@ -60,7 +81,7 @@ export class Viewer {
     this.banners.clear();
     this.$('ended').hidden = true;
     this.$('stats').hidden = !this.prefs.get('stats');
-    this.$('tbStats').setAttribute('aria-pressed', String(!this.$('stats').hidden));
+    this.$('optStats').checked = !this.$('stats').hidden;
 
     const attach = stream => {
       if (this.video.srcObject !== stream) this.video.srcObject = stream;
@@ -71,13 +92,15 @@ export class Viewer {
     session.onmessage = m => this._message(m);
     session.onlink = state => {
       if (state === 'disconnected') {
-        this.banners.show('link', { kind: 'warn', icon: 'refresh', title: 'Reconnecting…', body: 'The connection to your Mac dropped for a moment.' });
+        this.banners.show('link', { kind: 'warn', icon: 'refresh', title: 'Reconnecting…', body: 'The connection to your PC dropped for a moment.' });
       } else {
         this.banners.hide('link');
       }
     };
 
-    this._wireToolbar();
+    this._wireDock();
+    this._wireTweaks();
+    this._wirePalette();
     const enabled = () => this.inputAllowed && !this.over;
     const activity = e => this._activity(e);
     this.pointer = new PointerInput({
@@ -93,16 +116,17 @@ export class Viewer {
     });
     this.keys = new KeyboardInput({
       surface: this.surface, softkbd: this.$('softkbd'), keysBar: this.$('keysBar'), session,
-      swapCtrlCmd: () => !this.apple && this.prefs.get('swapCtrlCmd'), enabled, onActivity: activity,
+      swapCtrlCmd: () => !!this.prefs.get('swapCtrlCmd'), enabled, onActivity: activity,
       shortcut: id => findShortcut(id, this.customKeys),
       onPasteKey: () => this._pasteKey(),
     });
-    // ⌘V / Ctrl+V on the picture: this device's clipboard, text or picture, is pasted on the Mac.
+    // Ctrl+V on the picture: this device's clipboard, text or picture, is pasted on the PC.
     this._on(window, 'paste', e => this._onPaste(e), true);
-    // A copy from the Mac that couldn't be written here (this page didn't have focus) is written once it does.
+    // A copy from the PC that couldn't be written here (this page didn't have focus) is written once it does.
     this._on(window, 'focus', () => this._retryMirror());
     this._on(window, 'pointerdown', () => this._retryMirror(), true);
-    // Our own shortcut first, before the keys go to the Mac: Ctrl+Alt+Shift+T reaches the toolbar from the keyboard.
+    // Our own shortcuts first, before the keys go to the PC: Ctrl+Alt+Shift+K opens the Command palette, and
+    // Ctrl+Alt+Shift+T brings the Dock to the keyboard.
     this._on(window, 'keydown', e => this._ownShortcut(e), true);
     this.pointer.attach();
     this.keys.attach();
@@ -113,19 +137,19 @@ export class Viewer {
 
     this._applyStatus({ locked: this.ready.locked, input: this.ready.input });
     const q = this.prefs.get('quality');
-    this.$('tbQuality').value = q in QUALITY && !this.guest ? q : this.ready.quality;
+    this._showQuality(q in QUALITY && !this.guest ? q : this.ready.quality);
     if (!this.guest && q in QUALITY && q !== this.ready.quality) session.send({ t: 'quality', preset: q });
 
     this._every(PING_MS, () => this._ping());
     this._every(1000, () => this._stats());
     this._ping();
-    // Keep this device's screen on while the Mac is on it (phones dim and lock after a minute or so).
+    // Keep this device's screen on while the PC is on it (phones dim and lock after a minute or so).
     this._keepAwake();
     this._on(document, 'visibilitychange', () => { if (document.visibilityState === 'visible') this._keepAwake(); });
     if (window.visualViewport) {
       const vv = window.visualViewport;
       const fit = () => {
-        // iPhones don't shrink the page for the on-screen keyboard; lift the keys bar above it ourselves.
+        // iPhones don't shrink the page for the on-screen keyboard; lift the Key deck above it ourselves.
         const below = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
         root.style.setProperty('--kb-inset', `${Math.round(below)}px`);
       };
@@ -133,26 +157,27 @@ export class Viewer {
       this._on(vv, 'scroll', fit);
       fit();
     }
-    this._on(window, 'resize', () => { this.setView(this.view); this._reportView(); });
+    this._on(window, 'resize', () => { this.setView(this.view); this._reportView(); this._placePops(); });
     this._on(this.video, 'resize', () => { this._reportView(); this._shapeUi(); }); // the picture's own size or shape changed
     this._reportView();
     this._on(document, 'fullscreenchange', () => this._fullscreenChanged());
     this._on(document, 'webkitfullscreenchange', () => this._fullscreenChanged());
     this.surface.focus({ preventScroll: true });
-    this._showToolbar();
+    this._showDock();
   }
 
-  // The session ended (the Mac said bye, the network went): freeze the picture and say what happened.
+  // The session ended (the PC said bye, the network went): freeze the picture and say what happened.
   ended(m, { canReconnect = true } = {}) {
     this.gone = true;
     if (this.over) return;
-    this._releaseCmd();
+    this._releaseAlt();
     this.over = true;
     this._micOff();
     this._letSleep();
     if (document.pointerLockElement === this.surface) document.exitPointerLock();
     this.keys?.releaseAll();
     this._clearTimers();
+    this._closeOverlays();
     this.$('endedTitle').textContent = m.title;
     this.$('endedBody').textContent = m.body;
     const again = this.$('btnReconnect');
@@ -169,40 +194,37 @@ export class Viewer {
   destroy() {
     this.gone = true;
     this._letSleep();
-    this._releaseCmd();
+    this._releaseAlt();
     this.resizeObserver?.disconnect();
     cancelAnimationFrame(this.placeFrame);
     if (document.pointerLockElement === this.surface) document.exitPointerLock();
-    clearTimeout(this.captureNoteTimer);
-    clearTimeout(this.hideNoteTimer);
-    clearTimeout(this.inviteTimer);
+    for (const t of ['captureNoteTimer', 'hideNoteTimer', 'inviteTimer', 'idleTimer', 'viewTimer', 'clipNoteTimer', 'cursorNoteTimer']) clearTimeout(this[t]);
     this.pointer?.detach();
     this.keys?.detach();
+    this.palette?.detach();
     for (const [el, type, fn, opts] of this.listeners) el.removeEventListener(type, fn, opts);
     this.listeners = [];
     this._clearTimers();
-    clearTimeout(this.hideTimer);
-    clearTimeout(this.viewTimer);
     this._micOff();
     if (this.session) { this.session.onmessage = this.session.onstream = this.session.onlink = this.session.onmicended = () => {}; }
     if (this.video) { this.video.pause(); this.video.srcObject = null; }
     this.setView(IDENTITY);
     this.banners?.clear();
-    for (const id of ['ended', 'moreMenu', 'keysBar', 'keysEditor', 'soundPrompt', 'clipSheet']) this.$(id).hidden = true;
-    clearTimeout(this.clipNoteTimer);
+    for (const id of ['ended', 'tweaks', 'palette', 'scrim', 'displayMap', 'keysBar', 'keysEditor', 'soundPrompt', 'clipSheet', 'orb', 'dockLip']) this.$(id).hidden = true;
     this.clipWaiter = null;
-    this.$('tbKeys').setAttribute('aria-pressed', 'false');
+    this.$('dkKeys').setAttribute('aria-pressed', 'false');
     this._inviteKeyboard(null);
     // The browser says the mouse is let go only after these listeners are gone: don't leave the pointer hidden.
-    this.root.classList.remove('tb-on', 'zoomed', 'captured', 'touchpad', 'tb-pinned', 'tb-vertical', 'nocursor', ...EDGES.map(e => `tb-${e}`),
-      ...SHAPES.map(s => `shape-${s}`));
+    this.root.classList.remove('zoomed', 'captured', 'touchpad', 'touch', 'guest', 'view-only', 'nocursor', 'dock-vertical',
+      'dock-orb', 'dock-away', 'dragging', 'deck-on', 'tweaks-left', 'no-anim', ...ANCHORS.map(a => `at-${a}`), ...SHAPES.map(s => `shape-${s}`));
+    for (const v of ['--room-top', '--room-bottom', '--room-left', '--room-right', '--keys-h', '--keys-up']) this.root.style.removeProperty(v);
     this.root.hidden = true;
     document.body.classList.remove('viewing');
     navigator.keyboard?.unlock?.();
     if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
   }
 
-  // Local zoom: a CSS transform on the picture's wrapper. Nothing changes on the Mac.
+  // Local zoom: a CSS transform on the picture's wrapper. Nothing changes on the PC.
   setView(v) {
     const box = this.surface.getBoundingClientRect();
     this.view = clampView(v, box);
@@ -213,7 +235,7 @@ export class Viewer {
     this.$('optZoom').disabled = !zoomed;
   }
 
-  // --- messages from the Mac ---
+  // --- messages from the PC ---
 
   _message(m) {
     if (m.t === 'pong') {
@@ -235,11 +257,11 @@ export class Viewer {
     } else if (m.t === 'windows') {
       this._setWindows(Array.isArray(m.list) ? m.list : []);
     } else if (m.t === 'mic') {
-      // The Mac couldn't play the microphone (its sound output went away), or stopped it.
+      // The PC couldn't play the microphone (its sound output went away), or stopped it.
       if (m.on === false && this.micOn) {
         this._micOff();
-        this.banners.show('mic', { kind: 'warn', icon: 'warn', title: "Your Mac couldn't play your microphone.",
-          body: 'Check the sound output chosen in Perch\'s Setup on the Mac.', dismissible: true });
+        this.banners.show('mic', { kind: 'warn', icon: 'warn', title: "Your PC couldn't play your microphone.",
+          body: "Check the sound output chosen in Roost's Control Center on the PC.", dismissible: true });
       }
     } else if (m.t === 'fit') {
       if (m.ok === false) {
@@ -258,8 +280,8 @@ export class Viewer {
     Object.assign(this.status, st);
     if ('locked' in st) {
       if (st.locked) {
-        this.banners.show('locked', { kind: 'info', icon: 'lock', title: 'Your Mac is locked.',
-          body: "You can try typing its password here; if that doesn't work, unlock it at the Mac." });
+        this.banners.show('locked', { kind: 'info', icon: 'lock', title: 'Your PC is locked.',
+          body: "You can type its PIN or password here; if that doesn't work, unlock it at the PC." });
         if (this.touchFirst && this.inputAllowed !== false && document.activeElement !== this.$('softkbd')) {
           this._inviteKeyboard('Tap to type the password', { stay: true });
         }
@@ -277,19 +299,18 @@ export class Viewer {
         if (!this.guestNoted) {
           this.guestNoted = true;
           this.banners.show('guest', { kind: 'info', icon: 'eye', title: "You're watching as a guest.",
-            body: "You can see and hear this Mac, but you can't control it.", dismissible: true });
+            body: "You can see and hear this PC, but you can't control it.", dismissible: true });
         }
       } else if (!this.inputAllowed) {
         this.banners.show('viewonly', { kind: 'warn', icon: 'eye', title: 'View only.',
-          body: "Your Mac hasn't let Perch control it yet. On the Mac, open System Settings › Privacy & Security › " +
-            'Accessibility and turn on Perch.' });
+          body: "Roost can't control your PC right now. Check Roost is running on the PC and open its Control Center there." });
       } else {
         this.banners.hide('viewonly');
       }
     }
     if ('link' in st) {
       if (st.link === 'slow') {
-        const smooth = this.$('tbQuality').value === 'smooth';
+        const smooth = this.quality === 'smooth';
         this.banners.show('slow', { kind: 'warn', icon: 'warn', title: 'The connection is slow.',
           body: smooth ? 'The picture may lag or look blurry.' : 'The picture may lag. Smooth quality needs less data.',
           action: smooth ? undefined : { label: 'Use Smooth', onClick: () => this._setQuality('smooth') },
@@ -301,16 +322,16 @@ export class Viewer {
     if (st.width > 0 && st.height > 0) { this.display.width = st.width; this.display.height = st.height; }
     if (Array.isArray(st.displays)) this._setDisplays(st.displays, st.display);
     if (st.levels && typeof st.levels === 'object') this._showLevels(st.levels);
-    // Which window is being shown, if any. Just after choosing one here the Mac's older notes still say otherwise.
+    // Which window is being shown, if any. Just after choosing one here the PC's older notes still say otherwise.
     if ('window' in st && performance.now() >= (this.windowChosenAt ?? -Infinity) + 1500) this._showWindow(st.window ?? null);
   }
 
   // --- clipboard text ---
 
-  // Paste this device's clipboard on the Mac: straight away where the browser lets the page read it, otherwise
+  // Paste this device's clipboard on the PC: straight away where the browser lets the page read it, otherwise
   // through a box to paste into (iPhones without a prompt, Firefox, a refusal).
-  async _pasteToMac() {
-    this._toggleMenu(false);
+  async _pasteToPc() {
+    this._closeOverlays();
     // Pictures too, where the browser lets the page read them.
     if (this.clipImg && navigator.clipboard?.read) {
       try {
@@ -330,7 +351,7 @@ export class Viewer {
   }
 
   _sendClip(text, paste) {
-    if (!text) { this._clipStatus('There\u2019s no text to send.'); return; }
+    if (!text) { this._clipStatus('There’s no text to send.'); return; }
     if (text.length > MAX_CLIP) { this._clipStatus('That text is too long to send in one go.'); return; }
     this.clipPasting = paste;
     this.session.send({ t: 'clip-set', text, paste });
@@ -338,31 +359,28 @@ export class Viewer {
 
   _clipSetDone(ok) {
     if (this.clipPasting === 'key') {
-      // From ⌘V or Paste on the Mac: now the Mac pastes it.
+      // From Ctrl+V or Paste on the PC: now the PC pastes it.
       this.clipPasting = null;
       if (ok) {
         this.keys.pasteKey();
-        if (this.clipSentImage) this._clipNote('Pasted on your Mac.', 'paste');
+        if (this.clipSentImage) this._clipNote('Pasted on your PC.', 'paste');
       } else {
-        this._clipNote('Your Mac didn\u2019t take that.', 'paste');
+        this._clipNote('Your PC didn’t take that.', 'paste');
       }
       return;
     }
     if (!ok) {
       if (this.$('clipSheet').hidden) this._openClip('send', '');
-      this._clipStatus('Your Mac didn\u2019t take that text.');
+      this._clipStatus('Your PC didn’t take that text.');
       return;
     }
     this._closeClip();
-    this.banners.show('clip', { kind: 'info', icon: this.clipPasting ? 'paste' : 'copy',
-      title: this.clipPasting ? 'Pasted on your Mac.' : 'On your Mac\u2019s clipboard.', dismissible: true });
-    clearTimeout(this.clipNoteTimer);
-    this.clipNoteTimer = setTimeout(() => this.banners.hide('clip'), 3000);
+    this._clipNote(this.clipPasting ? 'Pasted on your PC.' : 'On your PC’s clipboard.', this.clipPasting ? 'paste' : 'copy');
   }
 
-  // --- the clipboard without the box: ⌘V pastes this device's clipboard, and copies on the Mac come here ---
+  // --- the clipboard without the box: Ctrl+V pastes this device's clipboard, and copies on the PC come here ---
 
-  // ⌘V on the picture. True: wait for the browser's paste event (and if none comes, the Mac pastes its own).
+  // Ctrl+V on the picture. True: wait for the browser's paste event (and if none comes, the PC pastes its own).
   _pasteKey() {
     if (!this.clipImg || this.guest) return false;
     clearTimeout(this.pasteTimer);
@@ -389,7 +407,7 @@ export class Viewer {
     this._pasteHere(dt?.getData('text/plain') ?? '', file);
   }
 
-  // Puts text and/or a picture on the Mac's clipboard, then presses ⌘V there. Nothing here: the Mac pastes its own.
+  // Puts text and/or a picture on the PC's clipboard, then presses Ctrl+V there. Nothing here: the PC pastes its own.
   async _pasteHere(text, file) {
     if (text && text.length > MAX_CLIP) text = '';
     if (file && file.size > MAX_CLIP_IMAGE) {
@@ -401,9 +419,9 @@ export class Viewer {
     const msg = { t: 'clip-set', paste: false };
     if (text) msg.text = text;
     if (file) {
-      if (file.size > 1024 * 1024) this._clipNote('Sending the picture\u2026', 'paste', 0);
+      if (file.size > 1024 * 1024) this._clipNote('Sending the picture…', 'paste', 0);
       let b64;
-      try { b64 = await blobToBase64(file); } catch { this._clipNote('Couldn\u2019t read that picture.', 'paste'); return; }
+      try { b64 = await blobToBase64(file); } catch { this._clipNote('Couldn’t read that picture.', 'paste'); return; }
       const id = Math.random().toString(36).slice(2, 12);
       const n = Math.ceil(b64.length / CLIP_PART);
       for (let i = 0; i < n; i++) {
@@ -439,7 +457,7 @@ export class Viewer {
     } catch { return null; }
   }
 
-  // Just copied on the Mac: onto this device's clipboard too.
+  // Just copied on the PC: onto this device's clipboard too.
   _mirrorClip(m) {
     const img = this._clipImageOf(m);
     const text = m.ok && typeof m.text === 'string' ? m.text : '';
@@ -454,7 +472,7 @@ export class Viewer {
       if (!text) throw new Error('no picture clipboard here');
       await navigator.clipboard.writeText(text);
     };
-    const note = img ? 'Picture copied from your Mac.' : 'Copied from your Mac.';
+    const note = img ? 'Picture copied from your PC.' : 'Copied from your PC.';
     this.pendingMirror = null;
     write().then(() => this._clipNote(note, 'copy', 1500), () => { this.pendingMirror = { write, note }; });
   }
@@ -472,23 +490,19 @@ export class Viewer {
     if (ms) this.clipNoteTimer = setTimeout(() => this.banners.hide('clip'), ms);
   }
 
-  // Copy the Mac's clipboard to this device. Browsers only let a page write the clipboard during a click, and the
-  // Mac's answer comes a moment later, so the write is started now with the text still on its way (ClipboardItem
+  // Copy the PC's clipboard to this device. Browsers only let a page write the clipboard during a click, and the
+  // PC's answer comes a moment later, so the write is started now with the text still on its way (ClipboardItem
   // takes a promise); where that isn't possible the text is shown, selected, to copy by hand.
-  _copyFromMac() {
-    this._toggleMenu(false);
+  _copyFromPc() {
+    this._closeOverlays();
     const answer = new Promise(resolve => {
       this.clipWaiter = resolve;
       setTimeout(() => resolve({ ok: false, timeout: true }), 5000);
     });
     this.session.send({ t: 'clip-get' });
-    // An empty Mac clipboard leaves this device's clipboard as it is.
+    // An empty PC clipboard leaves this device's clipboard as it is.
     const text = answer.then(m => (m.ok && typeof m.text === 'string' && m.text ? m.text : Promise.reject(new Error('no text'))));
-    const done = n => {
-      this.banners.show('clip', { kind: 'info', icon: 'copy', title: n ? 'Copied from your Mac.' : 'Your Mac\u2019s clipboard has no text.', dismissible: true });
-      clearTimeout(this.clipNoteTimer);
-      this.clipNoteTimer = setTimeout(() => this.banners.hide('clip'), 3000);
-    };
+    const done = n => this._clipNote(n ? 'Copied from your PC.' : 'Your PC’s clipboard has no text.', 'copy');
     const byHand = async () => {
       let t = '';
       try { t = await text; } catch { /* none */ }
@@ -507,12 +521,12 @@ export class Viewer {
     Promise.race([writing, stuck]).then(async () => done((await text).length), () => byHand());
   }
 
-  // The box for clipboard text: 'send' (to the Mac) or 'show' (the Mac's text, to copy by hand).
+  // The box for clipboard text: 'send' (to the PC) or 'show' (the PC's text, to copy by hand).
   _openClip(mode, error, text = '') {
     const $ = this.$;
     const show = mode === 'show';
-    $('clipTitle').textContent = show ? 'Your Mac\u2019s clipboard' : 'Send text to your Mac';
-    $('clipHelp').textContent = show ? 'This browser can\u2019t copy it by itself. It\u2019s selected: copy it from here.'
+    $('clipTitle').textContent = show ? 'Your PC’s clipboard' : 'Send text to your PC';
+    $('clipHelp').textContent = show ? 'This browser can’t copy it by itself. It’s selected: copy it from here.'
       : 'Paste or type it here.';
     $('clipText').value = text;
     $('clipText').readOnly = show;
@@ -536,7 +550,7 @@ export class Viewer {
     this.surface.focus({ preventScroll: true });
   }
 
-  // --- the microphone: what you say here is played on the Mac ---
+  // --- the microphone: what you say here is played on the PC ---
 
   async _toggleMic() {
     if (this.micOn) {
@@ -546,7 +560,6 @@ export class Viewer {
     }
     if (this.micBusy) return;
     this.micBusy = true;
-    this._toggleMenu(false);
     try {
       await this.session.startMic();
     } catch (e) {
@@ -563,38 +576,39 @@ export class Viewer {
     this.micOn = true;
     this.session.send({ t: 'mic', on: true });
     this.$('optMic').setAttribute('aria-pressed', 'true');
-    this.$('optMic').lastChild.textContent = 'Stop talking through your Mac';
+    this.$('optMic').lastChild.textContent = 'Stop talking through your PC';
     this.banners.show('mic', { kind: 'info', icon: 'mic', title: 'Your microphone is on.',
-      body: 'Your Mac is playing what you say.', action: { label: 'Turn off', onClick: () => this._toggleMic() } });
+      body: 'Your PC is playing what you say.', action: { label: 'Turn off', onClick: () => this._toggleMic() } });
   }
 
-  // Off on this side (the Mac is told separately, when it doesn't already know).
+  // Off on this side (the PC is told separately, when it doesn't already know).
   _micOff() {
     if (!this.micOn) return;
     this.micOn = false;
     this.session.stopMic?.();
     this.$('optMic').setAttribute('aria-pressed', 'false');
-    this.$('optMic').lastChild.textContent = 'Talk through your Mac';
+    this.$('optMic').lastChild.textContent = 'Talk through your PC';
     this.banners.hide('mic');
   }
 
   // --- one window ---
 
-  // The windows on the Mac right now, asked for each time the menu opens.
+  // The windows on the PC right now, asked for each time Tweaks or the Command palette opens.
   _setWindows(list) {
+    this.windows = list.filter(w => Number.isInteger(w?.id)).map(w => ({ id: w.id, name: windowName(w) }));
     const sel = this.$('optWindow');
     const whole = document.createElement('option');
     whole.value = '';
     whole.textContent = 'The whole screen';
-    sel.replaceChildren(whole, ...list.filter(w => Number.isInteger(w?.id)).map(w => {
+    sel.replaceChildren(whole, ...this.windows.map(w => {
       const o = document.createElement('option');
       o.value = String(w.id);
-      const app = String(w.app ?? '').trim(), title = String(w.title ?? '').trim();
-      o.textContent = (title && title !== app ? `${app || 'Window'}: ${title}` : app || 'Window').slice(0, 60);
+      o.textContent = w.name;
       return o;
     }));
-    // The one being shown may have gone from the list (it was closed); the Mac says so in its next note.
+    // The one being shown may have gone from the list (it was closed); the PC says so in its next note.
     sel.value = this.windowId != null && [...sel.options].some(o => o.value === String(this.windowId)) ? String(this.windowId) : '';
+    if (this.palette?.open) this.palette.render();
   }
 
   _showWindow(id) {
@@ -613,19 +627,23 @@ export class Viewer {
   }
 
   _chooseWindow(value) {
-    const id = value === '' ? null : Number(value);
+    const id = value === '' || value === null ? null : Number(value);
     if (id !== null && !Number.isInteger(id)) return;
     this.windowChosenAt = performance.now();
     this._showWindow(id);
     this.session.send({ t: 'window', id });
   }
 
-  // Reshape the window on the Mac to this screen's shape, so it fills the screen here.
+  // Reshape the window on the PC to this screen's shape, so it fills the screen here.
   _fitWindow() {
     const box = this.surface.getBoundingClientRect();
     if (this.windowId == null || !(box.width > 0 && box.height > 0)) return;
     this.session.send({ t: 'fit', w: Math.round(box.width), h: Math.round(box.height) });
-    this._toggleMenu(false);
+    this._closeOverlays();
+  }
+
+  _askWindows() {
+    if (this.canWindow) this.session.send({ t: 'windows' });
   }
 
   // --- regular checks ---
@@ -648,12 +666,16 @@ export class Viewer {
     dot.className = `dot ${q}`;
     dot.setAttribute('aria-label', QUALITY_WORDS[q]);
     dot.title = QUALITY_WORDS[q];
+    const orb = this.$('orb');
+    orb.classList.toggle('q-fair', q === 'fair');
+    orb.classList.toggle('q-poor', q === 'poor');
+    orb.setAttribute('aria-label', `Show the Dock (${QUALITY_WORDS[q].toLowerCase()})`);
     const panel = this.$('stats');
     if (panel.hidden) return;
     const route = this.session.via === 'relay' ? 'worker' : selectedRoute(report);
     const lines = statsLines(sum, { pingMs: this.pingMs, decoder: snap.video?.decoder, route });
     if (this.status.fps != null || this.status.kbps != null) {
-      lines.push(['Mac sends', `${this.status.fps ?? '–'} fps, ${this.status.kbps ?? '–'} kbit/s`]);
+      lines.push(['PC sends', `${this.status.fps ?? '–'} fps, ${this.status.kbps ?? '–'} kbit/s`]);
     }
     const dl = document.createElement('dl');
     for (const [k, v] of lines) {
@@ -664,6 +686,14 @@ export class Viewer {
       dl.append(dt, dd);
     }
     panel.replaceChildren(dl);
+  }
+
+  _setStats(on) {
+    const panel = this.$('stats');
+    panel.hidden = !on;
+    this.prefs.set('stats', on);
+    this.$('optStats').checked = on;
+    if (on) this._stats();
   }
 
   // --- sound ---
@@ -707,13 +737,16 @@ export class Viewer {
   _soundUi() {
     const v = this.video;
     const has = this.ready.audio !== false;
-    const b = this.$('tbSound');
+    const b = this.$('dkSound');
     b.hidden = !has;
-    this.$('tbVolumeWrap').hidden = !has || this.touchFirst;
+    this.$('optVolume').closest('label').hidden = !has || this.touchFirst;
     setIcon(b, v.muted ? 'muted' : 'sound');
     b.setAttribute('aria-label', v.muted ? 'Turn sound on' : 'Mute');
     b.title = v.muted ? 'Sound is off' : 'Sound is on';
-    this.$('tbVolume').value = String(v.volume ?? 1);
+    this.$('soundWrap').hidden = !has;
+    this.$('optSound').checked = !v.muted;
+    this.$('optVolume').value = String(v.volume ?? 1);
+    this.$('optVolumeOut').textContent = `${Math.round((v.volume ?? 1) * 100)}%`;
   }
 
   _setMuted(muted) {
@@ -727,94 +760,54 @@ export class Viewer {
     this._soundUi();
   }
 
-  // --- toolbar ---
+  // --- the Dock's buttons ---
 
-  _wireToolbar() {
+  _wireDock() {
     const $ = this.$;
-    $('tbName').textContent = this.ready.name || this.hi.name || 'your Mac';
+    $('dockName').textContent = this.ready.name || this.hi.name || 'your PC';
+    $('dockGrip').setAttribute('aria-label', `${this.ready.name || this.hi.name || 'Your PC'}: move the Dock (arrow keys)`);
     const on = (id, type, fn) => this._on($(id), type, fn);
 
-    on('tbQuality', 'change', e => this._setQuality(e.target.value));
+    // A guest only watches: nothing here that would change the PC or what it sends.
+    $('dkKeys').hidden = this.guest;
 
-    // A guest only watches: nothing here that would change the Mac or what it sends.
-    for (const id of ['tbKeys', 'tbMore']) $(id).hidden = this.guest;
-    $('tbQuality').closest('label').hidden = this.guest;
-    // 60 frames a second, on Macs that offer it.
-    const fast = $('tbQuality').querySelector('option[value="fast"]');
-    fast.hidden = fast.disabled = !this.session.caps?.includes('fps60');
-
-    // Which display: a button for each (shaped like it), a map of how they're arranged, and the edge flip.
+    // Which display: the Dock's display button opens the map, with a button for each display (shaped like it).
     this.edgeFlip = new EdgeFlip((edge, along) => (this.guest ? null : neighbour(this.displays ?? [], this._shownDisplay(), edge, along)));
     this._setDisplays(Array.isArray(this.ready.displays) ? this.ready.displays : [], this.display.id);
-    on('tbDisplayMap', 'click', () => this._toggleDisplayMap());
-    this._on($('displayMap'), 'keydown', e => { if (e.key === 'Escape') { e.preventDefault(); this._toggleDisplayMap(false); $('tbDisplayMap').focus(); } });
-    this._on(document, 'pointerdown', e => {
-      if (!$('displayMap').hidden && !e.target.closest?.('#displayMap, #tbDisplayMap')) this._toggleDisplayMap(false);
-    }, true);
+    on('dkDisplay', 'click', () => this._toggleDisplayMap());
+    this._on($('displayMap'), 'keydown', e => { if (e.key === 'Escape') { e.preventDefault(); this._toggleDisplayMap(false); $('dkDisplay').focus(); } });
 
-    // On a phone the toolbar can't hold everything, so the two pickers live in the More menu there.
-    // So do they when the bar stands up on the left or right.
-    const narrow = window.matchMedia('(max-width: 640px)');
-    this._placePickers = () => {
-      const pickers = [$('tbQuality').closest('label'), $('tbDisplayWrap')];
-      const menu = (narrow.matches || this.root.classList.contains('tb-vertical')) && !this.guest;
-      // In the menu they go under "This bar"'s settings, before "Sound" and "The Mac".
-      if (menu && pickers[0].parentElement !== $('moreMenu')) $('levelsWrap').before(...pickers);
-      else if (!menu && pickers[0].parentElement !== $('toolbar')) $('tbKeyboard').before(...pickers);
-    };
-    this._placePickers();
-    this._on(narrow, 'change', () => this._placeToolbar());
-
-    $('tbKeyboard').hidden = !this.touchFirst;
+    $('dkKeyboard').hidden = !this.touchFirst || this.guest;
     // pointerdown keeps the phone keyboard's focus while the button is pressed, so the button can toggle it.
-    on('tbKeyboard', 'pointerdown', e => e.preventDefault());
-    on('tbKeyboard', 'click', () => {
+    on('dkKeyboard', 'pointerdown', e => e.preventDefault());
+    on('dkKeyboard', 'click', () => {
       if (this.keys.softKeyboardOpen) this.keys.hideSoftKeyboard(); else this.keys.showSoftKeyboard();
     });
-    on('tbKeys', 'click', () => {
-      const bar = $('keysBar');
-      bar.hidden = !bar.hidden;
-      $('tbKeys').setAttribute('aria-pressed', String(!bar.hidden));
-      if (bar.hidden) this._closeKeysEditor();
-    });
+    on('dkKeys', 'click', () => this._setDeck($('keysBar').hidden));
 
-    on('tbSound', 'click', () => this._setMuted(!this.video.muted));
-    on('tbVolume', 'input', e => {
-      const vol = Number(e.target.value);
-      try { this.video.volume = vol; } catch {}
-      this.prefs.set('volume', vol);
-      if (vol > 0 && this.video.muted) this._setMuted(false);
-    });
+    on('dkSound', 'click', () => this._setMuted(!this.video.muted));
     on('soundPrompt', 'click', () => this._setMuted(false));
 
     const canFull = document.fullscreenEnabled || document.webkitFullscreenEnabled;
-    $('tbFull').hidden = !canFull;
-    on('tbFull', 'click', () => this._toggleFullscreen());
+    $('dkFull').hidden = !canFull;
+    on('dkFull', 'click', () => this._toggleFullscreen());
 
-    // Capture the mouse, as games do: this computer's pointer disappears and the mouse moves only the Mac's.
-    const canCapture = !this.touchFirst && !this.guest && 'requestPointerLock' in this.surface;
-    $('tbCapture').hidden = !canCapture;
-    $('captureClickWrap').hidden = !canCapture;
-    $('mouseSpeedWrap').hidden = !canCapture;
-    const speed = $('optMouseSpeed'), speedText = () => { $('mouseSpeedValue').textContent = `${Number(speed.value).toFixed(2).replace(/0$/, '')}×`; };
-    speed.value = String(this.prefs.get('mouseSpeed'));
-    speedText();
-    on('optMouseSpeed', 'input', () => { this.prefs.set('mouseSpeed', Number(speed.value)); speedText(); });
-    $('optCaptureClick').checked = !!this.prefs.get('captureOnClick');
-    on('optCaptureClick', 'change', e => this.prefs.set('captureOnClick', e.target.checked));
-    on('tbCapture', 'click', () => (this.pointer?.locked ? document.exitPointerLock() : this._capture()));
+    // Capture the mouse, as games do: this computer's pointer disappears and the mouse moves only the PC's.
+    this.canCapture = !this.touchFirst && !this.guest && 'requestPointerLock' in this.surface;
+    $('dkCapture').hidden = !this.canCapture;
+    on('dkCapture', 'click', () => (this.pointer?.locked ? document.exitPointerLock() : this._capture()));
     this._on(this.surface, 'pointerdown', e => {
-      if (canCapture && e.pointerType === 'mouse' && !this.pointer?.locked && this.prefs.get('captureOnClick') && this.inputAllowed) this._capture();
+      if (this.canCapture && e.pointerType === 'mouse' && !this.pointer?.locked && this.prefs.get('captureOnClick') && this.inputAllowed) this._capture();
     });
     this._on(document, 'pointerlockchange', () => {
       const locked = document.pointerLockElement === this.surface;
-      $('tbCapture').setAttribute('aria-pressed', String(locked));
-      $('tbCapture').setAttribute('aria-label', locked ? 'Let go of the mouse' : 'Capture the mouse');
+      $('dkCapture').setAttribute('aria-pressed', String(locked));
+      $('dkCapture').setAttribute('aria-label', locked ? 'Let go of the mouse' : 'Capture the mouse');
       this.root.classList.toggle('captured', locked);
       if (locked) {
-        this._hideToolbar(true);
+        this._closeOverlays();
         this.banners.show('capture', { kind: 'info', icon: 'pointer', title: 'The mouse is captured.',
-          body: 'It moves only your Mac\u2019s pointer. Press Esc to let go.', dismissible: true });
+          body: 'It moves only your PC’s pointer. Press Esc to let go.', dismissible: true });
         clearTimeout(this.captureNoteTimer);
         this.captureNoteTimer = setTimeout(() => this.banners.hide('capture'), 4000);
       } else {
@@ -822,64 +815,110 @@ export class Viewer {
       }
     });
     this._on(document, 'pointerlockerror', () => {
-      this.banners.show('capture', { kind: 'warn', icon: 'warn', title: "This browser didn't let Perch capture the mouse.",
-        body: 'Click the Mac\u2019s screen first, then try again.', dismissible: true });
+      this.banners.show('capture', { kind: 'warn', icon: 'warn', title: "This browser didn't let Roost capture the mouse.",
+        body: 'Click the PC’s screen first, then try again.', dismissible: true });
     });
 
-    on('tbStats', 'click', () => {
-      const panel = $('stats');
-      panel.hidden = !panel.hidden;
-      this.prefs.set('stats', !panel.hidden);
-      $('tbStats').setAttribute('aria-pressed', String(!panel.hidden));
-      if (!panel.hidden) this._stats();
+    on('dkPalette', 'click', () => this._togglePalette());
+    on('dkTweaks', 'click', () => this._toggleTweaks());
+    on('dkOrb', 'click', () => this._toOrb());
+    on('dkBye', 'click', () => this.onLeave());
+    on('orb', 'click', () => {
+      if (this.orbDragged) return;
+      this._fromOrb();
+      $('dkPalette').focus({ preventScroll: true });
+    });
+    on('dockLip', 'click', () => this._showDock());
+
+    const dock = $('dock');
+    this._on(dock, 'focusin', () => this._showDock());
+    this._on(dock, 'pointerenter', () => this._showDock());
+    this._on(dock, 'pointerleave', () => this._showDock());
+    // On the whole viewer: a Dock tucked away comes back when the mouse touches the very edge it went past.
+    this._on(this.root, 'pointermove', e => {
+      if (e.pointerType === 'touch' || this.pointer?.locked || !this.root.classList.contains('dock-away')) return;
+      const box = this.root.getBoundingClientRect();
+      const near = { top: e.clientY - box.top < EDGE_ZONE_PX, bottom: box.bottom - e.clientY < EDGE_ZONE_PX,
+        left: e.clientX - box.left < EDGE_ZONE_PX, right: box.right - e.clientX < EDGE_ZONE_PX };
+      if (near[anchorEdge(this._at())]) this._showDock();
+    });
+    // A tap or click on the picture closes whatever was open over it.
+    this._on(this.surface, 'pointerdown', () => this._closeOverlays());
+    this._on($('scrim'), 'pointerdown', e => { e.preventDefault(); this._closeOverlays({ focus: true }); });
+    this._on(document, 'pointerdown', e => {
+      if (!$('displayMap').hidden && !e.target.closest?.('#displayMap, #dkDisplay')) this._toggleDisplayMap(false);
+    }, true);
+  }
+
+  // --- Tweaks: the slide-over panel ---
+
+  _wireTweaks() {
+    const $ = this.$;
+    const on = (id, type, fn) => this._on($(id), type, fn);
+    on('tweaksClose', 'click', () => this._toggleTweaks(false));
+    this._on($('tweaks'), 'keydown', e => { if (e.key === 'Escape') { e.preventDefault(); this._toggleTweaks(false); } });
+
+    // Picture quality, with 60 frames a second on PCs that offer it. A guest can't change what the PC sends.
+    $('qualityGroup').hidden = this.guest;
+    $('qFastWrap').hidden = !this.session.caps?.includes('fps60');
+    for (const r of document.querySelectorAll('#qualityGroup input')) this._on(r, 'change', () => { if (r.checked) this._setQuality(r.value); });
+
+    on('optSound', 'change', e => this._setMuted(!e.target.checked));
+    // This device's volume (phones and tablets set it with their own buttons).
+    on('optVolume', 'input', e => {
+      const vol = Number(e.target.value);
+      try { this.video.volume = vol; } catch {}
+      this.prefs.set('volume', vol);
+      if (vol > 0 && this.video.muted) this._setMuted(false);
+      this.$('optVolumeOut').textContent = `${Math.round(vol * 100)}%`;
     });
 
-    on('tbMore', 'click', () => this._toggleMenu());
-    $('swapWrap').hidden = $('swapHelp').hidden = this.apple;
+    // Capture: its speed, and capturing on a click.
+    $('captureClickWrap').hidden = $('mouseSpeedWrap').hidden = !this.canCapture;
+    const speed = $('optMouseSpeed'), speedText = () => { $('mouseSpeedValue').textContent = `${Number(speed.value).toFixed(2).replace(/0$/, '')}×`; };
+    speed.value = String(this.prefs.get('mouseSpeed'));
+    speedText();
+    on('optMouseSpeed', 'input', () => { this.prefs.set('mouseSpeed', Number(speed.value)); speedText(); });
+    $('optCaptureClick').checked = !!this.prefs.get('captureOnClick');
+    on('optCaptureClick', 'change', e => this.prefs.set('captureOnClick', e.target.checked));
+
+    on('optStats', 'change', e => this._setStats(e.target.checked));
+
+    // "⌘ is Ctrl": on by default on Apple devices, where ⌘ sits where a PC keyboard has Ctrl.
+    $('twKeys').hidden = this.guest;
     $('optSwap').checked = !!this.prefs.get('swapCtrlCmd');
-    on('optSwap', 'change', e => {
-      this.keys.releaseAll();
-      this.prefs.set('swapCtrlCmd', e.target.checked);
-    });
-    on('optZoom', 'click', () => { this.setView(IDENTITY); this._toggleMenu(false); });
-    // Force Quit: the Mac's own Force Quit window (⌘⌥Esc), to pick the app that has stopped responding.
-    $('optForceQuit').hidden = this.guest;
-    on('optForceQuit', 'click', () => {
-      this._toggleMenu(false);
-      if (!this.inputAllowed) return;
-      this.keys._press(findShortcut('forceQuit', this.customKeys));
-      this.surface.focus({ preventScroll: true });
-    });
+    on('optSwap', 'change', e => this._setSwap(e.target.checked));
+    on('optZoom', 'click', () => { this.setView(IDENTITY); this._closeOverlays({ focus: true }); });
+    // Task Manager (Ctrl+Shift+Esc: Ctrl+Alt+Del can't be pressed by a program) and closing the app in front.
+    on('optForceQuit', 'click', () => this._pressAndClose('taskManager'));
+    on('optCloseApp', 'click', () => this._pressAndClose('closeApp'));
     // Touchpad mode, on phones and tablets.
     $('touchpadWrap').hidden = $('touchpadHelp').hidden = !this.touchFirst || this.guest;
     $('optTouchpad').checked = !!this.prefs.get('touchpad');
-    on('optTouchpad', 'change', e => {
-      this.prefs.set('touchpad', e.target.checked);
-      this.root.classList.toggle('touchpad', e.target.checked);
-    });
+    on('optTouchpad', 'change', e => this._setTouchpad(e.target.checked));
     this.root.classList.toggle('touchpad', this.touchFirst && !!this.prefs.get('touchpad'));
+    $('twMouse').hidden = this.guest;
 
-    // Clipboard text both ways, on Macs that offer it.
+    // Clipboard text both ways, on PCs that offer it.
     const canClip = !this.guest && !!this.session.caps?.includes('clipboard');
+    this.canClip = canClip;
+    $('twClip').hidden = !canClip;
     $('optPaste').hidden = $('optCopy').hidden = !canClip;
-    // Pictures, ⌘V without the box, and copies on the Mac coming here by themselves, on Macs that offer them.
+    // Pictures, Ctrl+V without the box, and copies on the PC coming here by themselves, on PCs that offer them.
     this.clipImg = canClip && !!this.session.caps?.includes('clipimg');
     $('clipSyncWrap').hidden = !this.clipImg;
     $('optClipSync').checked = !!this.prefs.get('clipSync');
     if (this.clipImg && this.prefs.get('clipSync')) this.session.send({ t: 'clip-sync', on: true });
-    on('optClipSync', 'change', e => {
-      this.prefs.set('clipSync', e.target.checked);
-      this.session.send({ t: 'clip-sync', on: e.target.checked });
-    });
-    on('optPaste', 'click', () => this._pasteToMac());
-    on('optCopy', 'click', () => this._copyFromMac());
+    on('optClipSync', 'change', e => this._setClipSync(e.target.checked));
+    on('optPaste', 'click', () => this._pasteToPc());
+    on('optCopy', 'click', () => this._copyFromPc());
     on('clipGo', 'click', () => this._sendClip($('clipText').value, true));
     on('clipOnly', 'click', () => this._sendClip($('clipText').value, false));
     on('clipClose', 'click', () => this._closeClip());
     this._on($('clipSheet'), 'keydown', e => { if (e.key === 'Escape') { e.preventDefault(); this._closeClip(); } });
 
-    // Sound levels, set on the Mac: what is sent here (0–150%) and its own speakers (0–100%, 0 = silent). Sent while
-    // a slider moves (at most a few times a second) and once more when it's let go; the Mac's status echoes them back.
+    // Sound levels, set on the PC: what is sent here (0–150%) and its own speakers (0–100%, 0 = silent). Sent while
+    // a slider moves (at most a few times a second) and once more when it's let go; the PC's status echoes them back.
     this._showLevels(this.ready.levels);
     const sendLevels = (final) => {
       const now = performance.now();
@@ -892,7 +931,7 @@ export class Viewer {
       on(id, 'change', () => { this.levelsDragged = performance.now(); sendLevels(true); });
     }
 
-    // Talking through the Mac, where the Mac, the browser and the connection all can.
+    // Talking through the PC, where the PC, the browser and the connection all can.
     this.micOn = false;
     $('optMic').hidden = this.guest || !this.session.canMic;
     on('optMic', 'click', () => this._toggleMic());
@@ -901,43 +940,104 @@ export class Viewer {
       this._micOff();
       this.session.send({ t: 'mic', on: false });
     };
-    // One window at a time, on Macs that offer it.
-    const canWindow = !this.guest && !!this.session.caps?.includes('window');
-    $('windowWrap').hidden = !canWindow;
+    // One window at a time, on PCs that offer it.
+    this.canWindow = !this.guest && !!this.session.caps?.includes('window');
+    $('windowWrap').hidden = !this.canWindow;
     $('optFit').hidden = true;
     this.windowId = null;
     this._setWindows([]);
     on('optWindow', 'change', e => this._chooseWindow(e.target.value));
     on('optFit', 'click', () => this._fitWindow());
-    on('optKeyframe', 'click', () => { this.session.send({ t: 'keyframe' }); this._toggleMenu(false); });
-    on('tbBye', 'click', () => this.onLeave());
-
-    on('handle', 'click', () => this._showToolbar());
-    const tb = $('toolbar');
-    this._on(tb, 'focusin', () => this._showToolbar());
-    this._on(tb, 'pointerenter', () => this._showToolbar());
-    this._on(tb, 'pointerleave', () => this._showToolbar());
-    this._on(tb, 'keydown', e => this._toolbarKey(e));
-    this._on($('moreMenu'), 'keydown', e => this._toolbarKey(e));
-    // On the whole viewer, not just the picture: at the top in the middle the mouse is over the handle instead.
-    this._on(this.root, 'pointermove', e => {
-      if (e.pointerType === 'touch' || this.pointer?.locked || !this._autoHide()) return;
-      const box = this.root.getBoundingClientRect();
-      const near = { top: e.clientY - box.top < EDGE_ZONE_PX, bottom: box.bottom - e.clientY < EDGE_ZONE_PX,
-        left: e.clientX - box.left < EDGE_ZONE_PX, right: box.right - e.clientX < EDGE_ZONE_PX };
-      if (near[this.prefs.get('tbEdge')]) this._showToolbar();
-    });
-    this._on(this.surface, 'pointerdown', () => { this._toggleMenu(false); this._closeKeysEditor(); });
+    $('optKeyframe').hidden = this.guest;
+    on('optKeyframe', 'click', () => this._refresh());
   }
 
-  // The sound sliders, from the Mac's own levels (ready, then status). Only the owner's viewer, and only where the Mac
-  // knows about them; the speakers slider only where the Mac can keep its speakers quiet.
+  _refresh() {
+    this.session.send({ t: 'keyframe' });
+    this._closeOverlays({ focus: true });
+  }
+
+  _pressAndClose(id) {
+    this._closeOverlays({ focus: true });
+    if (!this.inputAllowed) return;
+    this.keys._press(findShortcut(id, this.customKeys));
+  }
+
+  _setSwap(on) {
+    this.keys.releaseAll();
+    this.prefs.set('swapCtrlCmd', on);
+    this.$('optSwap').checked = on;
+  }
+
+  _setTouchpad(on) {
+    this.prefs.set('touchpad', on);
+    this.$('optTouchpad').checked = on;
+    this.root.classList.toggle('touchpad', on);
+  }
+
+  _setClipSync(on) {
+    this.prefs.set('clipSync', on);
+    this.$('optClipSync').checked = on;
+    this.session.send({ t: 'clip-sync', on });
+  }
+
+  _toggleTweaks(open) {
+    const panel = this.$('tweaks');
+    const show = open ?? panel.hidden;
+    if (show === !panel.hidden) return;
+    if (show) {
+      this._closeOverlays({ except: 'tweaks' });
+      this.root.classList.toggle('tweaks-left', onRight(this._at()));
+      panel.hidden = false;
+      this._askWindows();
+      this._scrim();
+      this.$('tweaksClose').focus({ preventScroll: true });
+    } else {
+      panel.hidden = true;
+      this._scrim();
+      if (panel.contains(document.activeElement) || document.activeElement === document.body) this.surface.focus({ preventScroll: true });
+    }
+    this.$('dkTweaks').setAttribute('aria-expanded', String(show));
+    this._showDock();
+  }
+
+  // Opens Tweaks at one of its sections (from the Command palette).
+  _tweaksAt(id) {
+    this._toggleTweaks(true);
+    const el = this.$(id);
+    el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    el?.querySelector('input, select, button')?.focus({ preventScroll: true });
+  }
+
+  // The scrim behind a panel: on phones for Tweaks and the Key deck chooser (they come up from the bottom), always
+  // for the Command palette.
+  _scrim() {
+    const phone = window.matchMedia('(max-width: 640px)').matches;
+    const show = !this.$('palette').hidden || (phone && (!this.$('tweaks').hidden || !this.$('keysEditor').hidden));
+    this.$('scrim').hidden = !show;
+  }
+
+  // Closes the palette, Tweaks, the display map and the Key deck chooser (all but `except`).
+  _closeOverlays({ except = null, focus = false } = {}) {
+    if (except !== 'palette' && this.palette?.open) this.palette.hide();
+    if (except !== 'tweaks' && !this.$('tweaks').hidden) {
+      this.$('tweaks').hidden = true;
+      this.$('dkTweaks').setAttribute('aria-expanded', 'false');
+    }
+    if (except !== 'map') this._toggleDisplayMap(false);
+    if (except !== 'keys') this._closeKeysEditor({ focus: false });
+    this._scrim();
+    if (focus) this.surface.focus({ preventScroll: true });
+  }
+
+  // The sound sliders, from the PC's own levels (ready, then status). Only the owner's viewer, and only where the PC
+  // knows about them; the speakers slider only where the PC can keep its speakers quiet.
   _showLevels(levels) {
     const wrap = this.$('levelsWrap');
     const ok = !this.guest && !!levels && this.session.caps?.includes('levels');
     wrap.hidden = !ok;
     if (!ok) return;
-    // Just let go of: the Mac's echo of the previous value mustn't pull the slider back.
+    // Just let go of: the PC's echo of the previous value mustn't pull the slider back.
     const settling = performance.now() - (this.levelsDragged ?? -Infinity) < 600;
     const active = document.activeElement;
     if (typeof levels.stream === 'number' && !settling && active !== this.$('optStream')) this.$('optStream').value = String(Math.round(levels.stream * 100));
@@ -953,7 +1053,173 @@ export class Viewer {
     this.$('optSpeakersOut').textContent = Number(this.$('optSpeakers').value) === 0 ? 'Silent' : `${this.$('optSpeakers').value}%`;
   }
 
-  // The display picker. Called again when the Mac says its displays changed (one was unplugged or plugged in).
+  // --- the Command palette: every action, searchable ---
+
+  _wirePalette() {
+    this.palette = new Palette({
+      root: this.$('palette'), input: this.$('paletteInput'), list: this.$('paletteList'), empty: this.$('paletteEmpty'),
+      actions: () => this._actions(),
+      // On a phone the search box would bring up the keyboard over the list: the list comes first there.
+      focusInput: () => !this.touchFirst,
+      onClose: () => {
+        this.$('dkPalette').setAttribute('aria-expanded', 'false');
+        this._scrim();
+        const a = document.activeElement;
+        if (!a || a === document.body || this.$('palette').contains(a)) this.surface.focus({ preventScroll: true });
+      },
+    });
+  }
+
+  _togglePalette(open) {
+    const show = open ?? !this.palette.open;
+    if (show === this.palette.open) return;
+    if (show) {
+      this._closeOverlays({ except: 'palette' });
+      this._askWindows();
+      this.palette.show();
+      this.$('dkPalette').setAttribute('aria-expanded', 'true');
+      this._scrim();
+    } else {
+      this.palette.hide();
+    }
+    this._showDock();
+  }
+
+  // Everything the viewer can do, for the Command palette. Kept as one list so nothing is only reachable one way.
+  _actions() {
+    const owner = !this.guest, input = () => this.inputAllowed && !this.over;
+    const A = [];
+    const add = (group, a) => A.push({ group, ...a });
+    const video = this.video;
+
+    // Picture
+    for (const q of Object.keys(QUALITY_TEXT)) {
+      if (!owner || (q === 'fast' && !this.session.caps?.includes('fps60'))) continue;
+      add('Picture', { id: `quality-${q}`, icon: q === 'fast' ? 'bolt' : 'display', label: `Quality: ${QUALITY_TEXT[q][0]}`,
+        hint: QUALITY_TEXT[q][1], keywords: 'quality picture resolution fps frames blurry sharp', state: () => (this.quality === q ? 'Now' : null),
+        run: () => this._setQuality(q) });
+    }
+    for (const s of SHAPES) {
+      add('Picture', { id: `shape-${s}`, icon: 'fullscreen', label: `Shape: ${SHAPE_TEXT[s]}`, keywords: 'fit fill stretch aspect bars crop',
+        state: () => (this._shape() === s ? 'Now' : null), run: () => this._setShape(s) });
+    }
+    if (this.canWindow) {
+      add('Picture', { id: 'window-whole', icon: 'display', label: 'Show the whole screen', keywords: 'window desktop all',
+        state: () => (this.windowId == null ? 'Now' : null), run: () => this._chooseWindow(null) });
+      for (const w of this.windows) {
+        add('Picture', { id: `window-${w.id}`, icon: 'window', label: `Show only ${w.name}`, keywords: 'one window app single',
+          state: () => (this.windowId === w.id ? 'Now' : null), run: () => this._chooseWindow(String(w.id)) });
+      }
+      add('Picture', { id: 'window-fit', icon: 'fullscreen', label: 'Fit this window to my screen', keywords: 'resize reshape window',
+        when: () => this.windowId != null, run: () => this._fitWindow() });
+    }
+    add('Picture', { id: 'zoom-out', icon: 'zoom', label: 'Zoom back out', keywords: 'zoom reset pinch', when: () => isZoomed(this.view),
+      run: () => this.setView(IDENTITY) });
+    if (owner) add('Picture', { id: 'keyframe', icon: 'refresh', label: 'Refresh the picture', keywords: 'redraw glitch keyframe', run: () => this._refresh() });
+    if (!this.$('dkFull').hidden) {
+      add('Picture', { id: 'fullscreen', icon: 'fullscreen', label: 'Full screen', keywords: 'fullscreen maximise',
+        state: () => !!(document.fullscreenElement || document.webkitFullscreenElement), run: () => this._toggleFullscreen() });
+    }
+
+    // Displays
+    if (owner && (this.displays ?? []).length > 1) {
+      this.displays.forEach((d, i) => add('Displays', { id: `display-${d.id}`, icon: 'display',
+        label: `Show display ${i + 1}${d.name ? `: ${d.name}` : ''}`, hint: d.main ? 'Main display' : `${d.width} × ${d.height}`,
+        keywords: 'monitor screen switch', state: () => (this.display.id === d.id ? 'Now' : null), run: () => this._showDisplay(d.id) }));
+      add('Displays', { id: 'display-map', icon: 'displays', label: 'Displays, as arranged', keywords: 'map monitors layout',
+        run: () => this._toggleDisplayMap(true) });
+    }
+
+    // Keyboard
+    if (owner) {
+      if (this.touchFirst) {
+        add('Keyboard', { id: 'soft-keyboard', icon: 'keyboard', label: 'Show the keyboard', keywords: 'type text phone',
+          run: () => this.keys.showSoftKeyboard() });
+      }
+      add('Keyboard', { id: 'deck', icon: 'keys', label: 'Key deck', hint: 'Win, Ctrl, Alt, shortcuts', keywords: 'keys bar special modifiers',
+        state: () => !this.$('keysBar').hidden, run: () => this._setDeck(this.$('keysBar').hidden) });
+      add('Keyboard', { id: 'deck-edit', icon: 'plus', label: 'Choose the Key deck’s keys', keywords: 'customise edit add shortcut',
+        run: () => this._openKeysEditor() });
+      add('Keyboard', { id: 'swap', icon: 'keyboard', label: '⌘ is Ctrl', hint: 'For Mac keyboards', keywords: 'command cmd control swap apple mac',
+        state: () => !!this.prefs.get('swapCtrlCmd'), run: () => this._setSwap(!this.prefs.get('swapCtrlCmd')) });
+      for (const [k, s] of Object.entries(SWIPE_ACTIONS)) {
+        add('Keyboard', { id: `swipe-${k}`, icon: 'touch', label: `Swipe sideways: ${s.label}`, keywords: 'gesture touchpad three fingers',
+          state: () => (this.prefs.get('swipe') === k ? 'Now' : null), run: () => { this.prefs.set('swipe', k); this.$('optSwipe').value = k; } });
+      }
+      // Every key and shortcut the Key deck knows, ready to press.
+      for (const s of [...CATALOG, ...this.customKeys]) {
+        add('Press a key', { id: `press-${s.id}`, icon: s.sys ? 'display' : 'keys', label: `Press ${s.title}`,
+          hint: s.title.includes(s.label) ? '' : s.label, keywords: `${s.group} key shortcut ${s.label}`,
+          disabled: () => !input(), run: () => { this.surface.focus({ preventScroll: true }); if (input()) this.keys._press(s); } });
+      }
+    }
+
+    // Clipboard
+    if (this.canClip) {
+      add('Clipboard', { id: 'paste', icon: 'paste', label: 'Paste on the PC', hint: 'This device’s clipboard', keywords: 'clipboard send text picture',
+        run: () => this._pasteToPc() });
+      add('Clipboard', { id: 'copy', icon: 'copy', label: 'Copy the PC’s clipboard', hint: 'To this device', keywords: 'clipboard get text',
+        run: () => this._copyFromPc() });
+      if (this.clipImg) {
+        add('Clipboard', { id: 'clip-sync', icon: 'clipboard', label: 'Share the clipboard both ways', keywords: 'sync automatic copy paste',
+          state: () => !!this.prefs.get('clipSync'), run: () => this._setClipSync(!this.prefs.get('clipSync')) });
+      }
+    }
+
+    // Sound
+    if (this.ready.audio !== false) {
+      add('Sound', { id: 'mute', icon: video.muted ? 'muted' : 'sound', label: video.muted ? 'Turn sound on' : 'Mute', keywords: 'sound audio volume mute',
+        run: () => this._setMuted(!video.muted) });
+    }
+    add('Sound', { id: 'levels', icon: 'sliders', label: 'Sound levels', hint: 'This device, the PC’s speakers', keywords: 'volume speakers silent',
+      run: () => this._tweaksAt('twSound') });
+    if (owner && this.session.canMic) {
+      add('Sound', { id: 'mic', icon: 'mic', label: 'Talk through your PC', keywords: 'microphone voice call',
+        state: () => !!this.micOn, run: () => this._toggleMic() });
+    }
+
+    // Mouse and touch
+    if (this.canCapture) {
+      add('Mouse and touch', { id: 'capture', icon: 'pointer', label: 'Capture the mouse', hint: 'Esc lets go', keywords: 'pointer lock games',
+        run: () => this._capture() });
+      add('Mouse and touch', { id: 'capture-click', icon: 'pointer', label: 'Capture the mouse when I click', keywords: 'pointer lock',
+        state: () => !!this.prefs.get('captureOnClick'), run: () => { const v = !this.prefs.get('captureOnClick'); this.prefs.set('captureOnClick', v); this.$('optCaptureClick').checked = v; } });
+      add('Mouse and touch', { id: 'mouse-speed', icon: 'sliders', label: 'Captured mouse speed', keywords: 'sensitivity pointer',
+        hint: `${this.prefs.get('mouseSpeed')}×`, run: () => this._tweaksAt('mouseSpeedWrap') });
+    }
+    if (owner && !this.touchFirst) {
+      add('Mouse and touch', { id: 'hide-cursor', icon: 'pointer', label: 'Hide this computer’s pointer', hint: 'Esc twice brings it back',
+        keywords: 'cursor', state: () => !!this.prefs.get('hideCursor'), run: () => this._setHideCursor(!this.prefs.get('hideCursor')) });
+    }
+    if (owner && this.touchFirst) {
+      add('Mouse and touch', { id: 'touchpad', icon: 'touch', label: 'Touchpad mode', hint: 'Your finger moves the pointer', keywords: 'trackpad',
+        state: () => !!this.prefs.get('touchpad'), run: () => this._setTouchpad(!this.prefs.get('touchpad')) });
+    }
+
+    // The Dock
+    for (const at of ANCHORS) {
+      add('The Dock', { id: `dock-${at}`, icon: 'dock', label: `Move the Dock to the ${ANCHOR_TEXT[at]}`, keywords: 'position place edge corner',
+        state: () => (this._at() === at ? 'Now' : null), run: () => this._moveDock(at) });
+    }
+    add('The Dock', { id: 'dock-orb', icon: 'orb', label: 'Shrink the Dock to an orb', keywords: 'collapse hide minimise', run: () => this._toOrb() });
+    for (const [k, t] of Object.entries(IDLE_TEXT)) {
+      add('The Dock', { id: `dock-idle-${k}`, icon: 'dock', label: `When I'm not using it: ${t}`, keywords: 'auto hide idle',
+        state: () => (this._idleMode() === k ? 'Now' : null), run: () => this._setIdle(k) });
+    }
+    add('The Dock', { id: 'dock-room', icon: 'dock', label: 'Keep the picture clear of the Dock', keywords: 'room space strip',
+      when: () => this._idleMode() === 'stay', state: () => this._room(), run: () => this._setRoom(!this._room()) });
+    add('The Dock', { id: 'tweaks', icon: 'sliders', label: 'Open Tweaks', keywords: 'settings preferences options', run: () => this._toggleTweaks(true) });
+
+    // The session
+    add('Session', { id: 'stats', icon: 'stats', label: 'Connection details', keywords: 'stats ping latency fps bitrate',
+      state: () => !this.$('stats').hidden, run: () => this._setStats(this.$('stats').hidden) });
+    if (owner) add('Session', { id: 'task-manager', icon: 'warn', label: 'Open Task Manager', hint: 'Ctrl+Shift+Esc', keywords: 'force quit kill frozen ctrl alt del',
+      disabled: () => !input(), run: () => this._pressAndClose('taskManager') });
+    add('Session', { id: 'disconnect', icon: 'power', label: 'Disconnect', keywords: 'leave end quit bye', run: () => this.onLeave() });
+    return A;
+  }
+
+  // The display picker. Called again when the PC says its displays changed (one was unplugged or plugged in).
   _setDisplays(displays, shownId) {
     const ids = (list) => (list ?? []).map(d => `${d.id}:${d.x},${d.y},${d.width},${d.height}`).join(' ');
     if (ids(displays) !== ids(this.displays)) this.edgeFlip?.reset();
@@ -963,8 +1229,8 @@ export class Viewer {
       this.display = { id: shown.id, width: shown.width, height: shown.height };
       this.setView(IDENTITY);
     }
-    // A guest can't switch displays (the Mac ignores it), so they aren't offered the picker.
-    this.$('tbDisplayWrap').hidden = displays.length < 2 || !!this.guest;
+    // A guest can't switch displays (the PC ignores it), so they aren't offered the picker.
+    this.$('dkDisplay').hidden = displays.length < 2 || !!this.guest;
     if (displays.length < 2) this._toggleDisplayMap(false);
     this._renderDisplayPicker();
   }
@@ -974,6 +1240,9 @@ export class Viewer {
   // One button per display, numbered, each with a small outline in its own shape; and the map, when it is open.
   _renderDisplayPicker() {
     const list = this.displays ?? [];
+    const index = list.findIndex(d => d.id === this.display.id);
+    this.$('dkDisplayNum').textContent = String(index + 1 || 1);
+    this.$('dkDisplay').setAttribute('aria-label', `Displays (showing ${index + 1 || 1} of ${list.length})`);
     // Only when something changed: rebuilding would take keyboard focus off a button.
     const key = `${this.display.id}|${list.map(d => `${d.id}:${d.name}:${d.width}x${d.height}:${d.main}`).join(',')}`;
     if (key === this.pickerKey) { if (!this.$('displayMap').hidden) this._renderDisplayMap(); return; }
@@ -982,9 +1251,9 @@ export class Viewer {
     const chips = list.map((d, i) => {
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'tb-chip';
+      b.className = 'display-chip';
       b.title = d.name || `Display ${i + 1}`;
-      b.setAttribute('aria-label', `${d.name || `Display ${i + 1}`}${d.main ? ' (has the menu bar)' : ''}`);
+      b.setAttribute('aria-label', `${d.name || `Display ${i + 1}`}${d.main ? ' (main display)' : ''}`);
       b.setAttribute('aria-pressed', String(d.id === this.display.id));
       const shape = document.createElement('span');
       shape.className = 'shape';
@@ -996,7 +1265,7 @@ export class Viewer {
       b.addEventListener('click', () => this._showDisplay(d.id)); // replaced with the button, so not in this.listeners
       return b;
     });
-    const box = this.$('tbDisplays');
+    const box = this.$('dkDisplays');
     const focused = [...box.children].indexOf(document.activeElement);
     box.replaceChildren(...chips);
     if (focused >= 0) chips[focused]?.focus();
@@ -1009,21 +1278,21 @@ export class Viewer {
     if (!all.length) { area.replaceChildren(); return; }
     const minX = Math.min(...all.map(d => d.x)), minY = Math.min(...all.map(d => d.y));
     const spanX = Math.max(...all.map(d => d.x + d.width)) - minX, spanY = Math.max(...all.map(d => d.y + d.height)) - minY;
-    const boxW = area.clientWidth || 260, boxH = 120;
-    const k = Math.min(boxW / (spanX || 1), boxH / (spanY || 1));
-    const offX = (boxW - spanX * k) / 2, offY = (boxH - spanY * k) / 2;
+    const boxW = area.clientWidth || 260, boxH = (area.clientHeight || 128) - 12;
+    const k = Math.min((boxW - 12) / (spanX || 1), boxH / (spanY || 1));
+    const offX = (boxW - spanX * k) / 2, offY = 6 + (boxH - spanY * k) / 2;
     area.replaceChildren(...all.map((d, i) => {
       const b = document.createElement('button');
       b.type = 'button';
       b.className = `map-display${d.id === this.display.id ? ' on' : ''}${d.main ? ' main' : ''}`;
       b.setAttribute('aria-pressed', String(d.id === this.display.id));
-      b.title = `${d.name || `Display ${i + 1}`}${d.main ? ' (has the menu bar)' : ''}`;
+      b.title = `${d.name || `Display ${i + 1}`}${d.main ? ' (main display)' : ''}`;
       b.textContent = `${i + 1}`;
       Object.assign(b.style, {
         left: `${offX + (d.x - minX) * k + 2}px`, top: `${offY + (d.y - minY) * k + 2}px`,
         width: `${Math.max(14, d.width * k - 4)}px`, height: `${Math.max(12, d.height * k - 4)}px`,
       });
-      b.addEventListener('click', () => { this._showDisplay(d.id); this.$('tbDisplayMap').focus(); });
+      b.addEventListener('click', () => { this._showDisplay(d.id); this.$('dkDisplay').focus(); });
       return b;
     }));
   }
@@ -1031,16 +1300,38 @@ export class Viewer {
   _toggleDisplayMap(open) {
     const map = this.$('displayMap');
     const show = (open ?? map.hidden) && (this.displays ?? []).length > 1 && !this.guest;
+    if (show === !map.hidden) return;
     map.hidden = !show;
-    this.$('tbDisplayMap').setAttribute('aria-expanded', String(show));
+    this.$('dkDisplay').setAttribute('aria-expanded', String(show));
     if (show) {
-      this._toggleMenu(false);
-      this._showToolbar();
+      this._closeOverlays({ except: 'map' });
+      if (this.root.classList.contains('dock-orb') || this.root.classList.contains('dock-away')) this._fromOrb();
+      this._showDock();
+      this._placePops();
       this._renderDisplayMap();
     }
   }
 
-  // Show another of the Mac's displays.
+  // Popovers open beside the Dock button they belong to, on the side facing the middle of the screen.
+  _placePops() {
+    const map = this.$('displayMap');
+    if (map.hidden) return;
+    const b = this.$('dkDisplay').getBoundingClientRect(), r = this.root.getBoundingClientRect();
+    const w = map.offsetWidth, h = map.offsetHeight, gap = 10, pad = 12;
+    const clamp = (v, lo, hi) => Math.min(Math.max(lo, v), Math.max(lo, hi));
+    let x, y;
+    if (isVertical(this._at())) {
+      x = this._at() === 'left' ? b.right + gap : b.left - gap - w;
+      y = clamp(b.top + b.height / 2 - h / 2 - r.top, pad, r.height - h - pad);
+      x -= r.left;
+    } else {
+      x = clamp(b.left + b.width / 2 - w / 2 - r.left, pad, r.width - w - pad);
+      y = anchorEdge(this._at()) === 'top' ? b.bottom + gap - r.top : b.top - gap - h - r.top;
+    }
+    Object.assign(map.style, { left: `${Math.round(x)}px`, top: `${Math.round(y)}px` });
+  }
+
+  // Show another of the PC's displays.
   _showDisplay(id) {
     const d = (this.displays ?? []).find(x => x.id === id);
     if (!d || this.guest || d.id === this.display.id) return;
@@ -1096,7 +1387,7 @@ export class Viewer {
     el.classList.add('charging');
   }
 
-  // Tells the Mac how big its picture is on this screen, in real pixels, so it doesn't send more than can be shown
+  // Tells the PC how big its picture is on this screen, in real pixels, so it doesn't send more than can be shown
   // (a phone needs far fewer than a desktop monitor, and fewer pixels means a smoother picture on the same link).
   // Zooming in asks for up to twice as many. Sent a moment after things settle, and only when it changed.
   _reportView() {
@@ -1118,22 +1409,15 @@ export class Viewer {
 
   _setQuality(preset) {
     if (!(preset in QUALITY)) return;
-    this.$('tbQuality').value = preset;
+    this._showQuality(preset);
     this.prefs.set('quality', preset);
     this.session.send({ t: 'quality', preset });
     if (this.status.link === 'slow') this._applyStatus({ link: 'slow' });
   }
 
-  _toggleMenu(open) {
-    const menu = this.$('moreMenu');
-    const show = open ?? menu.hidden;
-    menu.hidden = !show;
-    this.$('tbMore').setAttribute('aria-expanded', String(show));
-    if (show) {
-      this._toggleDisplayMap(false);
-      this._showToolbar();
-      if (!this.$('windowWrap').hidden) this.session.send({ t: 'windows' });
-    }
+  _showQuality(preset) {
+    this.quality = preset;
+    for (const r of document.querySelectorAll('#qualityGroup input')) r.checked = r.value === preset;
   }
 
   async _keepAwake() {
@@ -1150,7 +1434,7 @@ export class Viewer {
 
   async _capture() {
     if (this.over || !this.inputAllowed) return;
-    this._toggleMenu(false);
+    this._closeOverlays();
     this.surface.focus({ preventScroll: true });
     // Raw mouse movement (no acceleration) where the browser offers it, as games want.
     try {
@@ -1165,20 +1449,20 @@ export class Viewer {
   _shape() { return SHAPES.includes(this.prefs.get('shape')) ? this.prefs.get('shape') : 'fit'; }
 
   _wireShape() {
-    const sel = this.$('optShape');
     this.pan = { ...CENTER };
-    sel.value = this._shape();
-    this._on(sel, 'change', () => {
-      this.prefs.set('shape', SHAPES.includes(sel.value) ? sel.value : 'fit');
-      this._applyShape();
-    });
+    for (const r of document.querySelectorAll('#shapeGroup input')) this._on(r, 'change', () => { if (r.checked) this._setShape(r.value); });
+    this._applyShape();
+  }
+
+  _setShape(shape) {
+    this.prefs.set('shape', SHAPES.includes(shape) ? shape : 'fit');
     this._applyShape();
   }
 
   _applyShape() {
     const shape = this._shape();
     for (const s of SHAPES) this.root.classList.toggle(`shape-${s}`, s === shape);
-    this.$('optShape').value = shape;
+    for (const r of document.querySelectorAll('#shapeGroup input')) r.checked = r.value === shape;
     this._setPan(this.pan ?? CENTER);
     this._shapeUi();
     this.lastViewEdge = 0;
@@ -1192,7 +1476,7 @@ export class Viewer {
     this.video.style.objectPosition = this._shape() === 'fill' ? `${(x * 100).toFixed(2)}% ${(y * 100).toFixed(2)}%` : '';
   }
 
-  // Says how much a "fill" picture leaves out, or how much "stretch" squeezes, for this window and this Mac.
+  // Says how much a "fill" picture leaves out, or how much "stretch" squeezes, for this window and this PC.
   _shapeUi() {
     const note = this.$('shapeHelp');
     const box = this.surface.getBoundingClientRect();
@@ -1202,130 +1486,195 @@ export class Viewer {
     const ratio = (box.width / box.height) / (vw / vh);
     const off = Math.round(Math.abs(1 - Math.min(ratio, 1 / ratio)) * 100);
     note.hidden = false;
-    note.textContent = off < 2 ? 'This screen and the Mac\u2019s are the same shape.'
-      : shape === 'fill' ? `About ${off}% of the Mac\u2019s screen is off the ${ratio < 1 ? 'sides' : 'top and bottom'}: the picture slides along as the pointer nears an edge${this.touchFirst ? ' (or drag it with two fingers)' : ''}.`
+    note.textContent = off < 2 ? 'This screen and the PC’s are the same shape.'
+      : shape === 'fill' ? `About ${off}% of the PC’s screen is off the ${ratio < 1 ? 'sides' : 'top and bottom'}: the picture slides along as the pointer nears an edge${this.touchFirst ? ' (or drag it with two fingers)' : ''}.`
         : shape === 'stretch' ? `The picture is squeezed by about ${off}% to fit this screen.`
-          : `The whole Mac\u2019s screen, with bars where the shapes differ.`;
+          : 'The whole of the PC’s screen, with bars where the shapes differ.';
   }
 
-  // --- where the toolbar sits: any edge, anywhere along it ---
+  // --- where the Dock sits, and what it does when not in use ---
+
+  _at() { return this.prefs.get('dockAt') ?? (this.touchFirst ? 'bottom' : 'top'); }
+  _idleMode() { return this.prefs.get('dockIdle') ?? (this.touchFirst ? 'orb' : 'stay'); }
+  _room() { const r = this.prefs.get('dockRoom'); return typeof r === 'boolean' ? r : !this.touchFirst; }
 
   _wirePlacement() {
     const $ = this.$, prefs = this.prefs;
-    const edge = $('optEdge'), auto = $('optAutoHide');
-    edge.value = prefs.get('tbEdge');
-    auto.checked = this._autoHide();
-    this._on(edge, 'change', () => { prefs.set('tbEdge', edge.value); prefs.set('tbPos', 0.5); this._placeToolbar(); this._showToolbar(); });
-    this._on(auto, 'change', () => { prefs.set('tbAutoHide', auto.checked); this._placeToolbar(); this._showToolbar(); });
-    // Hide it now: the bar then tucks itself away when not in use, and the small tab (or the edge) brings it back.
-    this._on($('tbHide'), 'click', () => {
-      prefs.set('tbAutoHide', true);
-      auto.checked = true;
-      this._toggleMenu(false);
-      this._placeToolbar();
-      this._hideToolbar(true);
-      this.surface.focus({ preventScroll: true });
-      if (!prefs.get('tbHideNoted')) {
-        prefs.set('tbHideNoted', true);
-        this.banners.show('tbhide', { kind: 'info', icon: 'hideBar', title: 'The bar is hidden.',
-          body: this.touchFirst ? 'Tap the small tab at the edge to bring it back.'
-            : 'Move the pointer to the very edge of the window to bring it back. To keep it showing, turn off "Hide the bar" in More.',
-          dismissible: true });
-        clearTimeout(this.hideNoteTimer);
-        this.hideNoteTimer = setTimeout(() => this.banners.hide('tbhide'), 6000);
-      }
+    $('optDockIdle').value = this._idleMode();
+    $('optDockRoom').checked = this._room();
+    this._on($('optDockIdle'), 'change', e => this._setIdle(e.target.value));
+    this._on($('optDockRoom'), 'change', e => this._setRoom(e.target.checked));
+    for (const b of $('dockPos').querySelectorAll('button')) this._on(b, 'click', () => this._moveDock(b.dataset.at));
+    // The arrow keys move the radio group's choice, as radio buttons do.
+    this._on($('dockPos'), 'keydown', e => {
+      const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
+      if (!step) return;
+      e.preventDefault();
+      this._moveDock(stepAnchor(this._at(), ...step));
+      $('dockPos').querySelector(`[data-at="${this._at()}"]`)?.focus();
     });
 
-    // Drag the grip: the bar jumps to whichever edge the pointer is nearest, at the pointer's place along it.
-    const grip = $('tbGrip');
-    let dragging = null;
-    this._on(grip, 'pointerdown', e => {
+    // Drag the grip (or the orb): the Dock follows the finger, then snaps to the nearest edge or corner.
+    const startDrag = (el, e) => {
       if (e.button !== 0) return;
-      e.preventDefault();
-      dragging = e.pointerId;
-      try { grip.setPointerCapture(e.pointerId); } catch {}
-      this.root.classList.add('tb-dragging');
-    });
+      this.drag = { el, id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+      try { el.setPointerCapture(e.pointerId); } catch {}
+    };
+    this._on($('dockGrip'), 'pointerdown', e => startDrag($('dock'), e));
+    this._on($('orb'), 'pointerdown', e => { this.orbDragged = false; startDrag($('orb'), e); });
     this._on(window, 'pointermove', e => {
-      if (e.pointerId !== dragging) return;
+      const d = this.drag;
+      if (!d || e.pointerId !== d.id) return;
+      const dx = e.clientX - d.x, dy = e.clientY - d.y;
+      if (!d.moved && Math.hypot(dx, dy) < DRAG_PX) return;
+      if (!d.moved) { d.moved = true; this.root.classList.add('dragging'); this._closeOverlays(); }
+      e.preventDefault();
+      d.el.style.transform = `translate(${dx}px, ${dy}px)`;
+      // Where it would land, shown live on the position grid in Tweaks.
       const box = this.root.getBoundingClientRect();
-      const x = e.clientX - box.left, y = e.clientY - box.top;
-      const dist = { top: y, bottom: box.height - y, left: x, right: box.width - x };
-      const near = EDGES.reduce((a, b) => (dist[b] < dist[a] ? b : a));
-      prefs.values.tbEdge = near;
-      prefs.values.tbPos = Math.min(1, Math.max(0, near === 'top' || near === 'bottom' ? x / box.width : y / box.height));
-      this._placeToolbar();
+      this.dropAt = nearestAnchor(e.clientX - box.left, e.clientY - box.top, box.width, box.height);
     });
     const drop = e => {
-      if (e.pointerId !== dragging) return;
-      dragging = null;
-      this.root.classList.remove('tb-dragging');
-      prefs.set('tbEdge', prefs.get('tbEdge'));
-      prefs.set('tbPos', Math.round(prefs.get('tbPos') * 1000) / 1000);
-      $('optEdge').value = prefs.get('tbEdge');
-      this._showToolbar();
+      const d = this.drag;
+      if (!d || e.pointerId !== d.id) return;
+      this.drag = null;
+      if (!d.moved) return;
+      if (d.el.id === 'orb') { this.orbDragged = true; setTimeout(() => { this.orbDragged = false; }, 0); }
+      this.root.classList.remove('dragging');
+      this._moveDock(this.dropAt ?? this._at(), { from: d.el });
     };
     this._on(window, 'pointerup', drop, true);
     this._on(window, 'pointercancel', drop, true);
-    // From the keyboard: the arrow keys slide it along its edge.
-    this._on(grip, 'keydown', e => {
-      const step = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key];
+    // From the keyboard: the arrow keys move it to the next place that way.
+    this._on($('dockGrip'), 'keydown', e => {
+      const step = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key];
       if (!step) return;
       e.preventDefault();
-      prefs.set('tbPos', Math.min(1, Math.max(0, prefs.get('tbPos') + step * 0.05)));
-      this._placeToolbar();
+      this._moveDock(stepAnchor(this._at(), ...step));
+      $('dockGrip').focus({ preventScroll: true });
     });
 
-    // The bar, the keys bar and the window changing size all move things about.
+    // The Dock, the Key deck and the window changing size all move things about.
     if ('ResizeObserver' in window) {
       this.resizeObserver = new ResizeObserver(() => {
         cancelAnimationFrame(this.placeFrame);
-        this.placeFrame = requestAnimationFrame(() => this._placeToolbar());
+        this.placeFrame = requestAnimationFrame(() => this._placeDock());
       });
-      for (const id of ['toolbar', 'keysBar', 'viewer']) this.resizeObserver.observe($(id));
+      for (const id of ['dock', 'keysBar', 'viewer']) this.resizeObserver.observe($(id));
     }
-    this._placeToolbar();
+    this.root.classList.add('no-anim');
+    if (prefs.get('dockOrb')) this.root.classList.add('dock-orb');
+    this._placeDock();
+    requestAnimationFrame(() => this.root.classList.remove('no-anim'));
   }
 
-  // Unless chosen otherwise, the bar stays put with a mouse and hides itself on touch screens (small, and a tap on
-  // the handle is easy there).
-  _autoHide() {
-    const v = this.prefs.get('tbAutoHide');
-    return typeof v === 'boolean' ? v : !!this.touchFirst;
-  }
-
-  _placeToolbar() {
-    if (!this.root || this.root.hidden) return;
-    const root = this.root, tb = this.$('toolbar'), handle = this.$('handle');
-    const edge = this.prefs.get('tbEdge'), pos = this.prefs.get('tbPos');
-    const pinned = !this._autoHide();
-    const vertical = edge === 'left' || edge === 'right';
-    for (const e of EDGES) root.classList.toggle(`tb-${e}`, e === edge);
-    root.classList.toggle('tb-pinned', pinned);
-    root.classList.toggle('tb-vertical', vertical);
-    this._placePickers?.();
-    tb.style.left = tb.style.top = '';  // measured where the edge's own rules put it
-    const W = root.clientWidth, H = root.clientHeight, w = tb.offsetWidth, h = tb.offsetHeight;
-    const clampPx = (v, max) => Math.round(Math.min(Math.max(0, max), Math.max(0, v)));
-    if (vertical) {
-      tb.style.left = '';
-      tb.style.top = `${clampPx(pos * H - h / 2, H - h)}px`;
-      handle.style.left = '';
-      handle.style.top = `${Math.round(pos * 100)}%`;
+  // Moves the Dock to one of the eight places. `from`: the element as it was dropped, which then glides into place.
+  _moveDock(at, { from = null } = {}) {
+    if (!ANCHORS.includes(at)) return;
+    const el = from ?? (this.root.classList.contains('dock-orb') ? this.$('orb') : this.$('dock'));
+    const first = el.getBoundingClientRect();
+    this.prefs.set('dockAt', at);
+    el.style.transform = '';
+    this.root.classList.add('no-anim');
+    this._placeDock();
+    // FLIP: start where it was, then let it glide to its new place.
+    const last = el.getBoundingClientRect();
+    const dx = first.left - last.left, dy = first.top - last.top;
+    if ((dx || dy) && !matchMedia('(prefers-reduced-motion: reduce)').matches && !el.hidden) {
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+      void el.offsetWidth;
+      this.root.classList.remove('no-anim');
+      el.style.transform = '';
     } else {
-      tb.style.top = '';
-      tb.style.left = `${clampPx(pos * W - w / 2, W - w)}px`;
-      handle.style.top = '';
-      handle.style.left = `${Math.round(pos * 100)}%`;
+      this.root.classList.remove('no-anim');
     }
-    // A bar that stays put gets its own strip: the Mac's picture shrinks to fit beside it rather than under it.
-    const size = vertical ? w : h;
-    for (const e of EDGES) root.style.setProperty(`--tb-${e}`, `${pinned && e === edge ? size : 0}px`);
-    // So does the keys bar, with a mouse (on a touch screen it comes and goes with the phone keyboard).
-    const bar = this.$('keysBar');
-    root.style.setProperty('--keys-h', `${!this.touchFirst && !bar.hidden ? bar.offsetHeight : 0}px`);
-    // A bar at the bottom that comes and goes sits above the keys bar rather than over it.
-    root.style.setProperty('--keys-up', `${!bar.hidden ? bar.offsetHeight : 0}px`);
+    this._showDock();
+    this._placePops();
+  }
+
+  _setIdle(mode) {
+    if (!(mode in IDLE_TEXT)) return;
+    this.prefs.set('dockIdle', mode);
+    this.prefs.set('dockOrb', false);
+    this.$('optDockIdle').value = mode;
+    this.root.classList.remove('dock-orb', 'dock-away');
+    this._placeDock();
+    this._showDock();
+    if (mode !== 'stay' && !this.prefs.get('dockNoted')) {
+      this.prefs.set('dockNoted', true);
+      this.banners.show('dockhide', { kind: 'info', icon: 'dock',
+        title: mode === 'orb' ? 'The Dock shrinks to an orb when you’re not using it.' : 'The Dock tucks itself away when you’re not using it.',
+        body: mode === 'orb' ? 'Tap the orb to bring it back.' : this.touchFirst ? 'Tap the small tab at the edge to bring it back.'
+          : 'Move the pointer to the very edge of the window to bring it back.', dismissible: true });
+      clearTimeout(this.hideNoteTimer);
+      this.hideNoteTimer = setTimeout(() => this.banners.hide('dockhide'), 6000);
+    }
+  }
+
+  _setRoom(on) {
+    this.prefs.set('dockRoom', on);
+    this.$('optDockRoom').checked = on;
+    this._placeDock();
+  }
+
+  // Shrink the Dock to the orb by hand (it stays an orb until tapped, whatever it does when idle).
+  _toOrb() {
+    const hadFocus = this.$('dock').contains(document.activeElement);
+    this._closeOverlays();
+    this.prefs.set('dockOrb', true);
+    this.root.classList.remove('dock-away');
+    this.root.classList.add('dock-orb');
+    this._placeDock();
+    // Keyboard users keep their place: on the orb, which opens the Dock again.
+    if (hadFocus) this.$('orb').focus({ preventScroll: true });
+  }
+
+  _fromOrb() {
+    this.prefs.set('dockOrb', false);
+    this.root.classList.remove('dock-orb', 'dock-away');
+    this._placeDock();
+    this._showDock();
+  }
+
+  _placeDock() {
+    if (!this.root || this.root.hidden) return;
+    const root = this.root, $ = this.$, at = this._at();
+    for (const a of ANCHORS) root.classList.toggle(`at-${a}`, a === at);
+    const vertical = isVertical(at);
+    root.classList.toggle('dock-vertical', vertical);
+    $('dock').setAttribute('aria-orientation', vertical ? 'vertical' : 'horizontal');
+    const orb = root.classList.contains('dock-orb');
+    $('orb').hidden = !orb;
+    const away = root.classList.contains('dock-away');
+    const lip = $('dockLip');
+    lip.hidden = !(away && this.touchFirst);
+    lip.className = `dock-lip e-${anchorEdge(at)}${at.endsWith('left') && !vertical ? ' p-left' : at.endsWith('right') && !vertical ? ' p-right' : ''}`;
+    for (const b of $('dockPos').querySelectorAll('button')) {
+      b.setAttribute('aria-checked', String(b.dataset.at === at));
+      b.tabIndex = b.dataset.at === at ? 0 : -1;
+    }
+    $('dockRoomWrap').hidden = this._idleMode() !== 'stay';
+
+    // The Key deck along the bottom: the picture makes room for it with a mouse; things at the bottom sit above it.
+    const bar = $('keysBar'), H = root.clientHeight, W = root.clientWidth;
+    const deckOn = !bar.hidden;
+    root.classList.toggle('deck-on', deckOn);
+    const deckUp = deckOn ? Math.max(0, H - bar.offsetTop) : 0;
+    root.style.setProperty('--keys-up', `${deckUp}px`);
+    root.style.setProperty('--keys-h', `${deckOn && !this.touchFirst ? deckUp : 0}px`);
+
+    // A Dock that stays put can keep the picture clear of it: the picture shrinks to fit beside it rather than under it.
+    const dock = $('dock');
+    const room = { top: 0, bottom: 0, left: 0, right: 0 };
+    if (this._idleMode() === 'stay' && this._room() && !orb && !away) {
+      const m = 12, edge = anchorEdge(at);
+      if (edge === 'top') room.top = dock.offsetTop + dock.offsetHeight + m;
+      else if (edge === 'bottom') room.bottom = Math.max(0, H - dock.offsetTop + m - (deckOn && !this.touchFirst ? deckUp : 0));
+      else if (edge === 'left') room.left = dock.offsetLeft + dock.offsetWidth + m;
+      else room.right = W - dock.offsetLeft + m;
+    }
+    for (const [e, v] of Object.entries(room)) root.style.setProperty(`--room-${e}`, `${Math.round(v)}px`);
+
     const box = this.surface.getBoundingClientRect();
     const key = `${Math.round(box.width)}x${Math.round(box.height)}`;
     if (key !== this.surfaceKey) {
@@ -1335,7 +1684,26 @@ export class Viewer {
     }
   }
 
-  // --- this computer's pointer, hidden so only the Mac's shows ---
+  // The Dock is being used: show it, and (if it shrinks or tucks itself away) start counting again.
+  _showDock() {
+    const root = this.root;
+    if (root.classList.contains('dock-away')) { root.classList.remove('dock-away'); this._placeDock(); }
+    clearTimeout(this.idleTimer);
+    if (this._idleMode() !== 'stay' && !this.prefs.get('dockOrb')) this.idleTimer = setTimeout(() => this._idle(), IDLE_AFTER_MS);
+  }
+
+  _idle(now = false) {
+    const dock = this.$('dock');
+    const busy = !now && (dock.matches(':hover') || dock.contains(document.activeElement) || this.palette?.open ||
+      !this.$('tweaks').hidden || !this.$('displayMap').hidden || !!this.drag);
+    if (busy) { this.idleTimer = setTimeout(() => this._idle(), IDLE_AFTER_MS); return; }
+    const mode = this._idleMode();
+    if (mode === 'orb') this.root.classList.add('dock-orb');
+    else if (mode === 'hide') this.root.classList.add('dock-away');
+    this._placeDock();
+  }
+
+  // --- this computer's pointer, hidden so only the PC's shows ---
 
   _setHideCursor(on, { note = true } = {}) {
     on = on && !this.touchFirst;
@@ -1345,7 +1713,7 @@ export class Viewer {
     if (!note) return;
     this.banners.show('cursor', { kind: 'info', icon: 'pointer',
       title: on ? "This computer's pointer is hidden." : "This computer's pointer is back.",
-      body: on ? 'Only your Mac\u2019s pointer shows now. Press Esc twice quickly to bring this one back.' : '', dismissible: true });
+      body: on ? 'Only your PC’s pointer shows now. Press Esc twice quickly to bring this one back.' : '', dismissible: true });
     clearTimeout(this.cursorNoteTimer);
     this.cursorNoteTimer = setTimeout(() => this.banners.hide('cursor'), 4000);
   }
@@ -1354,7 +1722,7 @@ export class Viewer {
 
   _swipe(dir) {
     if (!this.inputAllowed || this.over) return;
-    if (dir === 'up' || dir === 'down') return this._pressId(dir === 'up' ? 'missionControl' : 'appWindows');
+    if (dir === 'up' || dir === 'down') return this._pressId(dir === 'up' ? 'taskView' : 'showDesktop');
     const mode = this.prefs.get('swipe');
     if (mode === 'apps') return this._appSwitch(dir);
     const a = SWIPE_ACTIONS[mode];
@@ -1366,30 +1734,38 @@ export class Viewer {
     if (s) for (const m of pressMessages(s.code, s.key, s.m)) this.session.sendInput(m);
   }
 
-  // ⌘ stays held between swipes, so the app switcher stays up and each swipe moves along it; let go a moment later.
+  // Alt stays held between swipes, so the app switcher stays up and each swipe moves along it; let go a moment later.
   _appSwitch(dir) {
     const send = m => this.session.sendInput(m);
-    if (!this.cmdHeld) {
-      send({ t: 'k', c: 'MetaLeft', k: 'Meta', d: true, m: META });
-      this.cmdHeld = true;
+    if (!this.altHeld) {
+      send({ t: 'k', c: 'AltLeft', k: 'Alt', d: true, m: ALT });
+      this.altHeld = true;
     }
-    const m = META | (dir < 0 ? SHIFT : 0);
+    const m = ALT | (dir < 0 ? SHIFT : 0);
     if (dir < 0) send({ t: 'k', c: 'ShiftLeft', k: 'Shift', d: true, m });
     send({ t: 'k', c: 'Tab', k: 'Tab', d: true, m });
     send({ t: 'k', c: 'Tab', k: 'Tab', d: false, m });
-    if (dir < 0) send({ t: 'k', c: 'ShiftLeft', k: 'Shift', d: false, m: META });
-    clearTimeout(this.cmdTimer);
-    this.cmdTimer = setTimeout(() => this._releaseCmd(), 1000);
+    if (dir < 0) send({ t: 'k', c: 'ShiftLeft', k: 'Shift', d: false, m: ALT });
+    clearTimeout(this.altTimer);
+    this.altTimer = setTimeout(() => this._releaseAlt(), 1000);
   }
 
-  _releaseCmd() {
-    clearTimeout(this.cmdTimer);
-    if (!this.cmdHeld) return;
-    this.cmdHeld = false;
-    this.session.sendInput({ t: 'k', c: 'MetaLeft', k: 'Meta', d: false, m: 0 });
+  _releaseAlt() {
+    clearTimeout(this.altTimer);
+    if (!this.altHeld) return;
+    this.altHeld = false;
+    this.session.sendInput({ t: 'k', c: 'AltLeft', k: 'Alt', d: false, m: 0 });
   }
 
-  // --- the keys bar: which keys it has, and the editor for choosing them ---
+  // --- the Key deck: which keys it has, and the chooser ---
+
+  _setDeck(on) {
+    const bar = this.$('keysBar');
+    bar.hidden = !on;
+    this.$('dkKeys').setAttribute('aria-pressed', String(on));
+    if (!on) this._closeKeysEditor();
+    this._placeDock();
+  }
 
   _wireKeysBar() {
     const $ = this.$;
@@ -1433,7 +1809,7 @@ export class Viewer {
     this._on(sw, 'change', () => this.prefs.set('swipe', sw.value));
 
     // This computer's pointer (only with a mouse or touchpad).
-    $('hideCursorWrap').hidden = !!this.touchFirst || this.guest;
+    $('hideCursorWrap').hidden = $('hideCursorHelp').hidden = !!this.touchFirst || this.guest;
     this._on($('optHideCursor'), 'change', e => this._setHideCursor(e.target.checked));
     if (this.prefs.get('hideCursor')) this._setHideCursor(true, { note: false });
   }
@@ -1445,60 +1821,68 @@ export class Viewer {
       const s = findShortcut(id, this.customKeys);
       const b = document.createElement('button');
       b.type = 'button';
-      b.className = 'key' + (s.label.length > 2 ? ' wide' : '');
+      b.className = 'key' + (s.label.length > 3 ? ' wide' : '');
       b.dataset.key = id;
       b.textContent = s.label;
       b.title = s.title;
       if (s.title !== s.label) b.setAttribute('aria-label', s.title);
       return b;
     }));
+    if (this.palette?.open) this.palette.render();
   }
 
   _openKeysEditor() {
-    this._toggleMenu(false);
-    const bar = this.$('keysBar');
-    bar.hidden = false;
-    this.$('tbKeys').setAttribute('aria-pressed', 'true');
+    this._closeOverlays({ except: 'keys' });
+    this._setDeck(true);
     this._renderKeysEditor();
     this.$('keysEditor').hidden = false;
+    this._scrim();
     this.$('keysEditorDone').focus({ preventScroll: true });
   }
 
-  _closeKeysEditor() {
+  _closeKeysEditor({ focus = true } = {}) {
     const ed = this.$('keysEditor');
     if (ed.hidden) return;
     ed.hidden = true;
-    this.surface.focus({ preventScroll: true });
+    this._scrim();
+    if (focus) this.surface.focus({ preventScroll: true });
   }
 
   _renderKeysEditor() {
     const on = new Set(this.bar);
     const choice = (s, extra) => {
-      const label = document.createElement('label');
-      label.className = 'ke-item';
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.checked = on.has(s.id);
-      box.addEventListener('change', () => {
-        this.prefs.set('keysBar', toggleOnBar(this.bar, s.id, box.checked));
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ke-item';
+      b.dataset.id = s.id;
+      b.setAttribute('aria-pressed', String(on.has(s.id)));
+      const label = document.createElement('b');
+      label.textContent = s.label;
+      b.append(label);
+      if (s.title !== s.label) {
+        const t = document.createElement('span');
+        t.textContent = s.title;
+        b.append(t);
+      }
+      b.addEventListener('click', e => {
+        if (e.target.closest('.ke-x')) return;
+        const now = b.getAttribute('aria-pressed') !== 'true';
+        this.prefs.set('keysBar', toggleOnBar(this.bar, s.id, now));
+        b.setAttribute('aria-pressed', String(now));
         this._renderKeys();
       });
-      const b = document.createElement('b');
-      b.textContent = s.label;
-      const t = document.createElement('span');
-      t.textContent = s.title === s.label ? '' : s.title;
-      label.append(box, b, t);
-      if (extra) label.append(extra);
-      return label;
+      if (extra) b.append(extra);
+      return b;
     };
     const groups = [];
     for (const g of [...GROUPS, 'Yours']) {
       const items = g === 'Yours' ? this.customKeys : CATALOG.filter(s => s.group === g);
       if (!items.length) continue;
-      const fs = document.createElement('fieldset');
-      const lg = document.createElement('legend');
-      lg.textContent = g === 'Yours' ? 'Your own' : g;
-      fs.append(lg);
+      const box = document.createElement('section');
+      box.className = 'ke-group';
+      const h = document.createElement('h3');
+      h.textContent = g === 'Yours' ? 'Your own' : g;
+      box.append(h);
       if (g === 'Function keys') {
         const all = document.createElement('button');
         all.type = 'button';
@@ -1512,57 +1896,41 @@ export class Viewer {
           this._renderKeys();
           this._renderKeysEditor();
         });
-        fs.append(all);
+        h.append(all);
       }
+      const chips = document.createElement('div');
+      chips.className = 'ke-chips';
       for (const s of items) {
         let extra;
         if (g === 'Yours') {
-          extra = document.createElement('button');
-          extra.type = 'button';
+          extra = document.createElement('span');
           extra.className = 'ke-x';
-          extra.textContent = '×';
+          extra.setAttribute('role', 'button');
+          extra.tabIndex = 0;
           extra.setAttribute('aria-label', `Remove ${s.label}`);
-          extra.addEventListener('click', e => {
+          extra.textContent = '×';
+          const remove = e => {
             e.preventDefault();
+            e.stopPropagation();
             this.prefs.set('customKeys', this.customKeys.filter(x => x.id !== s.id).map(({ code, m, name }) => ({ code, m, name })));
             this.prefs.set('keysBar', toggleOnBar(this.bar, s.id, false));
             this._renderKeys();
             this._renderKeysEditor();
-          });
+          };
+          extra.addEventListener('click', remove);
+          extra.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') remove(e); });
         }
-        fs.append(choice(s, extra));
+        chips.append(choice(s, extra));
       }
-      groups.push(fs);
+      box.append(chips);
+      groups.push(box);
     }
     this.$('keysGroups').replaceChildren(...groups);
   }
 
-  _showToolbar() {
-    this.root.classList.add('tb-on');
-    clearTimeout(this.hideTimer);
-    this.hideTimer = setTimeout(() => this._hideToolbar(), HIDE_AFTER_MS);
-  }
-
-  _hideToolbar(now = false) {
-    const tb = this.$('toolbar');
-    const busy = !now && (!this.$('moreMenu').hidden || tb.matches(':hover') || tb.contains(document.activeElement));
-    if (busy) {
-      this.hideTimer = setTimeout(() => this._hideToolbar(), HIDE_AFTER_MS);
-      return;
-    }
-    this.root.classList.remove('tb-on');
-  }
-
-  _toolbarKey(e) {
-    if (e.key !== 'Escape') return;
-    e.preventDefault();
-    this._toggleMenu(false);
-    this.surface.focus({ preventScroll: true });
-  }
-
   _ownShortcut(e) {
     if (this.over) return;
-    // A hidden pointer comes back with Esc twice (the first Esc still goes to the Mac).
+    // A hidden pointer comes back with Esc twice (the first Esc still goes to the PC).
     if (e.key === 'Escape' && !e.repeat && this.root.classList.contains('nocursor') && !this.pointer?.locked) {
       if (e.timeStamp - (this.lastEsc ?? -Infinity) < DOUBLE_ESC_MS) {
         e.preventDefault();
@@ -1573,25 +1941,32 @@ export class Viewer {
       }
       this.lastEsc = e.timeStamp;
     }
-    if (!(e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyT')) return;
-    e.preventDefault();
-    e.stopImmediatePropagation();
-    this._showToolbar();
-    this.$('tbQuality').focus();
+    if (!(e.ctrlKey && e.altKey && e.shiftKey)) return;
+    if (e.code === 'KeyK') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this._togglePalette();
+    } else if (e.code === 'KeyT') {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (this.root.classList.contains('dock-orb')) this._fromOrb();
+      this._showDock();
+      this.$('dockGrip').focus();
+    }
   }
 
   _activity(e) {
-    // The first touch or click after the toolbar went away shouldn't bring it back (it would cover what you tapped).
-    if (e?.type === 'pointerdown') this._toggleMenu(false);
+    // The first touch or click after the Dock went away shouldn't bring it back (it would cover what you tapped).
+    if (e?.type === 'pointerdown') this._closeOverlays();
   }
 
   // --- the phone keyboard button ---
 
-  // Always on screen on touch devices (the toolbar, with its own keyboard button, tucks itself away). Its invisible
-  // text box takes the tap itself, so the phone sees a tap on a real text field and opens its keyboard; a tap while
-  // the keyboard is open closes it. The special keys (⌘, Esc, arrows…) come up with the keyboard.
+  // Always on screen on touch devices. Its invisible text box takes the tap itself, so the phone sees a tap on a real
+  // text field and opens its keyboard; a tap while the keyboard is open closes it. The Key deck (Win, Ctrl, Esc,
+  // arrows…) comes up with the keyboard.
   _wireKeyboardButton() {
-    const fab = this.$('kbdFab'), box = this.$('softkbd'), bar = this.$('keysBar'), keysBtn = this.$('tbKeys');
+    const fab = this.$('kbdFab'), box = this.$('softkbd'), bar = this.$('keysBar');
     let barWasHidden = true;
     const closeIfOpen = e => {
       if (document.activeElement !== box) return;
@@ -1601,28 +1976,24 @@ export class Viewer {
     this._on(box, 'touchstart', closeIfOpen, { passive: false });
     this._on(box, 'mousedown', closeIfOpen);
     this._on(box, 'focus', () => {
-      // Opened by itself for a text box on the Mac, or by hand with this button.
+      // Opened by itself for a text box on the PC, or by hand with this button.
       this.autoKeyboard = this.openingAuto === true;
       this.openingAuto = false;
       this._inviteKeyboard(null);
       fab.classList.add('open');
       fab.setAttribute('aria-label', 'Hide the keyboard');
       barWasHidden = bar.hidden;
-      bar.hidden = false;
-      keysBtn.setAttribute('aria-pressed', 'true');
+      this._setDeck(true);
     });
     this._on(box, 'blur', () => {
       fab.classList.remove('open');
       fab.setAttribute('aria-label', 'Show the keyboard');
-      if (barWasHidden) {
-        bar.hidden = true;
-        keysBtn.setAttribute('aria-pressed', 'false');
-      }
+      if (barWasHidden) this._setDeck(false);
     });
     this._syncKeyboardButton();
   }
 
-  // The Mac says whether the last tap left it waiting for typing. Bring the keyboard up for a text box (where the
+  // The PC says whether the last tap left it waiting for typing. Bring the keyboard up for a text box (where the
   // browser lets a page do that), or invite a tap on the keyboard button (iPhones and iPads only open it for a tap);
   // put it away again after a tap elsewhere, if it came up by itself.
   _textFocus(editable, secure) {
@@ -1672,14 +2043,14 @@ export class Viewer {
     const el = this.root;
     const req = el.requestFullscreen || el.webkitRequestFullscreen;
     Promise.resolve(req?.call(el, { navigationUI: 'hide' })).then(() => {
-      // In full screen Chrome and Edge can pass every key to the page, even ⌘W and Esc (Keyboard Lock API).
+      // In full screen Chrome and Edge can pass every key to the page, even Ctrl+W and Esc (Keyboard Lock API).
       navigator.keyboard?.lock?.().catch(() => {});
     }, () => {});
   }
 
   _fullscreenChanged() {
     const full = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    const b = this.$('tbFull');
+    const b = this.$('dkFull');
     setIcon(b, full ? 'fullscreen-exit' : 'fullscreen');
     b.setAttribute('aria-label', full ? 'Leave full screen' : 'Full screen');
     b.title = full ? 'Leave full screen' : 'Full screen';
@@ -1700,6 +2071,12 @@ export class Viewer {
     for (const t of this.timers) clearInterval(t);
     this.timers = [];
   }
+}
+
+// A window's name for the list: "App: title", or the app alone.
+function windowName(w) {
+  const app = String(w.app ?? '').trim(), title = String(w.title ?? '').trim();
+  return (title && title !== app ? `${app || 'Window'}: ${title}` : app || 'Window').slice(0, 60);
 }
 
 // Whether this browser will open its on-screen keyboard for a text field focused by the page itself, now: only just

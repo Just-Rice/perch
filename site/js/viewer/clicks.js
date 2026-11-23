@@ -1,5 +1,5 @@
-// Click counting for the Mac: macOS decides "double click" from a count carried with each button event, not from
-// timing, so the viewer has to count. Browsers disagree on what PointerEvent.detail holds, so Perch counts itself.
+// Click counting for the PC: macOS decides "double click" from a count carried with each button event, not from
+// timing, so the viewer has to count. Browsers disagree on what PointerEvent.detail holds, so Roost counts itself.
 
 export const CLICK_MS = 500; // macOS's default double-click speed is about half a second
 export const CLICK_SLOP = 5;  // pixels the pointer may move between the clicks

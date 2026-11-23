@@ -133,7 +133,7 @@ export class RelayMedia {
       output: frame => this._draw(frame),
       error: e => { this.log(`relay video decoder: ${e.message}`); this._reset(); },
     });
-    // No description: the access units are Annex B, as the Mac sends them.
+    // No description: the access units are Annex B, as the PC sends them.
     this.decoder.configure({ codec, optimizeForLatency: true });
   }
 
@@ -144,7 +144,7 @@ export class RelayMedia {
     if (!this.closed) this._askKeyframe(true);
   }
 
-  // Asks the Mac for a keyframe: now (`now`), or at most once a second while still waiting for one.
+  // Asks the PC for a keyframe: now (`now`), or at most once a second while still waiting for one.
   _askKeyframe(now = false) {
     const t = performance.now();
     if (!now && t - (this.lastAsk ?? -Infinity) < KEYFRAME_ASK_EVERY_MS) return;

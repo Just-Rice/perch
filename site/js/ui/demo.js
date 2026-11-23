@@ -1,11 +1,11 @@
-// Demo mode, for checking the viewer without a Mac: connect.html?demo=1, only when served from localhost/127.0.0.1
-// (ui/env.js). A canvas draws a moving test picture that stands in for the Mac's screen, and every message the viewer
-// would send to the Mac is listed on the page instead. Nothing touches the network.
+// Demo mode, for checking the viewer without a PC: connect.html?demo=1, only when served from localhost/127.0.0.1
+// (ui/env.js). A canvas draws a moving test picture that stands in for the PC's screen, and every message the viewer
+// would send to the PC is listed on the page instead. Nothing touches the network.
 import { Viewer } from '../viewer/viewer.js';
 
 const DISPLAYS = [
-  { id: 1, name: 'Built-in Display', width: 1512, height: 982, main: true },
-  { id: 2, name: 'Studio Display', width: 2560, height: 1440, main: false },
+  { id: 1, name: 'Laptop screen', width: 1512, height: 982, main: true },
+  { id: 2, name: 'DELL U2723QE', width: 2560, height: 1440, main: false },
 ];
 
 export function startDemo(app) {
@@ -15,16 +15,22 @@ export function startDemo(app) {
   const setSize = d => { canvas.width = Math.round(d.width / 2); canvas.height = Math.round(d.height / 2); };
   setSize(display);
   const ctx = canvas.getContext('2d');
-  let last = null; // last pointer position the "Mac" got, drawn as a cursor
+  let last = null; // last pointer position the "PC" got, drawn as a cursor
   let clicks = [];  // recent clicks, drawn as rings
 
   const draw = now => {
     const w = canvas.width, h = canvas.height;
-    const g = ctx.createLinearGradient(0, 0, w, h);
-    g.addColorStop(0, '#1f6f8b');
-    g.addColorStop(0.5, '#2a9d8f');
-    g.addColorStop(1, '#e9c46a');
+    // A warm wallpaper, like the website's picture of a PC.
+    const g = ctx.createLinearGradient(0, 0, w * 0.4, h);
+    g.addColorStop(0, '#241830');
+    g.addColorStop(0.6, '#7A2E2A');
+    g.addColorStop(1, '#C4532B');
     ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    const glow = ctx.createRadialGradient(w * 0.75, h * 0.8, 0, w * 0.75, h * 0.8, w * 0.5);
+    glow.addColorStop(0, 'rgba(255,193,94,.75)');
+    glow.addColorStop(1, 'rgba(255,193,94,0)');
+    ctx.fillStyle = glow;
     ctx.fillRect(0, 0, w, h);
     // A grid every tenth of the screen, so mapped positions can be checked by eye.
     ctx.strokeStyle = 'rgba(255,255,255,.25)';
@@ -38,15 +44,21 @@ export function startDemo(app) {
     ctx.fillRect(w * 0.08, h * 0.12, w * 0.5, h * 0.55);
     ctx.fillStyle = '#141820';
     ctx.font = `600 ${Math.round(h / 16)}px system-ui, sans-serif`;
-    ctx.fillText('Perch demo', w * 0.11, h * 0.24);
+    ctx.fillText('Roost demo', w * 0.11, h * 0.24);
     ctx.font = `${Math.round(h / 28)}px system-ui, sans-serif`;
     ctx.fillText(`${display.name} · ${display.width} × ${display.height}`, w * 0.11, h * 0.32);
     ctx.fillText(new Date().toLocaleTimeString(), w * 0.11, h * 0.39);
     const t = now / 1000;
-    ctx.fillStyle = '#e76f51';
+    ctx.fillStyle = '#FF7A3D';
     ctx.beginPath();
     ctx.arc(w * (0.5 + 0.38 * Math.cos(t)), h * (0.75 + 0.15 * Math.sin(t * 1.7)), h / 18, 0, Math.PI * 2);
     ctx.fill();
+    // The taskbar, with Start in the middle, so the bottom edge reads as Windows'.
+    ctx.fillStyle = 'rgba(20,18,26,.78)';
+    ctx.fillRect(0, h - h * 0.06, w, h * 0.06);
+    const s = h * 0.03, cx = w / 2 - s / 2, cy = h - h * 0.045;
+    ctx.fillStyle = '#FFB27A';
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) ctx.fillRect(cx + dx * s * 0.54, cy + dy * s * 0.54, s * 0.46, s * 0.46);
     clicks = clicks.filter(c => now - c.t < 800);
     for (const c of clicks) {
       ctx.strokeStyle = c.b === 2 ? '#ffd166' : '#ffffff';
@@ -88,22 +100,22 @@ export function startDemo(app) {
   };
 
   const ready = {
-    t: 'ready', name: 'demo-mac-0000', hv: 'demo', display: { id: display.id, width: display.width, height: display.height },
+    t: 'ready', name: 'demo-pc-0000', hv: 'demo', display: { id: display.id, width: display.width, height: display.height },
     displays: DISPLAYS, quality: 'balanced', audio: params.get('sound') === 'blocked', input: params.get('viewonly') !== '1',
     locked: params.get('locked') === '1',
     levels: { speakers: 1, stream: 1, speakersAvailable: true },
   };
   // Two pretend windows for "show one window"; choosing one makes the picture that window's size and shape.
   const WINDOWS = [
-    { id: 11, app: 'Notes', title: 'Shopping list', width: 900, height: 620 },
-    { id: 12, app: 'Safari', title: 'Perch', width: 1200, height: 800 },
+    { id: 11, app: 'Notepad', title: 'Shopping list', width: 900, height: 620 },
+    { id: 12, app: 'Microsoft Edge', title: 'Roost', width: 1200, height: 800 },
   ];
   let shown = null;
   const session = {
     stream,
-    caps: ['window', 'textfocus', 'clipboard', 'clipimg', 'levels'],
+    caps: ['window', 'textfocus', 'clipboard', 'clipimg', 'levels', 'fps60'],
     controlBacklog: () => 0,
-    clipboard: 'Text copied on the demo Mac',
+    clipboard: 'Text copied on the demo PC',
     onmessage: () => {},
     onstream: () => {},
     onlink: () => {},
@@ -117,7 +129,7 @@ export function startDemo(app) {
         setTimeout(() => this.onmessage({ t: 'status', width: display.width, height: display.height, window: null }), 50);
       }
       if (m.t === 'levels') {
-        // As the Mac does: keep them, and say back what they are now.
+        // As the PC does: keep them, and say back what they are now.
         if (Number.isFinite(m.speakers)) ready.levels.speakers = Math.min(1, Math.max(0, m.speakers));
         if (Number.isFinite(m.stream)) ready.levels.stream = Math.min(1.5, Math.max(0, m.stream));
         setTimeout(() => this.onmessage({ t: 'status', levels: { ...ready.levels } }), 30);
@@ -139,7 +151,7 @@ export function startDemo(app) {
         setTimeout(() => this.onmessage({ t: 'status', width: canvas.width, height: canvas.height, window: shown?.id ?? null }), 50);
       }
       if (m.t === 'fit' && shown) {
-        // As the Mac does: the viewer's shape, as large as the display allows.
+        // As the PC does: the viewer's shape, as large as the display allows.
         const scale = Math.min(display.width / m.w, display.height / m.h);
         setSize({ width: Math.round(m.w * scale) * 2, height: Math.round(m.h * scale) * 2 });
         setTimeout(() => {
@@ -150,7 +162,7 @@ export function startDemo(app) {
     },
     sendInput(m) {
       log('input', m);
-      // The demo's pretend text box is the top half of the screen, as in the Mac app's test runs.
+      // The demo's pretend text box is the top half of the screen, as in the PC app's test runs.
       if (m.t === 'b' && m.d === false && m.b === 0) setTimeout(() => this.onmessage({ t: 'textfocus', editable: m.y < 0.5, secure: false }), 40);
     },
     sendPointer(m) { log('pointer', m); },

@@ -114,7 +114,7 @@ async function assertPlaying(page) {
   assert.ok(await page.eval(`document.getElementById('video').currentTime`) > t0, 'the picture is moving');
   assert.equal(await page.eval(`document.getElementById('video').srcObject.getAudioTracks().length`), 1, 'sound track');
   // The sound really arrives and is decoded, not just a silent track.
-  await page.waitFor(`window.__perch.conn?.media?.stats.audio > 20`, { timeoutMs: 10000, what: 'sound packets over the relay' });
+  await page.waitFor(`window.__roost.conn?.media?.stats.audio > 20`, { timeoutMs: 10000, what: 'sound packets over the relay' });
 }
 
 async function assertInputReachesMac(page) {
@@ -164,18 +164,18 @@ test('pairing over the relay: the Mac on screen with sound, and input reaching t
   await page.click('#btnCreate');
   await enterCode(page);
   await assertPlaying(page);
-  assert.equal(await page.eval(`window.__perch.conn.via`), 'relay', 'the viewer used the relay');
+  assert.equal(await page.eval(`window.__roost.conn.via`), 'relay', 'the viewer used the relay');
   // A browser that wants a tap before sound pauses the relay's audio context (this test browser is told not to, so
   // pause it as one would): the sound waits, and the first click starts it.
-  await page.eval(`window.__perch.conn.media.audio.ac.suspend()`);
-  assert.equal(await page.eval(`window.__perch.conn.media.soundPaused`), true);
+  await page.eval(`window.__roost.conn.media.audio.ac.suspend()`);
+  assert.equal(await page.eval(`window.__roost.conn.media.soundPaused`), true);
   await assertInputReachesMac(page);
-  await page.waitFor(`window.__perch.conn.media.audio.ac.state === 'running'`, { what: 'the sound started by the click' });
+  await page.waitFor(`window.__roost.conn.media.audio.ac.state === 'running'`, { what: 'the sound started by the click' });
   const st = await app.call('state');
   assert.equal(st.session?.route, 'pair');
   assert.equal(st.session?.transport, 'relay', 'the Mac used the relay');
   assert.equal((await stack.auth.credentials()).length, 1, 'one passkey made');
-  await page.click('#tbBye');
+  await page.click('#dkBye');
   await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
   assert.deepEqual(page.problems(), []);
 });
@@ -185,18 +185,18 @@ test('signing in again over the relay: the pinned Mac’s signed offer, passkey,
   await page.waitScreen('home');
   await page.waitFor(`document.querySelectorAll('#macList button').length > 0`, { what: 'the remembered Mac' });
   // The remembered Mac carries its certificate pin, so the relay offer had to be signed by that certificate.
-  assert.ok(await page.eval(`!!JSON.parse(localStorage.getItem('perch.macs.v1'))[0].pin`), 'the Mac is pinned');
+  assert.ok(await page.eval(`!!JSON.parse(localStorage.getItem('roost.pcs.v1'))[0].pin`), 'the Mac is pinned');
   await page.click('#macList button');
   await page.waitScreen(['code', 'passkey'], { timeoutMs: 20000 });
   if ((await page.screen()) === 'passkey') await page.click('#btnPasskeyGo');
   await enterCode(page);
   await assertPlaying(page);
-  assert.equal(await page.eval(`window.__perch.conn.via`), 'relay');
+  assert.equal(await page.eval(`window.__roost.conn.via`), 'relay');
   assert.equal((await app.call('state')).session?.transport, 'relay');
   // Changing the quality goes over the relay's control channel and reaches the Mac.
-  await page.eval(`window.__perch.conn.send({ t: 'quality', preset: 'smooth' })`);
+  await page.eval(`window.__roost.conn.send({ t: 'quality', preset: 'smooth' })`);
   await app.waitFor(() => app.commands.some(c => c.c === 'capture' && c.kbps <= 4000), { what: 'smooth quality at the Mac' });
-  await page.click('#tbBye');
+  await page.click('#dkBye');
   await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
   assert.deepEqual(page.problems(), []);
 });
@@ -256,8 +256,8 @@ test('where only the relay gets through: a page it serves pairs and signs in, fi
   await page.waitFor(`document.getElementById('video').videoWidth > 16`, { timeoutMs: 15000, what: 'video' });
   await assertInputReachesMac(page);
   // The Mac named its relay, and the page remembers it for next time.
-  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('perch.macs.v1'))[0].relay`), DEPLOYED ? relayUrl : relayUrl);
-  await page.click('#tbBye');
+  assert.equal(await page.eval(`JSON.parse(localStorage.getItem('roost.pcs.v1'))[0].relay`), DEPLOYED ? relayUrl : relayUrl);
+  await page.click('#dkBye');
   await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
 });
 

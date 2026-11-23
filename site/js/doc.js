@@ -1,4 +1,10 @@
-// Pages of plain reading (privacy.html): only the moving background, kept faint behind the text column.
-import { startCipher } from './shared/cipher.js';
+// Pages of plain reading (privacy.html): the embers, kept calm behind the text, icons, and the header's line.
+import { startEmbers } from './shared/ember.js';
+import { fillIcons } from './ui/icons.js';
 
-startCipher(document.getElementById('cipher'), { calm: () => document.querySelector('main') });
+startEmbers(document.getElementById('embers'), { calm: () => document.querySelector('main') });
+fillIcons(document);
+const header = document.querySelector('header.site');
+const onScroll = () => header?.classList.toggle('scrolled', scrollY > 8);
+addEventListener('scroll', onScroll, { passive: true });
+onScroll();

@@ -1,5 +1,5 @@
-// Pairing links and passkey user handles carry a Mac's address as raw bytes, and (newer Macs) a pin: the first 16
-// bytes of the Mac's fixed DTLS certificate fingerprint, so the browser can tell the real Mac from an impostor.
+// Pairing links and passkey user handles carry a PC's address as raw bytes, and (newer PCs) a pin: the first 16
+// bytes of the PC's fixed DTLS certificate fingerprint, so the browser can tell the real PC from an impostor.
 //   pairing link: connect.html#pair=<b64url(hostId ‖ sigKey ‖ pairId ‖ pairSecret [‖ pin])>  (docs/PROTOCOL.md)
 //   user handle:  hostId ‖ sigKey [‖ pin]                                                   (docs/PROTOCOL.md)
 import { fromB64url, toB64url } from '../shared/bytes.js';
@@ -57,7 +57,7 @@ export function makePairHash({ hostId, sigKey, pairId, pairSecret, pin = null })
   return '#pair=' + toB64url(all);
 }
 
-// A passkey's user handle → {hostId, sigKey, pin?}, or null for a passkey that isn't Perch's.
+// A passkey's user handle → {hostId, sigKey, pin?}, or null for a passkey that isn't Roost's.
 export function parseUserHandle(bytes) {
   const base = HOST_ID_BYTES + SIG_KEY_BYTES;
   if (!(bytes instanceof Uint8Array) || (bytes.length !== base && bytes.length !== base + PIN_BYTES)) return null;

@@ -3,13 +3,13 @@
 //   tap                      → left click where the finger was (a second tap soon after → double click)
 //   long press (~0.5 s)      → right click
 //   short hold, then drag    → drag with the left button held (moving files, selecting text)
-//   one finger moved at once → just moves the Mac's pointer (for menus and tooltips)
+//   one finger moved at once → just moves the PC's pointer (for menus and tooltips)
 //   two fingers moved        → scroll (or, when zoomed in, move around the zoomed picture)
-//   pinch                    → zoom this view in or out (nothing changes on the Mac)
+//   pinch                    → zoom this view in or out (nothing changes on the PC)
 //   two-finger double tap    → back to the whole screen
 //   three fingers sideways   → swipe: next (fingers move left) or previous, like a Mac trackpad; up or down too
 //
-// Positions in and out are page (client) pixels; viewer/pointer.js maps them to the Mac's screen and sends them.
+// Positions in and out are page (client) pixels; viewer/pointer.js maps them to the PC's screen and sends them.
 // Time comes in as an argument (milliseconds) so tests can replay exact sequences. When nextTimer() returns a time,
 // call tick(time) then: that's how a long press fires while the finger stays still.
 
@@ -158,7 +158,7 @@ export class TouchGestures {
     let n = 1, x = g.sx, y = g.sy;
     const last = this.lastTap;
     if (last && g.st - last.t <= this.o.DOUBLE_MS && dist(x, y, last.x, last.y) <= this.o.DOUBLE_SLOP_PX) {
-      // Click where the first tap was: the Mac only counts a double click if both land on (almost) the same spot.
+      // Click where the first tap was: the PC only counts a double click if both land on (almost) the same spot.
       n = Math.min(last.n + 1, 3);
       x = last.x;
       y = last.y;
@@ -198,7 +198,7 @@ export class TouchGestures {
     } else if (g.mode === 'pan') {
       out.push({ a: 'pan', dx, dy });
     } else if (g.mode === 'scroll') {
-      // Fingers moving up push the page up, like scrolling on a phone; for the Mac that's a positive wheel delta.
+      // Fingers moving up push the page up, like scrolling on a phone; for the PC that's a positive wheel delta.
       out.push({ a: 'scroll', dx: -dx, dy: -dy, x: c.x, y: c.y });
     }
     if (g.mode !== 'pending') {

@@ -39,13 +39,13 @@ export const DISPLAYS = [
 // werift falls back to Google's STUN server even with no ICE servers; tests must not touch the internet.
 function noDefaultStun() {
   const proto = werift.Connection.prototype;
-  if (proto.__perchNoDefaultStun) return;
+  if (proto.__roostNoDefaultStun) return;
   const orig = proto.applyStunTurnServersFromOptions;
   proto.applyStunTurnServersFromOptions = function () {
     orig.call(this);
     if (!this.options.stunServer) this.stunServer = undefined;
   };
-  proto.__perchNoDefaultStun = true;
+  proto.__roostNoDefaultStun = true;
 }
 
 // --- authenticator codes (RFC 6238: HMAC-SHA1, 6 digits, 30 s) ---
@@ -375,8 +375,8 @@ class Session {
     this.step = 'pair-cred';
     this.send({ t: 'pair-options', options: {
       challenge: toB64url(this.bind),
-      rp: { id: this.mac.rpId, name: 'Perch' },
-      user: { id: toB64url(this.mac.userHandle), name: `Perch · ${this.mac.macName}`, displayName: `Perch on ${this.mac.macName}` },
+      rp: { id: this.mac.rpId, name: 'Roost' },
+      user: { id: toB64url(this.mac.userHandle), name: `Roost · ${this.mac.macName}`, displayName: `Roost on ${this.mac.macName}` },
       pubKeyCredParams: [-7, -8, -257].map(alg => ({ type: 'public-key', alg })),
       timeout: 120000,
       excludeCredentials: this.mac.devices.map(d => ({ type: 'public-key', id: d.id })),

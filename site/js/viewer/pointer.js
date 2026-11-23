@@ -1,4 +1,4 @@
-// Mouse, pen and touch on the Mac's picture → pointer and input messages (docs/PROTOCOL.md, "Input and pointer
+// Mouse, pen and touch on the PC's picture → pointer and input messages (docs/PROTOCOL.md, "Input and pointer
 // channels"). The decisions are made by pure modules (coords.js, wheel.js, touch.js, clicks.js); this file only listens
 // to the page and sends.
 import { toDisplay, zoomAround, panView, isZoomed, IDENTITY, FIT, followPan, shownScale } from './coords.js';
@@ -7,19 +7,19 @@ import { TouchGestures } from './touch.js';
 import { ClickCounter } from './clicks.js';
 import { SwipeDetector } from './shortcuts.js';
 
-// The last 2 page pixels at each side of the picture are the Mac's very edge (see coords.js).
+// The last 2 page pixels at each side of the picture are the PC's very edge (see coords.js).
 const EDGE_PX = 2;
 
 // A captured mouse's speed, chosen in More: from a fifth as fast to twice as fast as the page's own pointer.
 export const MIN_SPEED = 0.2, MAX_SPEED = 2;
 
-// Touchpad mode: the Mac's pointer moves this many times as far as the finger, across the picture.
+// Touchpad mode: the PC's pointer moves this many times as far as the finger, across the picture.
 const TOUCHPAD_SPEED = 1.6;
 
 export class PointerInput {
   // surface: the element that gets the events (not transformed); video: for the picture size;
   // session: {sendInput, sendPointer}; view: {get(), set(view)} for local zoom; size(): fallback picture size.
-  // touchpad(): true when a finger should move the Mac's pointer like a laptop's touchpad (from where the pointer
+  // touchpad(): true when a finger should move the PC's pointer like a laptop's touchpad (from where the pointer
   // is, by how far the finger goes) instead of clicking right under the finger.
   // onSwipe(dir): a swipe sideways (two fingers on a touchpad, three on a touch screen; +1 next, -1 previous) or up
   // and down with three fingers ('up', 'down'). swipesOn(): whether a touchpad's sideways swipe is one (or scrolls).
@@ -29,7 +29,7 @@ export class PointerInput {
   // comes in on the display beyond). Called with null when the pointer leaves the picture.
   constructor({ surface, video, session, view, size, enabled = () => true, onActivity = () => {}, touchpad = () => false,
     onSwipe = () => {}, swipesOn = () => false, layout = { get: () => FIT, pan: () => {} }, mouseSpeed = () => 1, onEdge = () => null }) {
-    // mouseSpeed(): how far a captured mouse moves the Mac's pointer, 1 = as far as on this screen.
+    // mouseSpeed(): how far a captured mouse moves the PC's pointer, 1 = as far as on this screen.
     Object.assign(this, { surface, video, session, view, size, enabled, onActivity, touchpad, onSwipe, swipesOn, layout, mouseSpeed, onEdge });
     this.swipe = new SwipeDetector();
     this.clicks = new ClickCounter();
@@ -41,7 +41,7 @@ export class PointerInput {
     this.gestureTimer = null;
     this.buttons = new Set();
     this.listeners = [];
-    // A captured mouse (pointer lock): the page's own pointer is hidden and stays put, so the Mac's pointer is moved
+    // A captured mouse (pointer lock): the page's own pointer is hidden and stays put, so the PC's pointer is moved
     // by how far the mouse goes, from where it last was.
     this.locked = false;
     this.last = { x: 0.5, y: 0.5 };
@@ -67,8 +67,8 @@ export class PointerInput {
     });
   }
 
-  // Where an event is on the Mac's screen: under the page's pointer, or, with the mouse captured, wherever the
-  // Mac's pointer has been moved to.
+  // Where an event is on the PC's screen: under the page's pointer, or, with the mouse captured, wherever the
+  // PC's pointer has been moved to.
   pos(e) {
     if (this.locked) return { ...this.last };
     const p = this.map(e.clientX, e.clientY, true);
@@ -82,14 +82,14 @@ export class PointerInput {
     const [w, h] = this.pictureSize();
     const z = this.view.get().scale ?? 1;
     const [sx, sy] = shownScale(box.width, box.height, w, h, this.layout.get().shape);
-    // Moving across the whole Mac takes one window's width at most, even when a "fill" picture is wider than that.
+    // Moving across the whole PC takes one window's width at most, even when a "fill" picture is wider than that.
     return [Math.min(w * sx, box.width) * z, Math.min(h * sy, box.height) * z];
   }
 
   _fills() { return this.layout.get().shape === 'fill'; }
 
-  // "fill": the picture slides after the Mac's pointer (moved by a captured mouse or a touchpad finger), so the part
-  // of the Mac it's on is in view.
+  // "fill": the picture slides after the PC's pointer (moved by a captured mouse or a touchpad finger), so the part
+  // of the PC it's on is in view.
   _followLast() {
     if (this._fills()) this.layout.pan({ x: this.last.x, y: this.last.y });
   }
@@ -101,8 +101,8 @@ export class PointerInput {
     clearTimeout(this.gestureTimer);
   }
 
-  // Page position → the Mac's display (0..1). `follow`: a mouse or pen; with "fill" the picture first slides so
-  // that the pointer's place in the window is its place on the Mac (touches use the picture where it is).
+  // Page position → the PC's display (0..1). `follow`: a mouse or pen; with "fill" the picture first slides so
+  // that the pointer's place in the window is its place on the PC (touches use the picture where it is).
   map(clientX, clientY, follow = false) {
     const box = this.surface.getBoundingClientRect();
     const [w, h] = this.pictureSize();
@@ -228,7 +228,7 @@ export class PointerInput {
     e.preventDefault();
     if (kind === 'down') {
       // While the phone keyboard is up, leave focus in its text box: moving it to the picture would close the
-      // keyboard on every tap (tap a text field on the Mac, and the keyboard you were about to type with is gone).
+      // keyboard on every tap (tap a text field on the PC, and the keyboard you were about to type with is gone).
       if (!document.activeElement?.classList?.contains('softkbd')) this.surface.focus({ preventScroll: true });
       try { this.surface.setPointerCapture(e.pointerId); } catch {}
     }
@@ -255,8 +255,8 @@ export class PointerInput {
     }, delay);
   }
 
-  // Touchpad mode: moving the finger moves the Mac's pointer by as much (a little more, so one swipe crosses the
-  // screen), and taps, presses and scrolls happen where the Mac's pointer is, not under the finger.
+  // Touchpad mode: moving the finger moves the PC's pointer by as much (a little more, so one swipe crosses the
+  // screen), and taps, presses and scrolls happen where the PC's pointer is, not under the finger.
   _touchpadAction(a) {
     if (a.a === 'move' || a.a === 'drag') {
       const from = this.finger ?? { x: a.x, y: a.y };

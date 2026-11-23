@@ -5,8 +5,8 @@
 //   pair:    hi → pair1 (proof over bind) → pair-options → pair-cred (new passkey) → totp → code → paired → ready
 //
 // `ui` provides the screens (ui/screens.js): askPasskey, askCreate, askCode and stage. Every wait on the person goes
-// through conn.guard(), so if the Mac gives up meanwhile (2-minute limit, a bye) the flow stops at once.
-import { PerchError } from './connection.js';
+// through conn.guard(), so if the PC gives up meanwhile (2-minute limit, a bye) the flow stops at once.
+import { RoostError } from './connection.js';
 import { getAssertion, createPasskey, webauthnErrorKind } from './passkey.js';
 import { deniedMessage } from './messages.js';
 import { bindProof } from '../shared/bind.js';
@@ -22,13 +22,13 @@ export function loadOpaque() {
   return opaqueModule;
 }
 
-const deniedError = m => new PerchError('denied', { reason: m.reason, retryAfter: m.retryAfter, final: m.final !== false });
+const deniedError = m => new RoostError('denied', { reason: m.reason, retryAfter: m.retryAfter, final: m.final !== false });
 
 // ctx: {route, rpId, label, credentialId?, hostId?, sigKey?, password?, pair?, onPaired(msg), onHi(hi)}
 // Resolves to {hi, ready}.
 export async function signIn(conn, ctx, ui) {
   const hi = await conn.open();
-  if (hi.route && hi.route !== ctx.route) throw new PerchError('protocol', { message: `Mac answered for ${hi.route}` });
+  if (hi.route && hi.route !== ctx.route) throw new RoostError('protocol', { message: `PC answered for ${hi.route}` });
   ctx.onHi?.(hi);
 
   if (ctx.route === 'passkey') {
@@ -52,11 +52,11 @@ export async function signIn(conn, ctx, ui) {
     if (m.t === 'denied') throw deniedError(m);
     return { hi, ready: m };
   } else {
-    throw new PerchError('protocol', { message: 'unknown route' });
+    throw new RoostError('protocol', { message: 'unknown route' });
   }
 
   ui.stage('verifying');
-  // The 6-digit code comes next, unless the Mac's owner switched it off for this way of signing in (then the Mac says
+  // The 6-digit code comes next, unless the PC's owner switched it off for this way of signing in (then the PC says
   // ready straight away; when pairing, paired first).
   let m = await conn.next(['totp', 'paired', 'ready', 'denied'], REPLY_MS);
   if (m.t === 'denied') throw deniedError(m);
@@ -99,8 +99,8 @@ async function passkeyStep(conn, ctx, ui, hi) {
     try {
       return await conn.guard(run());
     } catch (e) {
-      if (e instanceof PerchError) throw e;
-      if (webauthnErrorKind(e) === 'wrong-site') throw new PerchError('denied', { reason: 'origin', final: true });
+      if (e instanceof RoostError) throw e;
+      if (webauthnErrorKind(e) === 'wrong-site') throw new RoostError('denied', { reason: 'origin', final: true });
       // Fall through to the button: most often the browser just wanted a fresh tap.
     }
   }
@@ -108,9 +108,9 @@ async function passkeyStep(conn, ctx, ui, hi) {
     try {
       return await conn.guard(ui.askPasskey({ name: hi.name, error, run }));
     } catch (e) {
-      if (e instanceof PerchError) throw e;
+      if (e instanceof RoostError) throw e;
       const kind = webauthnErrorKind(e);
-      if (kind === 'wrong-site') throw new PerchError('denied', { reason: 'origin', final: true });
+      if (kind === 'wrong-site') throw new RoostError('denied', { reason: 'origin', final: true });
       error = kind === 'cancelled'
         ? 'The passkey request was closed before it finished. Tap the button to try again.'
         : `The passkey didn't work (${e.name || 'error'}). Tap the button to try again.`;
@@ -118,8 +118,8 @@ async function passkeyStep(conn, ctx, ui, hi) {
   }
 }
 
-// Backup sign-in started at the meeting point: the password's first message goes with the hello and the Mac's reply
-// comes back with its offer, so a wrong password is known in a second or two, before anything is connected. A Mac
+// Backup sign-in started at the meeting point: the password's first message goes with the hello and the PC's reply
+// comes back with its offer, so a wrong password is known in a second or two, before anything is connected. A PC
 // from before 0.3.5 doesn't reply then: the whole exchange happens over the connection, as before (backupSteps).
 export async function backupEarly(password) {
   const opaque = await loadOpaque();
@@ -131,8 +131,8 @@ export async function backupEarly(password) {
       if (typeof first.opaque2 !== 'string') return;
       let fin = null;
       try { fin = opaque.client.finishLogin({ clientLoginState, loginResponse: first.opaque2, password }); } catch {}
-      // A wrong password can't be told apart from a wrong Mac name; the Mac has counted it as a failed try either way.
-      if (!fin) throw new PerchError('wrong-password');
+      // A wrong password can't be told apart from a wrong PC name; the PC has counted it as a failed try either way.
+      if (!fin) throw new RoostError('wrong-password');
       early.fin = fin;
     },
   };
@@ -160,9 +160,9 @@ async function backupSteps(conn, ctx, ui) {
     fin = undefined;
   }
   if (!fin) {
-    // A wrong password can't be told apart from a wrong Mac name; the Mac counts it as a failed try either way.
+    // A wrong password can't be told apart from a wrong PC name; the PC counts it as a failed try either way.
     conn.send({ t: 'opaque-fail' });
-    throw new PerchError('wrong-password');
+    throw new RoostError('wrong-password');
   }
   const proof = await bindProof(fromB64url(fin.sessionKey), 'backup', conn.bind);
   conn.send({ t: 'opaque3', fin: fin.finishLoginRequest, proof: toB64url(proof) });
@@ -171,18 +171,18 @@ async function backupSteps(conn, ctx, ui) {
 async function pairSteps(conn, ctx, ui, hi) {
   const { pair } = ctx;
   // A device that can't easily keep a passkey: offer the backup sign-in before anything is made (the link stays unused).
-  if (ctx.offerBackup) throw new PerchError('use-backup', { name: hi.name });
+  if (ctx.offerBackup) throw new RoostError('use-backup', { name: hi.name });
   const proof = await bindProof(pair.pairSecret, 'pair', conn.bind);
-  // `origin`: which site this is, so the Mac makes the passkey for this site's domain (it must be one it accepts).
+  // `origin`: which site this is, so the PC makes the passkey for this site's domain (it must be one it accepts).
   conn.send({ t: 'pair1', pairId: toB64url(pair.pairId), proof: toB64url(proof), origin: globalThis.location?.origin });
   const m = await conn.next(['pair-options', 'denied'], REPLY_MS);
   if (m.t === 'denied') throw deniedError(m);
   const o = m.options;
-  // The new passkey must be for this connection and carry this Mac's address (and, from Macs that have one, the
+  // The new passkey must be for this connection and carry this PC's address (and, from PCs that have one, the
   // certificate pin the pairing link carried); anything else means something is off.
   const handle = pair.pin ? concat(pair.hostId, pair.sigKey, pair.pin) : concat(pair.hostId, pair.sigKey);
   if (!o || o.challenge !== toB64url(conn.bind) || o.user?.id !== toB64url(handle)) {
-    throw new PerchError('wrong-mac');
+    throw new RoostError('wrong-mac');
   }
   let error = null;
   for (;;) {
@@ -191,10 +191,10 @@ async function pairSteps(conn, ctx, ui, hi) {
       conn.send({ t: 'pair-cred', response: cred.json, label: ctx.label });
       return;
     } catch (e) {
-      if (e instanceof PerchError) throw e;
+      if (e instanceof RoostError) throw e;
       const kind = webauthnErrorKind(e);
-      if (kind === 'exists') throw new PerchError('denied', { reason: 'exists', final: true });
-      if (kind === 'wrong-site') throw new PerchError('denied', { reason: 'origin', final: true });
+      if (kind === 'exists') throw new RoostError('denied', { reason: 'exists', final: true });
+      if (kind === 'wrong-site') throw new RoostError('denied', { reason: 'origin', final: true });
       error = kind === 'cancelled'
         ? 'The passkey wasn\'t made: the request was closed before it finished. Tap the button to try again.'
         : `The passkey couldn't be made (${e.name || 'error'}). Tap the button to try again.`;

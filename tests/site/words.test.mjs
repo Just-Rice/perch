@@ -56,11 +56,11 @@ test('retryAfterSeconds and formatWait', () => {
   assert.equal(formatWait(0), 'now');
 });
 
-test('denied reasons the Mac sends get plain messages', () => {
+test('denied reasons the PC sends get plain messages', () => {
   // The reasons host/src/session.mjs and auth.mjs actually send, plus the protocol's own words.
   const cases = {
     'wrong-code': /code didn't work/, 'locked-out': /Too many/, 'bad-passkey': /passkey/, 'unknown-device': /passkey/,
-    'bad-proof': /confirm the connection/, 'wrong-password': /Wrong Mac name or password/, 'bad-link': /pairing link/,
+    'bad-proof': /confirm the connection/, 'wrong-password': /Wrong PC name or password/, 'bad-link': /pairing link/,
     'link-expired': /expired/, 'link-used': /already used/, 'already-paired': /already paired/, timeout: /too long/,
     origin: /doesn't accept sign-ins from this site/, protocol: /understand/, error: /went wrong/,
   };
@@ -79,7 +79,7 @@ test('a wrong code that keeps the session open asks for another code', () => {
   assert.equal(deniedMessage('timeout', { route: 'pair' }).action, 'home', 'a pairing link may be used up');
 });
 
-test('unknown reasons still read well and say what the Mac said', () => {
+test('unknown reasons still read well and say what the PC said', () => {
   const r = refuseMessage('weird-thing');
   wellFormed(r);
   assert.match(r.body, /weird-thing/);
@@ -99,26 +99,26 @@ test('bye reasons', () => {
   assert.equal(byeMessage('removed').action, 'home');
 });
 
-test('error codes from the Mac', () => {
-  assert.match(errorMessage('no-screen-permission').body, /Screen & System Audio Recording/);
+test('error codes from the PC', () => {
+  assert.match(errorMessage('no-screen-permission').body, /Control admin apps/);
   wellFormed(errorMessage('capture-failed'));
   assert.match(errorMessage('other', 'Disk on fire').body, /Disk on fire/);
 });
 
 test('failures found on this side', () => {
   const t = failureMessage('timeout');
-  assert.equal(`${t.title}. ${t.body}`, "Your Mac didn't answer. Check it's on, awake and running Perch.");
-  assert.match(failureMessage('timeout', { route: 'backup' }).title, /No Mac answered to that name/);
-  for (const k of ['brokers', 'webrtc', 'lost', 'old-mac', 'no-webauthn', 'not-perch-passkey', 'bad-link', 'wrong-mac',
+  assert.equal(`${t.title}. ${t.body}`, "Your PC didn't answer. Check it's on, awake and running Roost.");
+  assert.match(failureMessage('timeout', { route: 'backup' }).title, /No PC answered to that name/);
+  for (const k of ['brokers', 'webrtc', 'lost', 'old-mac', 'no-webauthn', 'not-roost-passkey', 'bad-link', 'wrong-mac',
     'wrong-password', 'protocol', 'unexpected']) wellFormed(failureMessage(k));
-  assert.match(failureMessage('old-mac').body, /Check for Updates/);
+  assert.match(failureMessage('old-mac').body, /Control Center/);
 });
 
-test('messageFor picks the right family from a PerchError-like object', () => {
+test('messageFor picks the right family from a RoostError-like object', () => {
   assert.equal(messageFor({ kind: 'refuse', reason: 'paused' }).title, refuseMessage('paused').title);
   assert.equal(messageFor({ kind: 'denied', reason: 'locked-out', retryAfter: 33 }).wait, 33);
   assert.equal(messageFor({ kind: 'bye', reason: 'idle' }).title, byeMessage('idle').title);
-  assert.equal(messageFor({ kind: 'timeout', message: 'timeout' }, 'passkey').title, "Your Mac didn't answer");
+  assert.equal(messageFor({ kind: 'timeout', message: 'timeout' }, 'passkey').title, "Your PC didn't answer");
   assert.match(messageFor({ kind: "unexpected", message: "boom" }).body, /boom/);
 });
 
@@ -169,7 +169,7 @@ test('Apple keyboards and touch-first devices', () => {
 const loc = url => { const u = new URL(url); return { hostname: u.hostname, search: u.search }; };
 
 test('pageEnv: the real site ignores every test switch', () => {
-  const e = pageEnv(loc('https://just-rice.github.io/perch/connect.html?brokers=ws://127.0.0.1:1/mqtt&test=1&demo=1'));
+  const e = pageEnv(loc('https://faarisaahmed.github.io/roost/connect.html?brokers=ws://127.0.0.1:1/mqtt&test=1&demo=1'));
   assert.equal(e.local, false);
   assert.equal(e.test, false);
   assert.equal(e.demo, false);
@@ -194,6 +194,18 @@ test('pageEnv: some other host gets its own hostname as passkey domain and no te
   assert.equal(e.rpId, 'example.org');
   assert.equal(e.test, false);
   assert.equal(e.brokers, BROKERS);
+});
+
+test('no Mac or Perch words in anything a person reads', async () => {
+  const all = [];
+  for (const r of ['version', 'busy', 'paused', 'locked-out', 'backup-off', 'not-set-up', 'rate', 'odd']) all.push(refuseMessage(r));
+  for (const r of ['wrong-code', 'code-used', 'locked-out', 'bad-passkey', 'wrong-password', 'bad-proof', 'link-expired', 'link-used',
+    'bad-link', 'registration', 'already-paired', 'timeout', 'origin', 'protocol', 'error', 'odd']) all.push(deniedMessage(r));
+  for (const r of ['signed-in-elsewhere', 'paused', 'quit', 'idle', 'removed', 'disconnected', 'odd']) all.push(byeMessage(r));
+  for (const c of ['no-screen-permission', 'capture-failed', 'odd']) all.push(errorMessage(c));
+  for (const k of ['timeout', 'brokers', 'webrtc', 'lost', 'old-mac', 'no-webauthn', 'not-roost-passkey', 'no-passkey', 'bad-link',
+    'wrong-mac', 'wrong-password', 'protocol', 'odd']) all.push(failureMessage(k));
+  for (const m of all) assert.doesNotMatch(`${m.title} ${m.body}`, /\bMacs?\b|Perch|macOS|menu bar|Setup|just-rice/, m.title);
 });
 
 test('stats: readStats, summarize, linkQuality and the panel lines', () => {

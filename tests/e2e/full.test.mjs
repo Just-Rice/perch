@@ -1,10 +1,10 @@
-// The whole system end to end: the real website (site/, in headless Chrome with a virtual passkey) and the real Mac
+// The whole system end to end: the real website (site/, in headless Chrome with a virtual passkey) and the real PC
 // host (host/src/main.mjs in test mode, with the stand-in app that plays test video and sound and echoes input),
 // meeting through the local test broker. Covers pairing, passkey sign-in, backup sign-in and an about:blank tab.
 //   node --test tests/e2e/full.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { startStack, openPage, Page, targetMatching, evalInFrame, sleep } from '../site/lib/browser.mjs';
+import { startStack, openPage, Page, targetMatching, evalInFrame, sleep, DESKTOP } from '../site/lib/browser.mjs';
 import { startHost } from '../../host/test/fake-app.mjs';
 
 let stack, app;
@@ -51,7 +51,7 @@ async function enterCode(page) {
   if ((await page.screen()) === 'code') await page.click('#btnCode').catch(() => {});
 }
 
-// The viewer is showing a moving picture from the Mac, with sound attached.
+// The viewer is showing a moving picture from the PC, with sound attached.
 async function assertPlaying(page) {
   await page.waitScreen('viewer', { timeoutMs: 20000 });
   await page.waitFor(`document.getElementById('video').videoWidth > 0`, { timeoutMs: 15000, what: 'video frames' });
@@ -74,7 +74,7 @@ async function assertInputReachesMac(page) {
   assert.ok(Math.abs(down.x - 0.5) < 0.02 && Math.abs(down.y - 0.5) < 0.02, `click in the middle (${down.x}, ${down.y})`);
 }
 
-test('pairing a new device, then the Mac on screen with sound, and input reaching the Mac', async () => {
+test('pairing a new device, then the PC on screen with sound, and input reaching the PC', async () => {
   const { link } = await app.call('pairStart');
   assert.match(link, /connect\.html#pair=[A-Za-z0-9_-]+$/);
   // The pairing link goes to the real site; in this test it must also say "use the local broker".
@@ -88,15 +88,15 @@ test('pairing a new device, then the Mac on screen with sound, and input reachin
   const st = await app.call('state');
   assert.equal(st.devices.length, 1, 'one paired device');
   assert.equal(st.session?.route, 'pair');
-  assert.equal(JSON.parse(await page.eval(`localStorage.getItem('perch.macs.v1')`)).length, 1, 'the Mac is remembered');
+  assert.equal(JSON.parse(await page.eval(`localStorage.getItem('roost.pcs.v1')`)).length, 1, 'the Mac is remembered');
   // Keep the new passkey for later tabs, as a synced passkey would be: the virtual authenticator goes with this tab.
   assert.equal((await stack.auth.credentials()).length, 1, 'one passkey made');
-  await page.click('#tbBye');
+  await page.click('#dkBye');
   await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
   assert.deepEqual(page.problems(), []);
 });
 
-test('signing in again with the remembered Mac: passkey, then code; then talking through the Mac', async () => {
+test('signing in again with the remembered PC: passkey, then code; then talking through the PC', async () => {
   // tonemic: a generated tone stands in for the microphone (nobody is here to answer a microphone prompt).
   const page = await openPage(stack, `${stack.base}connect.html?${testParams()}&tonemic=1`, { name: 'signin' });
   await page.waitScreen('home');
@@ -109,11 +109,11 @@ test('signing in again with the remembered Mac: passkey, then code; then talking
   await assertPlaying(page);
   assert.equal((await app.call('state')).session?.route, 'passkey');
 
-  // Talk through the Mac: the browser's microphone (a generated tone here) reaches the app as Opus packets, only
+  // Talk through the PC: the browser's microphone (a generated tone here) reaches the app as Opus packets, only
   // while it is switched on.
   assert.equal(app.mic.length, 0);
-  await page.eval(`window.__perch.viewer._showToolbar()`);
-  await page.click('#tbMore');
+  await page.eval(`window.__roost.viewer._toggleTweaks(true)`);
+  await sleep(300); // Tweaks slides in
   assert.equal(await page.eval(`document.getElementById('optMic').hidden`), false, 'the microphone is offered');
   let since = app.commands.length;
   await page.click('#optMic');
@@ -153,7 +153,7 @@ test('a wrong code is refused and nothing is shown; the right one then works', a
   await assertPlaying(page);
 });
 
-test('backup sign-in: Mac name and password (checked by OPAQUE), then the code', async () => {
+test('backup sign-in: PC name and password (checked by OPAQUE), then the code', async () => {
   const opaque = await import('../../site/js/vendor/opaque/index.js');
   await opaque.ready;
   const password = 'amber-otter-quietly-sings-loud';
@@ -168,8 +168,8 @@ test('backup sign-in: Mac name and password (checked by OPAQUE), then the code',
   await page.waitScreen('home');
   await page.click('#btnBackup');
   await page.waitScreen('backup');
-  // A wrong password first: found out at the meeting point, from the Mac's reply to the password's first message, so
-  // the viewer never answers the offer (nothing is connected). Still a failed try in the Mac's log.
+  // A wrong password first: found out at the meeting point, from the PC's reply to the password's first message, so
+  // the viewer never answers the offer (nothing is connected). Still a failed try in the PC's log.
   const answersBefore = (await app.call('debug')).signaling.answers;
   await page.click('#macName');
   await page.type(macName);
@@ -203,7 +203,7 @@ test('backup sign-in: Mac name and password (checked by OPAQUE), then the code',
   assert.equal((await app.call('state')).session?.route, 'backup');
 });
 
-test('a Chromebook: a pairing link offers the backup sign-in, with the Mac\u2019s name filled in; opening Perch goes straight there', async () => {
+test('a Chromebook: a pairing link offers the backup sign-in, with the PC\u2019s name filled in; opening Roost goes straight there', async () => {
   // (The backup password was set by the test before.) ?device=chromebook stands in for the browser saying it has no
   // easy passkey of its own.
   const password = 'amber-otter-quietly-sings-loud';
@@ -218,7 +218,7 @@ test('a Chromebook: a pairing link offers the backup sign-in, with the Mac\u2019
   await page.waitScreen('backup');
   assert.equal(await page.eval(`document.getElementById('macName').value`), macName, 'the Mac\u2019s name is filled in');
   // The owner switched the 6-digit code off for the backup sign-in (Setup, Settings, Sign-in): name and password alone.
-  // (This also keeps the Mac's clock where it is: every fresh code moves it on 30 seconds.)
+  // (This also keeps the PC's clock where it is: every fresh code moves it on 30 seconds.)
   await app.call('updateSettings', { codeWithBackup: false });
   await page.click('#password');
   await page.type(password);
@@ -226,16 +226,16 @@ test('a Chromebook: a pairing link offers the backup sign-in, with the Mac\u2019
   await assertPlaying(page);
   assert.equal((await app.call('state')).session?.route, 'backup');
   await app.call('updateSettings', { codeWithBackup: true });
-  await page.click('#tbBye');
+  await page.click('#dkBye');
   await app.waitFor(async () => !(await app.call('state')).session, { what: 'session over' });
-  // Next time: straight to the backup sign-in, name remembered (on a device that knows no Mac by passkey, as a
-  // Chromebook won't; this test browser remembers the earlier tests' Mac, so forget it here).
-  const macsBefore = await page.eval(`localStorage.getItem('perch.macs.v1')`);
-  await page.eval(`localStorage.removeItem('perch.macs.v1')`);
+  // Next time: straight to the backup sign-in, name remembered (on a device that knows no PC by passkey, as a
+  // Chromebook won't; this test browser remembers the earlier tests' PC, so forget it here).
+  const macsBefore = await page.eval(`localStorage.getItem('roost.pcs.v1')`);
+  await page.eval(`localStorage.removeItem('roost.pcs.v1')`);
   await page.goto(`${stack.base}connect.html?${testParams()}&device=chromebook`);
   await page.waitScreen('backup');
   assert.equal(await page.eval(`document.getElementById('macName').value`), macName);
-  if (macsBefore) await page.eval(`localStorage.setItem('perch.macs.v1', ${JSON.stringify(macsBefore)})`);
+  if (macsBefore) await page.eval(`localStorage.setItem('roost.pcs.v1', ${JSON.stringify(macsBefore)})`);
   await app.call('pairCancel');
   assert.deepEqual(page.problems(), []);
 });
@@ -254,7 +254,7 @@ test('inside an about:blank tab: same sign-in, same picture', async () => {
     await sleep(100);
   }
   assert.equal(await tab.eval('location.href'), 'about:blank', 'the tab really is about:blank');
-  // Tap the remembered Mac inside the frame (the frame fills the tab, so its coordinates are the tab's).
+  // Tap the remembered PC inside the frame (the frame fills the tab, so its coordinates are the tab's).
   const at = await inFrame(`(() => { const r = document.querySelector('#macList button').getBoundingClientRect();
     return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await tab.click(null, at);
@@ -281,12 +281,12 @@ test('inside an about:blank tab: same sign-in, same picture', async () => {
   assert.equal((await app.call('state')).session?.route, 'passkey');
 });
 
-test('"Sign in with a passkey" on a browser that doesn\'t remember the Mac asks for the passkey only once', async () => {
+test('"Sign in with a passkey" on a browser that doesn\'t remember the PC asks for the passkey only once', async () => {
   let asked = 0;
   const off = stack.cdp.on(m => { if (m.method === 'WebAuthn.credentialAsserted') asked++; });
   try {
     const page = await openPage(stack, `${stack.base}connect.html?${testParams()}`, { name: 'one-tap' });
-    await page.eval(`localStorage.removeItem('perch.macs.v1')`);
+    await page.eval(`localStorage.removeItem('roost.pcs.v1')`);
     await page.goto(`${stack.base}connect.html?${testParams()}`);
     await page.waitScreen('home');
     assert.equal(await page.eval(`document.querySelectorAll('#macList button').length`), 0, 'no remembered Mac');
@@ -295,7 +295,7 @@ test('"Sign in with a passkey" on a browser that doesn\'t remember the Mac asks 
     await assertPlaying(page);
     assert.equal((await app.call('state')).session?.route, 'passkey');
     assert.equal(asked, 1, `passkey requests: ${asked}`);
-    const macs = JSON.parse(await page.eval(`localStorage.getItem('perch.macs.v1')`));
+    const macs = JSON.parse(await page.eval(`localStorage.getItem('roost.pcs.v1')`));
     assert.equal(macs.length, 1);
     assert.match(macs[0].pin ?? '', /^[A-Za-z0-9_-]{22}$/, 'the Mac is remembered with its certificate pin');
     assert.deepEqual(page.problems(), []);
@@ -312,11 +312,19 @@ test('a guest link: the page watches with no sign-in, shows it is view only, and
   assert.equal(await page.eval('location.hash'), '', 'the link was cleared from the address bar');
   await page.waitFor(`!!document.querySelector('#banners [data-id="guest"]')`, { what: 'the guest note' });
   assert.match(await page.text('#banners'), /watching as a guest/);
-  assert.equal(await page.eval(`document.getElementById('tbKeys').hidden && document.getElementById('tbMore').hidden`), true);
+  // Nothing that would change the PC: no Key deck, no quality, no keys or clipboard in Tweaks or the palette.
+  assert.equal(await page.eval(`document.getElementById('dkKeys').hidden && document.getElementById('qualityGroup').hidden &&
+    document.getElementById('twKeys').hidden && document.getElementById('twClip').hidden`), true);
+  await page.eval(`window.__roost.viewer._togglePalette(true)`);
+  const ids = await page.eval(`[...document.querySelectorAll('#paletteList .pi')].map(li => li.dataset.id)`);
+  assert.ok(!ids.some(id => /^(press-|quality-|paste|copy|display-|deck)/.test(id)), ids.join(' '));
+  assert.ok(ids.includes('disconnect') && ids.includes('shape-fill'));
+  await page.shotAll('viewer-guest', { views: { desktop: DESKTOP } });
+  await page.eval(`window.__roost.viewer._togglePalette(false)`);
   const st = await app.call('state');
   assert.equal(st.guest.watching, 1);
   assert.equal(st.session, null);
-  // Clicking and typing on the picture send nothing to the Mac.
+  // Clicking and typing on the picture send nothing to the PC.
   const before = app.inputs.length;
   const box = await page.eval(`(() => { const r = document.getElementById('surface').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
   await page.click(null, box);

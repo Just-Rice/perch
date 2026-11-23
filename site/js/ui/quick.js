@@ -1,6 +1,6 @@
 // One-tap passkey sign-in (docs/PROTOCOL.md, "One-tap sign-in"). The browser's WebRTC certificate is made in advance,
-// so a single passkey request can both say which Mac this is (its user handle) and sign this browser's certificate;
-// the connection then uses exactly that certificate, and the Mac checks the signature against it.
+// so a single passkey request can both say which PC this is (its user handle) and sign this browser's certificate;
+// the connection then uses exactly that certificate, and the PC checks the signature against it.
 import { quickChallenge, sdpFingerprint, fingerprintBytes } from '../shared/bind.js';
 import { randomBytes, toB64url, equalBytes } from '../shared/bytes.js';
 
@@ -28,13 +28,13 @@ export function prepareQuick(PC = globalThis.RTCPeerConnection) {
   return prepared;
 }
 
-// The challenge for one passkey request, and the {r, ts} the Mac needs to check it.
+// The challenge for one passkey request, and the {r, ts} the PC needs to check it.
 export async function quickRequest(q, now = Date.now()) {
   const r = randomBytes(16);
   return { challenge: await quickChallenge(r, now, q.fingerprint), proof: { r: toB64url(r), ts: now } };
 }
 
-// Does this offer come from the Mac the pin belongs to?
+// Does this offer come from the PC the pin belongs to?
 export function offerMatchesPin(offerSdp, pin) {
   const fp = fingerprintBytes(sdpFingerprint(offerSdp));
   return !!fp && equalBytes(fp, pin);

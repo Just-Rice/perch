@@ -1,5 +1,5 @@
-// Passkeys (WebAuthn) for Perch: sign-in assertions over the connection's `bind`, discovering which Mac a passkey
-// belongs to, and making a new passkey when pairing. The Mac checks everything; this side only asks the browser.
+// Passkeys (WebAuthn) for Roost: sign-in assertions over the connection's `bind`, discovering which PC a passkey
+// belongs to, and making a new passkey when pairing. The PC checks everything; this side only asks the browser.
 import { toB64url, fromB64url } from '../shared/bytes.js';
 
 export const webauthnAvailable = () =>
@@ -8,7 +8,7 @@ export const webauthnAvailable = () =>
 const b64 = buf => toB64url(new Uint8Array(buf));
 
 // PublicKeyCredential.toJSON() where the browser has it (Chrome 129+, Safari 18.4+, Firefox 119+); the same JSON shape
-// built by hand elsewhere. The Mac expects exactly this shape (docs/PROTOCOL.md, "Control channel: signing in").
+// built by hand elsewhere. The PC expects exactly this shape (docs/PROTOCOL.md, "Control channel: signing in").
 export function credentialToJSON(cred) {
   if (typeof cred.toJSON === 'function') {
     try { return cred.toJSON(); } catch { /* some versions throw on extensions; build it by hand */ }
@@ -39,7 +39,7 @@ export function credentialToJSON(cred) {
   return json;
 }
 
-// PublicKeyCredentialCreationOptionsJSON (what the Mac sends in pair-options) → the options create() takes.
+// PublicKeyCredentialCreationOptionsJSON (what the PC sends in pair-options) → the options create() takes.
 export function parseCreationOptions(json) {
   const PKC = globalThis.PublicKeyCredential;
   if (typeof PKC?.parseCreationOptionsFromJSON === 'function') {
@@ -71,7 +71,7 @@ export async function getAssertion({ challenge, rpId, credentialIds = [], timeou
   return { json: credentialToJSON(cred), id: cred.id, userHandle };
 }
 
-// Pairing: make a passkey from the Mac's options. Resolves to {json, id}.
+// Pairing: make a passkey from the PC's options. Resolves to {json, id}.
 export async function createPasskey(optionsJSON, { signal } = {}) {
   const cred = await navigator.credentials.create({ publicKey: parseCreationOptions(optionsJSON), ...(signal ? { signal } : {}) });
   if (!cred) throw Object.assign(new Error('no passkey made'), { name: 'NotAllowedError' });
@@ -80,7 +80,7 @@ export async function createPasskey(optionsJSON, { signal } = {}) {
 
 // What a failed WebAuthn call means for the person, in a word the UI can use:
 //   'cancelled' (closed, timed out, or the browser wanted a fresh tap), 'exists' (this device already has a passkey for
-//   this Mac), 'wrong-site' (passkeys can't be used from this address), 'unsupported', 'failed'.
+//   this PC), 'wrong-site' (passkeys can't be used from this address), 'unsupported', 'failed'.
 export function webauthnErrorKind(e) {
   switch (e?.name) {
     case 'NotAllowedError': case 'AbortError': return 'cancelled';

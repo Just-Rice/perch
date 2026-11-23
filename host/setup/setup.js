@@ -65,6 +65,8 @@ const parts = [nav, hero, home, restart, admin, totp, pairing, devices, backup, 
 
 function apply(next) {
   if (!next || typeof next !== 'object' || gone) return;
+  // Snapshots can arrive out of order (an action's answer after a newer live update): never go back in time.
+  if (typeof next.rev === 'number' && typeof state?.rev === 'number' && next.rev < state.rev) return;
   state = next;
   for (const part of parts) {
     try { part.render(next); } catch (e) { console.error('Control Center: render failed', e); }

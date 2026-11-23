@@ -1,19 +1,19 @@
-// The Macs this browser knows how to reach: what a passkey sign-in needs to find the Mac (its hostId and rendezvous
+// The PCs this browser knows how to reach: what a passkey sign-in needs to find the PC (its hostId and rendezvous
 // key, both also inside the passkey's user handle) plus which passkey to ask for and a name to show.
-// Kept in localStorage under 'perch.macs.v1'. Storage can be missing or throw (private windows, blocked site data,
+// Kept in localStorage under 'roost.pcs.v1'. Storage can be missing or throw (private windows, blocked site data,
 // some about:blank set-ups); then the list simply lives in memory for this visit.
 import { relayBase } from '../shared/wsrelay.js';
 import { fromB64url } from '../shared/bytes.js';
 import { HOST_ID_BYTES, SIG_KEY_BYTES } from '../shared/proto.js';
 
-export const MACS_KEY = 'perch.macs.v1';
+export const MACS_KEY = 'roost.pcs.v1';
 const MAX_MACS = 20;
 
 // localStorage, or a stand-in that keeps values in memory when the real one can't be used.
 export function safeStorage(get = () => globalThis.localStorage) {
   try {
     const s = get();
-    const probe = 'perch.probe';
+    const probe = 'roost.probe';
     s.setItem(probe, '1');
     s.removeItem(probe);
     return s;
@@ -48,10 +48,10 @@ const clean = m => ({
   name: String(m.name || '').slice(0, 64),
   credentialId: m.credentialId,
   ...(m.label ? { label: String(m.label).slice(0, 64) } : {}),
-  // The Mac's certificate pin (b64url of 16 bytes), when its passkey or pairing link carried one.
+  // The PC's certificate pin (b64url of 16 bytes), when its passkey or pairing link carried one.
   ...(m.pin ? { pin: m.pin } : {}),
-  // The Mac owner's Worker relay (https://…workers.dev), which the Mac named when signing in: it is also a rendezvous
-  // broker, so the Mac can be found there when the public brokers are blocked. Anything else is dropped.
+  // The PC owner's Worker relay (https://…workers.dev), which the PC named when signing in: it is also a rendezvous
+  // broker, so the PC can be found there when the public brokers are blocked. Anything else is dropped.
   ...(typeof m.relay === 'string' && relayBase(m.relay, { allowLocal: true }) === m.relay ? { relay: m.relay } : {}),
   lastUsed: Number.isFinite(m.lastUsed) ? m.lastUsed : 0,
 });
@@ -73,9 +73,9 @@ export class MacStore {
 
   get(hostId) { return this.list().find(m => m.hostId === hostId) || null; }
 
-  // Adds a Mac or updates the one with the same hostId (one entry per Mac; the newest passkey wins).
+  // Adds a PC or updates the one with the same hostId (one entry per PC; the newest passkey wins).
   save(mac) {
-    if (!validMac(mac)) throw new Error('not a valid Mac entry');
+    if (!validMac(mac)) throw new Error('not a valid PC entry');
     const old = this.get(mac.hostId);
     const merged = clean({ ...old, ...mac, name: mac.name || old?.name || '' });
     const list = [merged, ...this.list().filter(m => m.hostId !== mac.hostId)].slice(0, MAX_MACS);
@@ -97,7 +97,7 @@ export class MacStore {
   }
 }
 
-// "Today", "Yesterday", "3 days ago" — for the list of Macs.
+// "Today", "Yesterday", "3 days ago" — for the list of PCs.
 export function lastUsedText(ms, now = Date.now()) {
   if (!ms) return 'Not used yet';
   const day = 24 * 60 * 60 * 1000;

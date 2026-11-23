@@ -1,7 +1,7 @@
 // The sign-in screens in connect.html: showing one at a time, and the waits on the person (a tap, a code).
 // Anything that needs a fresh tap (passkeys, especially in Safari) is started *inside* the click handler: `run` is
 // called synchronously there, never after an await.
-import { PerchError } from './connection.js';
+import { RoostError } from './connection.js';
 import { formatWait } from './messages.js';
 
 const STEPS = ['finding', 'connecting', 'checking', 'verifying'];
@@ -40,7 +40,7 @@ export class Screens {
   }
 
   // Marks the sign-in steps done / current. Stages after 'verifying' (passkey, code-sent, password) keep the list
-  // where it is but bring the progress screen back while the Mac checks.
+  // where it is but bring the progress screen back while the PC checks.
   stage(stage) {
     const i = STEPS.indexOf(stage);
     if (i >= 0) {
@@ -53,7 +53,7 @@ export class Screens {
       passkey: 'Waiting for your passkey…',
       'code-sent': 'Checking the code…',
       password: 'Checking the password…',
-      verifying: 'Your Mac is checking…',
+      verifying: 'Your PC is checking…',
     };
     if (stage in notes) {
       this.$('progressNote').textContent = notes[stage];
@@ -80,8 +80,10 @@ export class Screens {
     const input = this.$('code');
     input.value = '';
     input.disabled = false;
+    this._otp();
     this.$('btnCode').disabled = false;
     this._message('codeError', error ? `${error.title}. ${error.body}` : '');
+    this.$('otp')?.classList.toggle('bad', !!error);
     this.show('code', { focus: 'code' });
     return new Promise(resolve => { this._codeDone = resolve; });
   }
@@ -147,6 +149,17 @@ export class Screens {
     el.hidden = !text;
   }
 
+  // The six cells drawn under the code box: the digits typed so far, and where the next one goes.
+  _otp() {
+    const input = this.$('code'), cells = this.doc.querySelectorAll('#otp .otp-cells i');
+    const v = input.value;
+    cells.forEach((c, i) => {
+      c.textContent = v[i] ?? '';
+      c.classList.toggle('filled', i < v.length);
+      c.classList.toggle('at', i === Math.min(v.length, 5));
+    });
+  }
+
   _wireCode() {
     const input = this.$('code');
     const submit = () => {
@@ -166,8 +179,11 @@ export class Screens {
     input.addEventListener('input', () => {
       const digits = input.value.replace(/\D/g, '').slice(0, 6);
       if (digits !== input.value) input.value = digits;
+      this.$('otp')?.classList.remove('bad');
+      this._otp();
       if (digits.length === 6) submit();
     });
+    for (const type of ['focus', 'blur', 'select', 'keyup', 'click']) input.addEventListener(type, () => this._otp());
     this.$('codeForm').addEventListener('submit', e => {
       e.preventDefault();
       submit();
@@ -175,4 +191,4 @@ export class Screens {
   }
 }
 
-export const cancelled = () => new PerchError('cancelled');
+export const cancelled = () => new RoostError('cancelled');

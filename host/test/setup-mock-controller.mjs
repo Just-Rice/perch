@@ -1,9 +1,9 @@
-// A stand-in for the host controller (host/src/controller.mjs), for testing the Setup page and its server on
+// A stand-in for the host controller (host/src/controller.mjs), for testing the Control Center page and its server on
 // their own. It implements the whole controller interface in memory, with real authenticator codes (src/totp.mjs)
-// and a real OPAQUE server (@serenity-kit/opaque), plus `mock.*` hooks a test uses to play the Mac's side: a device
-// finishing pairing, someone signing in, a permission being switched on.
+// and a real OPAQUE server (@serenity-kit/opaque), plus `mock.*` hooks a test uses to play the PC's side: a device
+// finishing pairing, someone signing in, Windows answering about "Control admin apps".
 //
-// Run it on its own to look at Setup in a browser:   node test/setup-mock-controller.mjs [--port 8790] [--full]
+// Run it on its own to look at the Control Center in a browser:   node test/setup-mock-controller.mjs [--port 8790] [--full]
 // (--full starts with everything set up: devices, a session, backup sign-in and some activity.)
 import * as opaque from '@serenity-kit/opaque';
 import { newSecret, base32, otpauthUri, checkCode } from '../src/totp.mjs';
@@ -13,7 +13,8 @@ import { toB64url, randomBytes } from '../../site/js/shared/bytes.js';
 import { CONNECT_URL, PAIR_TTL_MS, DEFAULT_QUALITY } from '../../site/js/shared/proto.js';
 
 const IDLE_CHOICES = [15, 30, 60, 120, 0]; // 0 = never
-const QUALITIES = ['smooth', 'balanced', 'sharp'];
+const QUALITIES = ['smooth', 'balanced', 'sharp', 'fast'];
+const OFFICIAL = new URL(CONNECT_URL).origin;
 const iso = (ms = Date.now()) => new Date(ms).toISOString();
 
 export async function createMockController({ version = '0.1.0', test = true, macName = 'amber-otter-4821' } = {}) {
@@ -26,11 +27,16 @@ export async function createMockController({ version = '0.1.0', test = true, mac
     macName,
     stateOverride: null,
     offline: false,
-    permissions: { screen: false, accessibility: false },
+    // Windows has no Screen Recording or Accessibility permission: both are always true (docs/WINDOWS-APP.md).
+    permissions: { screen: true, accessibility: true },
     displays: [{ id: 1, name: 'Built-in Display', width: 3024, height: 1964, main: true }],
     settings: { loginItem: true, keepAwake: true, backupOn: false, idleMinutes: 60, paused: false, quality: DEFAULT_QUALITY, micOutput: '',
-      codeWithPasskey: true, codeWithBackup: true, codeWithPairing: true, autoUpdate: false, macSpeakers: 1, streamVolume: 1 },
+      codeWithPasskey: true, codeWithBackup: true, codeWithPairing: true, autoUpdate: false, macSpeakers: 1, streamVolume: 1,
+      lockOnDisconnect: false, curtain: false },
     soundTap: true,
+    // What roost.exe said in its HELLO, and "Control admin apps" (docs/WINDOWS-APP.md).
+    app: { os: 'windows', osVersion: '10.0.22631', arch: 'x64', elevated: false, elevatedTask: false,
+      features: { curtain: true, encoder: 'OpenH264', elevatedTask: false }, elevationError: null },
     audioOutputs: [],
     loginItem: { on: true, status: 'enabled' },
     totp: { secret: null, setAt: null, lastStep: -1 },
@@ -39,6 +45,10 @@ export async function createMockController({ version = '0.1.0', test = true, mac
     opaqueServerSetup: opaque.server.createSetup(),
     devices: [],
     pairing: null,
+    guest: null,
+    sites: [],               // sites added by the owner: {origin, url, addedAt}
+    relay: { set: false },
+    workerRelay: { url: null, setAt: null, backup: null, tunnel: null, working: null, error: null },
     session: null,
     activity: [],
     update: null,
@@ -60,7 +70,7 @@ export async function createMockController({ version = '0.1.0', test = true, mac
 
   function overall() {
     if (s.stateOverride) return s.stateOverride;
-    if (s.offline) return { state: 'offline', stateText: 'Can\'t reach the internet. Perch will keep trying.' };
+    if (s.offline) return { state: 'offline', stateText: 'Can\'t reach the internet. Roost will keep trying.' };
     if (s.settings.paused) return { state: 'paused', stateText: 'Paused: nobody can connect until you resume.' };
     if (s.session) return { state: 'connected', stateText: `${s.session.viewer} is connected.` };
     if (!s.totp.secret || s.devices.length === 0) return { state: 'needs-setup', stateText: 'Finish setting up to connect.' };
@@ -84,12 +94,18 @@ export async function createMockController({ version = '0.1.0', test = true, mac
         loginItem: { ...s.loginItem },
         totp: { set: !!s.totp.secret, setAt: s.totp.setAt },
         backup: { set: !!s.backup.record, on: !!s.backup.record && s.settings.backupOn, setAt: s.backup.setAt },
-        devices: s.devices.map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt })),
+        devices: s.devices.map(({ id, label, createdAt, lastUsedAt, site }) => ({ id, label, createdAt, lastUsedAt, site: site ?? new URL(OFFICIAL).host })),
+        sites: [{ origin: OFFICIAL, url: CONNECT_URL, builtIn: true, addedAt: null, official: true },
+          ...s.sites.map(x => ({ ...x, builtIn: false, official: false }))].map((x, i) => ({ ...x, primary: i === 0 })),
         pairing: s.pairing && { link: s.pairing.link, expiresAt: s.pairing.expiresAt },
+        guest: s.guest && { ...s.guest },
+        relay: { ...s.relay },
+        workerRelay: { set: !!s.workerRelay.url, ...s.workerRelay },
         session: s.session && { ...s.session },
         activity: s.activity.slice(0, 50).map(a => ({ ...a })),
         update: s.update && { ...s.update },
         soundTap: s.soundTap,
+        app: { ...s.app, features: { ...s.app.features } },
         test,
       };
     },
@@ -118,10 +134,12 @@ export async function createMockController({ version = '0.1.0', test = true, mac
       return { ok: true };
     },
 
-    pairStart() {
-      call('pairStart');
-      if (!s.totp.secret) throw new Error('Set up the authenticator app first.');
-      const link = `${CONNECT_URL}#pair=${toB64url(randomBytes(96))}`;
+    pairStart(site) {
+      call('pairStart', site);
+      if (!s.totp.secret && s.settings.codeWithPairing !== false) throw new Error('Set up the authenticator app first.');
+      const base = site && site !== OFFICIAL ? s.sites.find(x => x.origin === site)?.url : CONNECT_URL;
+      if (!base) throw new Error('That site isn\'t on the list any more.');
+      const link = `${base}#pair=${toB64url(randomBytes(96))}`;
       s.pairing = { link, expiresAt: Date.now() + PAIR_TTL_MS };
       changed();
       return { link, expiresAt: s.pairing.expiresAt };
@@ -131,6 +149,105 @@ export async function createMockController({ version = '0.1.0', test = true, mac
       call('pairCancel');
       s.pairing = null;
       changed();
+    },
+
+    guestStart(minutes) {
+      call('guestStart', minutes);
+      if (![15, 30, 60, 240].includes(minutes)) throw new Error('Choose one of the listed times.');
+      s.guest = { link: `${CONNECT_URL}#watch=${toB64url(randomBytes(32))}`, expiresAt: iso(Date.now() + minutes * 60_000), watching: 0 };
+      note('settings', `Guest link made, for ${minutes} minutes`);
+      changed();
+      return { ...s.guest };
+    },
+
+    guestStop() {
+      call('guestStop');
+      s.guest = null;
+      changed();
+    },
+
+    siteAdd(url) {
+      call('siteAdd', url);
+      let u;
+      try { u = new URL(url); } catch { throw new Error('That doesn\'t look like a web address.'); }
+      if (u.protocol !== 'https:') throw new Error('The site must use https.');
+      if (u.origin === OFFICIAL || s.sites.some(x => x.origin === u.origin)) throw new Error('That site is already on the list.');
+      const site = { origin: u.origin, url: u.href.endsWith('/') ? `${u.href}connect.html` : u.href, addedAt: iso() };
+      s.sites.push(site);
+      note('settings', `Sign-ins are now accepted from ${u.origin}`);
+      changed();
+      return { ...site };
+    },
+
+    siteRemove(origin) {
+      call('siteRemove', origin);
+      s.sites = s.sites.filter(x => x.origin !== origin);
+      changed();
+    },
+
+    relaySet(keyId, apiToken) {
+      call('relaySet', keyId, apiToken);
+      if (apiToken.length < 8) throw new Error('Cloudflare didn\'t accept that key. Check both values and try again.');
+      s.relay = { set: true, setAt: iso(), working: true };
+      note('settings', 'TURN relay set up');
+      changed();
+      return { ok: true };
+    },
+
+    relayRemove() {
+      call('relayRemove');
+      s.relay = { set: false };
+      changed();
+    },
+
+    workerRelaySet(url) {
+      call('workerRelaySet', url);
+      const base = url.replace(/\/+$/, '');
+      if (!/^https:\/\/[^/]+$/.test(base)) throw new Error('That doesn\'t look like a relay address.');
+      Object.assign(s.workerRelay, { url: base, setAt: iso(), working: true, error: null });
+      note('settings', 'Worker relay for strict networks set up');
+      changed();
+      return { ok: true };
+    },
+
+    workerRelayRemove() {
+      call('workerRelayRemove');
+      s.workerRelay = { url: null, setAt: null, backup: null, tunnel: null, working: null, error: null };
+      changed();
+    },
+
+    workerRelayBackupSet(url) {
+      call('workerRelayBackupSet', url);
+      if (!s.workerRelay.url) throw new Error('Set up the main relay first.');
+      s.workerRelay.backup = url.replace(/\/+$/, '');
+      note('settings', 'Backup relay set up');
+      changed();
+      return { ok: true };
+    },
+
+    workerRelayBackupRemove() {
+      call('workerRelayBackupRemove');
+      s.workerRelay.backup = null;
+      changed();
+    },
+
+    workerRelayTunnelSet(url) {
+      call('workerRelayTunnelSet', url);
+      if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+\/?$/.test(url)) throw new Error('That should be the relay’s address on this PC, like http://127.0.0.1:8788');
+      s.workerRelay.tunnel = url.replace(/\/+$/, '');
+      note('settings', 'Quick Tunnel backup relay set up');
+      changed();
+      return { ok: true };
+    },
+
+    workerRelayTunnelRemove() {
+      call('workerRelayTunnelRemove');
+      s.workerRelay.tunnel = null;
+      changed();
+    },
+
+    relaunch() {
+      call('relaunch');
     },
 
     deviceRename(id, label) {
@@ -224,6 +341,16 @@ export async function createMockController({ version = '0.1.0', test = true, mac
       changed();
     },
 
+    // The real app asks Windows (UAC) and restarts; the mock just says it worked.
+    elevation(on) {
+      call('elevation', on);
+      if (typeof on !== 'boolean') throw new Error('on must be true or false.');
+      s.app = { ...s.app, elevated: on, elevatedTask: on, features: { ...s.app.features, elevatedTask: on }, elevationError: null };
+      note('settings', on ? 'Control admin apps turned on' : 'Control admin apps turned off');
+      changed();
+      return { ok: true };
+    },
+
     requestPermission(which) {
       call('requestPermission', which);
       if (which !== 'screen' && which !== 'accessibility') throw new Error('Unknown permission.');
@@ -234,7 +361,7 @@ export async function createMockController({ version = '0.1.0', test = true, mac
       s.macName = newMacName();
       s.backup = { record: null, setAt: null };
       s.settings.backupOn = false;
-      note('settings', `Mac renamed to ${s.macName}`);
+      note('settings', `PC renamed to ${s.macName}`);
       changed();
       return s.macName;
     },
@@ -242,12 +369,12 @@ export async function createMockController({ version = '0.1.0', test = true, mac
     customMacName(name) {
       call('customMacName', name);
       const clean = normalizeMacName(name);
-      if (!CUSTOM_MAC_NAME_RE.test(clean)) throw new Error('Use 4 to 40 letters or numbers, with single hyphens between words, like jordan-macbook.');
-      if (clean === s.macName) throw new Error('That is already this Mac’s name.');
+      if (!CUSTOM_MAC_NAME_RE.test(clean)) throw new Error('Use 4 to 40 letters or numbers, with single hyphens between words, like jordan-desktop.');
+      if (clean === s.macName) throw new Error('That is already your PC’s name.');
       s.macName = clean;
       s.backup = { record: null, setAt: null };
       s.settings.backupOn = false;
-      note('settings', `Mac renamed to ${s.macName}`);
+      note('settings', `PC renamed to ${s.macName}`);
       changed();
       return s.macName;
     },
@@ -261,8 +388,11 @@ export async function createMockController({ version = '0.1.0', test = true, mac
       s.opaqueServerSetup = opaque.server.createSetup();
       s.devices = [];
       s.pairing = null;
+      s.guest = null;
       s.session = null;
       s.activity = [];
+      s.relay = { set: false };
+      s.workerRelay = { url: null, setAt: null, backup: null, tunnel: null, working: null, error: null };
       s.settings = { ...s.settings, backupOn: false, paused: false };
       changed();
     },
@@ -291,7 +421,7 @@ export async function createMockController({ version = '0.1.0', test = true, mac
     },
   };
 
-  // --- hooks for tests: things the Mac or a viewer would do ---
+  // --- hooks for tests: things the PC or a viewer would do ---
   const mock = {
     calls,
     get listenerCount() { return listeners.size; },
@@ -304,6 +434,9 @@ export async function createMockController({ version = '0.1.0', test = true, mac
     failNext(method, message) { failures.set(method, message); },
     callsOf(name) { return calls.filter(c => c[0] === name); },
     setPermissions(p) { Object.assign(s.permissions, p); changed(); },
+    // What the Windows app says about itself (HELLO, or an 'elevation' event): a shallow patch, features merged.
+    setApp(patch) { s.app = { ...s.app, ...patch, features: { ...s.app.features, ...(patch.features ?? {}) } }; changed(); },
+    guestWatching(n) { if (s.guest) { s.guest.watching = n; changed(); } },
     setOffline(on) { s.offline = on; changed(); },
     setStateOverride(v) { s.stateOverride = v; changed(); },
     setLoginItem(v) { s.loginItem = { ...v }; changed(); },
@@ -344,7 +477,6 @@ export async function createMockController({ version = '0.1.0', test = true, mac
 export function fillMock(mock) {
   const s = mock.raw;
   const day = 24 * 3600 * 1000;
-  s.permissions = { screen: true, accessibility: true };
   s.totp = { secret: newSecret(), setAt: iso(Date.now() - 9 * day), lastStep: -1 };
   mock.addDevice('Safari on iPhone', { createdAt: iso(Date.now() - 9 * day), lastUsedAt: iso(Date.now() - 4 * 60 * 1000) });
   mock.addDevice('Chrome on the work laptop', { createdAt: iso(Date.now() - 3 * day), lastUsedAt: iso(Date.now() - day - 3 * 3600 * 1000) });
@@ -355,16 +487,16 @@ export function fillMock(mock) {
   mock.signIn({ viewer: 'Safari on iPhone', route: 'passkey', deviceId: s.devices[0].id });
 }
 
-// `node test/setup-mock-controller.mjs` serves Setup with this mock so it can be tried in a browser.
+// `node test/setup-mock-controller.mjs` serves the Control Center with this mock so it can be tried in a browser.
 if (import.meta.main) {
   const { startSetupServer } = await import('../src/setup-server.mjs');
   const args = process.argv.slice(2);
   const port = args.includes('--port') ? Number(args[args.indexOf('--port') + 1]) : 0;
   const { controller, mock } = await createMockController();
   if (args.includes('--full')) fillMock(mock);
-  mock.setAvailableUpdate({ version: '0.2.0', url: 'https://github.com/Just-Rice/perch/releases/tag/v0.2.0', notes: 'Smoother video on slow networks.' });
+  mock.setAvailableUpdate({ version: '0.2.0', url: 'https://github.com/faarisaahmed/roost/releases/tag/v0.2.0', notes: 'Smoother video on slow networks.' });
   const srv = await startSetupServer({ controller, port, log: (m) => console.error(m) });
-  console.log(`Setup (mock Mac) at ${srv.url}`);
+  console.log(`Control Center (mock PC) at ${srv.url}`);
   console.log('Ctrl-C to stop.');
   process.on('SIGINT', async () => { await srv.close(); process.exit(0); });
 }

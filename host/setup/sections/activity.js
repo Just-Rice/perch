@@ -5,8 +5,8 @@ import { ago, dayAndTime, toMs } from '../lib/time.js';
 const FIRST = 8;
 
 // Failures and lock-outs stand out in red, sign-ins and pairing in green; everything else is neutral. It goes by the
-// entry's kind (Perch uses failure, lockout, sign-in, pairing, session, device, settings), not by its words, since
-// a Mac or device name could contain anything ("amber-badger-1234").
+// entry's kind (Roost uses failure, lockout, sign-in, pairing, session, device, settings), not by its words, since
+// a PC or device name could contain anything ("amber-badger-1234").
 export function toneOf(item) {
   const kind = String(item.kind ?? '').toLowerCase();
   if (/fail|lock|denied|refus/.test(kind)) return 'bad';

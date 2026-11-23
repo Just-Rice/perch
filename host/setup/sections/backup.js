@@ -1,5 +1,5 @@
-// Backup sign-in (optional): the Mac's name + a password + the 6-digit code, for devices without a passkey.
-// The password is turned into an OPAQUE registration right here in the page (lib/backup.js); Perch never sees it.
+// Backup sign-in (optional): the PC's name + a password + the 6-digit code, for devices without a passkey.
+// The password is turned into an OPAQUE registration right here in the page (lib/backup.js); Roost never sees it.
 import { $, setText, show, say, busy } from '../lib/dom.js';
 import { confirmInline } from '../lib/confirm.js';
 import { dateOnly } from '../lib/time.js';
@@ -58,7 +58,7 @@ export function backup(ctx) {
     pw.value = '';
     reveal(false);
     updateHint();
-    const name = ctx.state?.macName ?? 'this Mac\'s name';
+    const name = ctx.state?.macName ?? 'your PC\'s name';
     say(ok, `Saved. Backup sign-in is on: sign in with the username “${name}”, this password and the 6-digit code.`);
   });
 

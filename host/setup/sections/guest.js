@@ -1,5 +1,5 @@
 // "Show your screen to someone": a guest link lets a person watch (never control) until its time is up or the owner
-// stops it. The link carries its own random key; it says nothing about how to reach this Mac otherwise.
+// stops it. The link carries its own random key; it says nothing about how to reach this PC otherwise.
 import { $, setText, show, say, busy } from '../lib/dom.js';
 import { toMs, minutesSeconds } from '../lib/time.js';
 
@@ -23,7 +23,7 @@ export function guest(ctx) {
     } catch {
       link.focus();
       link.select();
-      setText($('guestCopyStatus'), 'Selected: press ⌘C to copy it.');
+      setText($('guestCopyStatus'), 'Selected: press Ctrl+C to copy it.');
     }
   });
 

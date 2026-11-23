@@ -1,5 +1,5 @@
 // The optional relay for school or office Wi-Fi: the owner's own Cloudflare TURN key (host/src/relay.mjs).
-// Perch checks the key with Cloudflare before saving it, so a typo is caught here, not on the train.
+// Roost checks the key with Cloudflare before saving it, so a typo is caught here, not on the train.
 import { $, setText, show, say, busy } from '../lib/dom.js';
 import { confirmInline } from '../lib/confirm.js';
 import { dateOnly } from '../lib/time.js';
@@ -41,6 +41,9 @@ export function relay(ctx) {
     setText($('relayStatus'), !r.set ? 'Not set up'
       : r.working === false ? `Set up, but the last check failed: ${r.error}`
         : `Set up${r.setAt ? ` on ${dateOnly(r.setAt)}` : ''}`);
+    const chip = $('relayChip');
+    setText(chip, !r.set ? 'Not set up' : r.working === false ? 'Not working' : 'Ready');
+    chip.dataset.tone = !r.set ? 'neutral' : r.working === false ? 'bad' : 'good';
     setText($('relaySaveBtn'), r.set ? 'Check and replace' : 'Check and save');
     show($('relayRemoveHost'), !!r.set);
   }

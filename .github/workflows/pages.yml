@@ -1,4 +1,4 @@
-# Publishes the website (the site/ folder) to https://just-rice.github.io/perch/ whenever it changes on main.
+# Publishes the website (the site/ folder) to https://faarisaahmed.github.io/roost/ whenever it changes on main.
 name: Pages
 
 on:

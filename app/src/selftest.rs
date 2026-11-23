@@ -28,6 +28,10 @@ pub fn run() -> i32 {
         p.feed(&synthetic::Tone::default().next(1920), 0, |_, _| n += 1);
         if n == 2 { Ok(String::new()) } else { Err(format!("{n} packets for 40 ms")) }
     })());
+    // CI machines run without a desktop or sound card: there the PC-specific checks are reported, not counted.
+    let lenient = std::env::var("ROOST_SELFTEST_LENIENT").as_deref() == Ok("1");
+    let core_failed = failed;
     for (name, r) in crate::sys::selftest() { check(&name, r); }
-    if failed == 0 { println!("all checks passed"); 0 } else { 1 }
+    let counted = if lenient { core_failed } else { failed };
+    if counted == 0 { println!("all checks passed{}", if lenient && failed > core_failed { " (PC-specific failures ignored)" } else { "" }); 0 } else { 1 }
 }

@@ -1,4 +1,5 @@
-# Checks every push and pull request: the host's tests, the website's tests and the app's build and self-test.
+# Checks every push and pull request: the app on Windows (x64 and ARM64), the host's and the website's tests, and
+# everything together end to end.
 name: CI
 
 on:
@@ -7,59 +8,94 @@ on:
   pull_request:
 
 jobs:
-  test:
-    runs-on: macos-15
+  app:
+    name: roost.exe (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: windows-latest, target: x86_64-pc-windows-msvc }
+          - { arch: arm64, runner: windows-11-arm, target: aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+      - name: Unit tests
+        working-directory: app
+        run: cargo test --target ${{ matrix.target }}
+      - name: Build
+        working-directory: app
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Self-test (screen and sound checks are reported only; CI machines have neither)
+        working-directory: app
+        env:
+          ROOST_SELFTEST_LENIENT: '1'
+        run: target/${{ matrix.target }}/release/roost.exe --selftest
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roost-${{ matrix.arch }}
+          path: app/target/${{ matrix.target }}/release/roost.exe
 
+  host-and-website:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
-
       - name: Install the host's packages
-        working-directory: host/node
+        working-directory: host
         run: npm ci
-
       - name: Host tests
-        working-directory: host/node
+        working-directory: host
+        shell: bash
         run: node --test --test-concurrency=1 --test-timeout=180000 $(ls test/*.test.mjs | grep -v -e browser -e chrome-smoke)
-
       - name: Website tests
+        shell: bash
         run: node --test --test-concurrency=1 --test-timeout=180000 $(ls tests/site/*.test.mjs | grep -v browser)
-
-      - name: Build the app and run its self-test
-        run: |
-          swift build -c release --package-path host/app
-          host/app/.build/release/Perch --selftest
-
-      # Perch supports macOS 13.5 Ventura and later. Building for macOS 13 makes the compiler reject any newer API
-      # that isn't behind #available; this checks the target didn't drift.
-      - name: The app still targets macOS 13
-        run: vtool -show-build host/app/.build/release/Perch | tee /dev/stderr | grep -q 'minos 13\.0'
-
       - name: Website and host end to end
+        shell: bash
         run: |
           run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/full.test.mjs; }
           run || { echo "::warning::end-to-end tests failed once; retrying"; run; }
 
+  end-to-end:
+    needs: app
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: roost-x64
+          path: app/target/release
+      - run: npm ci
+        working-directory: host
+      - name: Website, host and the real roost.exe end to end
+        shell: bash
+        run: |
+          run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/app.test.mjs; }
+          run || { echo "::warning::app end-to-end test failed once; retrying"; run; }
       - name: Worker relay end to end (the real relay Worker, under wrangler dev)
+        shell: bash
         run: |
           (cd relay && npm ci)
           run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/relay.test.mjs; }
           run || { echo "::warning::relay end-to-end tests failed once; retrying"; run; }
-
-      - name: Website, host and the real app end to end
-        run: |
-          run() { node --test --test-concurrency=1 --test-timeout=180000 tests/e2e/app.test.mjs; }
-          run || { echo "::warning::app end-to-end test failed once; retrying"; run; }
-
-      # The screen-by-screen browser tests pass on a Mac but are timing-sensitive on GitHub's GPU-less 3-core VMs
-      # (a canvas test picture, live page updates). They run last, get one retry, and are reported without blocking
-      # until they are made robust there; the logic and end-to-end tests above must pass.
-      - name: Browser tests (Setup page, Chrome video, website screens)
+      # Screen-by-screen browser tests are timing-sensitive on GitHub's GPU-less VMs: reported without blocking.
+      - name: Browser tests (Control Center, Chrome video, website screens)
         continue-on-error: true
+        shell: bash
         run: |
-          run() { node --test --test-concurrency=1 --test-timeout=180000 host/test/setup-browser.test.mjs \
-            host/test/chrome-smoke.test.mjs tests/site/*.browser.test.mjs; }
-          run || { echo "::warning::browser tests failed once; retrying"; run; }
+          node --test --test-concurrency=1 --test-timeout=180000 host/test/setup-browser.test.mjs \
+            host/test/chrome-smoke.test.mjs tests/site/*.browser.test.mjs

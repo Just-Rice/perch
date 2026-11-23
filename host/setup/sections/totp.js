@@ -1,4 +1,4 @@
-// Step 2: the authenticator app. "Set up" asks Perch for a new secret (kept by Perch only until it's confirmed),
+// The authenticator app. "Set up" asks Roost for a new secret (kept by Roost only until it's confirmed),
 // shows it as a QR code and as text, and a 6-digit code from the app confirms it.
 import { $, setText, show, say, busy } from '../lib/dom.js';
 import { qrSvg } from '../lib/qr.js';
@@ -17,7 +17,7 @@ export function totp(ctx) {
     const r = await busy(button, error, () => ctx.post('totpStart'));
     if (!r) return;
     pending = { ...r, macName: ctx.state?.macName };
-    $('totpQr').replaceChildren(qrSvg(r.uri, 'QR code that adds Perch to your authenticator app'));
+    $('totpQr').replaceChildren(qrSvg(r.uri, 'QR code that adds Roost to your authenticator app'));
     setText($('totpSecret'), groupSecret(r.secret));
     codeInput.value = '';
     render(ctx.state);
@@ -41,7 +41,7 @@ export function totp(ctx) {
     e.preventDefault();
     const code = codeInput.value.replace(/\D/g, '');
     if (code.length !== 6) {
-      say(error, 'Type the 6 digits your authenticator app shows for Perch.');
+      say(error, 'Type the 6 digits your authenticator app shows for Roost.');
       codeInput.focus();
       return;
     }
@@ -62,15 +62,12 @@ export function totp(ctx) {
     show($('totpIdle'), !pending && !set);
     show($('totpDone'), !pending && set);
     if (!set) say(ok, '');
-    if (pending) setText($('totpAccount'), `Perch (${st.macName})`);
+    if (pending) setText($('totpAccount'), `Roost (${st.macName})`);
     setText($('totpSetAt'), set && st.totp.setAt ? ` on ${dateOnly(st.totp.setAt)}` : '');
-    // Every code switched off (Sign-in & security, When to ask for the 6-digit code): the app is optional.
+    // Every code switched off (Sign-in, When to ask for the 6-digit code): the app is optional.
     const s = st.settings ?? {};
     const optional = !set && s.codeWithPasskey === false && s.codeWithBackup === false && s.codeWithPairing === false;
     show($('totpOptional'), optional);
-    const num = $('numTotp');
-    num.dataset.done = String(set || optional);
-    setText(num, set ? '✓' : optional ? '–' : '2');
   }
 
   return { render };

@@ -1,5 +1,5 @@
-// Sites this Mac accepts sign-ins from. The official site is built in; the owner can add others (their own copy of
-// the Perch website). Only this page can change the list, and this page only opens on the Mac itself.
+// Sites this PC accepts sign-ins from. The official site is built in; the owner can add others (their own copy of
+// the Roost website). Only this page can change the list, and this page only opens on the PC itself.
 import { $, h, setText, show, say, busy } from '../lib/dom.js';
 import { confirmInline } from '../lib/confirm.js';
 
@@ -14,11 +14,11 @@ export function sites(ctx) {
   $('siteForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     say(ok, '');
-    if (!url.value.trim()) { say(error, 'Type the address of the Perch page on that site.'); url.focus(); return; }
+    if (!url.value.trim()) { say(error, 'Type the address of the Roost page on that site.'); url.focus(); return; }
     const added = await busy($('siteAddBtn'), error, () => ctx.post('siteAdd', { url: url.value.trim() }));
     if (!added) return;
     url.value = '';
-    say(ok, `Added ${host(added.origin)}. Pair your devices for it in step 3.`);
+    say(ok, `Added ${host(added.origin)}. Pair your devices for it under Devices.`);
   });
 
   let shown = '';
@@ -30,7 +30,7 @@ export function sites(ctx) {
       $('sitesList').replaceChildren(...list.map(site => {
         const row = h('li', { class: 'site-row' },
           h('span', { class: 'site-name' }, h('b', {}, host(site.origin)),
-            h('span', { class: 'muted small' }, (site.official ? ' · the official Perch site' : site.builtIn ? ' · built in' : ` · ${site.url}`)
+            h('span', { class: 'muted small' }, (site.official ? ' · the official Roost site' : site.builtIn ? ' · built in' : ` · ${site.url}`)
               + (site.primary && list.length > 1 ? ' · new pairing links use it' : ''))));
         if (!site.builtIn) {
           const remove = h('button', { type: 'button', class: 'btn danger-quiet small' }, 'Remove');
@@ -44,7 +44,7 @@ export function sites(ctx) {
         return row;
       }));
     }
-    // Step 3 asks which site a new device is for, once there is more than one.
+    // Pairing (and guest links) ask which site a new device is for, once there is more than one.
     const pick = $('pairSite');
     const want = list.map(x => x.origin).join('|');
     if (pick.dataset.sites !== want) {

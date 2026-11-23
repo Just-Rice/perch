@@ -1,7 +1,7 @@
 // Setting the backup sign-in password with OPAQUE (@serenity-kit/opaque), run here in the page so the password
-// itself never leaves it: the Mac only ever receives a registration request and, at the end, a registration record
+// itself never leaves it: the PC only ever receives a registration request and, at the end, a registration record
 // (a verifier it can check sign-ins against, which can't be turned back into the password).
-// Steps: client.startRegistration -> Mac's backupRegisterStart -> client.finishRegistration -> backupRegisterFinish.
+// Steps: client.startRegistration -> PC's backupRegisterStart -> client.finishRegistration -> backupRegisterFinish.
 
 let loading = null;
 
@@ -12,13 +12,13 @@ export function loadOpaque() {
     .then(async (opaque) => { await opaque.ready; return opaque; })
     .catch((e) => {
       loading = null;
-      console.warn('Setup: OPAQUE failed to load', e);
-      throw new Error('Couldn\'t load the part of Setup that protects your password. Reload the page and try again.');
+      console.warn('Control Center: OPAQUE failed to load', e);
+      throw new Error('Couldn\'t load the part of the Control Center that protects your password. Reload the page and try again.');
     });
   return loading;
 }
 
-// `post(action, body)` sends one request to Perch and resolves to its result.
+// `post(action, body)` sends one request to Roost and resolves to its result.
 export async function registerBackupPassword(password, post) {
   const opaque = await loadOpaque();
   const { clientRegistrationState, registrationRequest } = opaque.client.startRegistration({ password });
@@ -27,7 +27,7 @@ export async function registerBackupPassword(password, post) {
   try {
     ({ registrationRecord } = opaque.client.finishRegistration({ clientRegistrationState, registrationResponse, password }));
   } catch (e) {
-    console.warn('Setup: finishRegistration failed', e);
+    console.warn('Control Center: finishRegistration failed', e);
     throw new Error('The password couldn\'t be saved. Please try again.');
   }
   await post('backupRegisterFinish', { registrationRecord });

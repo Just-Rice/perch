@@ -1,4 +1,4 @@
-// The paired devices, with Rename and Remove. Rows are kept and updated in place (not rebuilt) when Perch sends a
+// The paired devices, with Rename and Remove. Rows are kept and updated in place (not rebuilt) when Roost sends a
 // new state, so a rename being typed or a removal being confirmed isn't wiped out by a live update.
 import { $, h, setText, show, say, busy } from '../lib/dom.js';
 import { confirmInline } from '../lib/confirm.js';
@@ -6,9 +6,9 @@ import { ago, dateOnly } from '../lib/time.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const ICONS = {
-  phone: 'M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm3 17h2',
-  tablet: 'M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zm5 17h2',
-  computer: 'M4 5h16a1 1 0 0 1 1 1v10H3V6a1 1 0 0 1 1-1zM1 19h22',
+  phone: 'M7 2.5h6a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 16V4A1.5 1.5 0 0 1 7 2.5zM9 15h2',
+  tablet: 'M5 2.5h10a1.5 1.5 0 0 1 1.5 1.5v12a1.5 1.5 0 0 1-1.5 1.5H5A1.5 1.5 0 0 1 3.5 16V4A1.5 1.5 0 0 1 5 2.5zM9 15h2',
+  computer: 'M4 4.5h12a1 1 0 0 1 1 1v8H3v-8a1 1 0 0 1 1-1zM1.5 16h17',
 };
 
 function kindOf(label) {
@@ -19,15 +19,11 @@ function kindOf(label) {
 
 function icon(kind) {
   const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('viewBox', '0 0 20 20');
+  svg.setAttribute('class', 'i');
   svg.setAttribute('aria-hidden', 'true');
   const path = document.createElementNS(NS, 'path');
   path.setAttribute('d', ICONS[kind]);
-  path.setAttribute('fill', 'none');
-  path.setAttribute('stroke', 'currentColor');
-  path.setAttribute('stroke-width', '2');
-  path.setAttribute('stroke-linecap', 'round');
-  path.setAttribute('stroke-linejoin', 'round');
   svg.append(path);
   return svg;
 }
@@ -41,12 +37,13 @@ export function devices(ctx) {
     const iconBox = h('span', { class: 'device-icon' });
     const label = h('div', { class: 'device-label' });
     const meta = h('div', { class: 'device-meta' });
-    const now = h('div', { class: 'device-now', hidden: true }, 'Connected now');
-    const renameBtn = h('button', { type: 'button', class: 'btn quiet' }, 'Rename');
-    const removeBtn = h('button', { type: 'button', class: 'btn quiet danger-quiet' }, 'Remove');
+    const now = h('span', { class: 'device-now', hidden: true }, 'Connected now');
+    const renameBtn = h('button', { type: 'button', class: 'btn quiet small' }, 'Rename');
+    const removeBtn = h('button', { type: 'button', class: 'btn quiet small danger-quiet' }, 'Remove');
     const buttons = h('div', { class: 'device-buttons confirm-host' }, renameBtn, removeBtn);
     const li = h('li', { class: 'device', 'data-id': d.id },
-      h('div', { class: 'device-top' }, iconBox, h('div', { class: 'device-main' }, label, meta, now), buttons));
+      h('div', { class: 'device-top' }, iconBox,
+        h('div', { class: 'device-main' }, h('div', { class: 'device-name' }, label, now), meta), buttons));
     const row = { li, iconBox, label, meta, now, renameBtn, removeBtn, buttons, form: null, kind: null, device: d };
 
     renameBtn.addEventListener('click', () => openRename(row));
@@ -74,8 +71,8 @@ export function devices(ctx) {
     const cancel = h('button', { type: 'button', class: 'btn' }, 'Cancel');
     const msg = h('p', { class: 'msg bad', role: 'alert', hidden: true });
     const form = h('form', { class: 'device-rename-form', novalidate: true },
-      h('label', { for: inputId, class: 'sr-label' }, `New name for “${row.device.label}”`),
-      h('div', { class: 'device-rename' }, input, save, cancel), msg);
+      h('label', { for: inputId, class: 'sr-only' }, `New name for “${row.device.label}”`),
+      h('div', { class: 'inline' }, input, save, cancel), msg);
     const close = () => { form.remove(); row.form = null; row.buttons.hidden = false; render(ctx.state); row.renameBtn.focus(); };
     cancel.addEventListener('click', close);
     form.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } });
@@ -109,6 +106,8 @@ export function devices(ctx) {
   function render(st) {
     if (!st) return;
     const devs = st.devices ?? [];
+    // Say which site a device signs in from only when it isn't the official one.
+    const official = (st.sites ?? []).filter(x => x.official || x.builtIn).map(x => { try { return new URL(x.origin).host; } catch { return ''; } });
     const seen = new Set();
     devs.forEach((d, i) => {
       seen.add(d.id);
@@ -119,11 +118,12 @@ export function devices(ctx) {
       if (row.kind !== kind) { row.kind = kind; row.iconBox.replaceChildren(icon(kind)); }
       setText(row.label, d.label);
       const used = d.lastUsedAt ? `last used ${ago(d.lastUsedAt)}` : 'not used yet';
-      // Say which site a device signs in from only when it isn't the official one.
-      const where = d.site && d.site !== 'just-rice.github.io' && d.site !== 'localhost' ? ` · on ${d.site}` : '';
+      const where = d.site && d.site !== 'localhost' && !official.includes(d.site) ? ` · on ${d.site}` : '';
       setText(row.meta, `Added ${dateOnly(d.createdAt)} · ${used}${where}`);
-      show(row.now, st.session?.deviceId === d.id);
-      // Keep Perch's order, but only move a row when it's out of place: moving it would drop the focus inside it.
+      const live = st.session?.deviceId === d.id;
+      show(row.now, live);
+      row.li.dataset.live = String(live);
+      // Keep Roost's order, but only move a row when it's out of place: moving it would drop the focus inside it.
       if (list.children[i] !== row.li) list.insertBefore(row.li, list.children[i] ?? null);
     });
     for (const [id, row] of rows) {

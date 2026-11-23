@@ -1,10 +1,10 @@
-// The Setup page in headless Chrome, against the mock controller (test/setup-mock-controller.mjs): every step is
-// walked through with real clicks and typing, the QR codes are checked module by module, the backup password is
-// registered with OPAQUE in the page and then checked with a real OPAQUE sign-in here, and the page must finish with
-// no console errors, no security-policy violations and no pop-up dialogs. Screenshots of each major state, light and
-// dark, desktop and narrow, go to tests/e2e/out/setup/.
+// The Control Center (the Setup page) in headless Chrome, against the mock controller (test/setup-mock-controller.mjs):
+// every flow is walked through with real clicks and typing, the QR codes are checked module by module, the backup
+// password is registered with OPAQUE in the page and then checked with a real OPAQUE sign-in here, and the page must
+// finish with no console errors, no security-policy violations and no pop-up dialogs. Screenshots of each major
+// state, light and dark, desktop and narrow, go to tests/e2e/out/setup/.
 // A second, shorter walk-through runs the page against the real host (src/main.mjs in test mode, with the local test
-// broker and a stand-in for the Swift app), to catch any difference between the mock and the real controller.
+// broker and a stand-in for roost.exe), to catch any difference between the mock and the real controller.
 // Run: node --test test/setup-browser.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,6 +19,7 @@ import vm from 'node:vm';
 import * as opaque from '@serenity-kit/opaque';
 import { launchChrome, CHROME } from '../../tests/e2e/cdp.mjs';
 import { startBroker } from '../../tests/e2e/broker.mjs';
+import { CONNECT_URL } from '../../site/js/shared/proto.js';
 import { startSetupServer } from '../src/setup-server.mjs';
 import { totp, base32, otpauthUri, fromBase32 } from '../src/totp.mjs';
 import { T, encodeJson, FrameReader } from '../src/ipc.mjs';
@@ -31,11 +32,13 @@ const OUT = path.join(HERE, '..', '..', 'tests', 'e2e', 'out', 'setup');
 const qrcode = vm.runInNewContext(
   `${readFileSync(path.join(HERE, '..', 'setup', 'vendor', 'qrcode.js'), 'utf8')}\n;qrcode`, {}, { filename: 'qrcode.js' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const PAIR_LINK = (n) => new RegExp(`^${escapeRe(CONNECT_URL)}#pair=[A-Za-z0-9_-]{${n}}$`);
 
 // --- a little page driver (its own, so no stray timers keep Node running) ---
 
-// A DevTools call that fails after `ms` instead of waiting for ever. A reply can go missing (seen once when the Mac
-// went to sleep in the middle of a run), and a run that hangs says much less than one that fails.
+// A DevTools call that fails after `ms` instead of waiting for ever. A reply can go missing (seen once when the
+// computer went to sleep in the middle of a run), and a run that hangs says much less than one that fails.
 function timed(page, method, params, ms = 20_000) {
   let timer;
   return Promise.race([
@@ -73,9 +76,14 @@ async function until(fn, what, timeoutMs = 8000) {
 }
 
 const q = (s) => JSON.stringify(s);
-const text = (page, sel) => evaluate(page, `document.querySelector(${q(sel)})?.textContent.trim() ?? null`);
-const visible = (page, sel) => evaluate(page, `(() => { const el = document.querySelector(${q(sel)}); return !!el && !!el.getClientRects().length; })()`);
+// Its text as read, with runs of white space (from the HTML's line breaks) as one space.
+const text = (page, sel) => evaluate(page, `document.querySelector(${q(sel)})?.textContent.replace(/\\s+/g, ' ').trim() ?? null`);
+// Shown: nothing hides it but the section it's in being another than the one on screen (the page shows one section
+// of the Control Center at a time; anything else that's hidden uses the hidden attribute).
+const visible = (page, sel) => evaluate(page, `(() => { const el = document.querySelector(${q(sel)});
+  return !!el && !el.closest('[hidden]:not(.view)') && getComputedStyle(el).display !== 'none'; })()`);
 const value = (page, sel) => evaluate(page, `document.querySelector(${q(sel)})?.value ?? null`);
+const view = (page) => evaluate(page, `document.querySelector('.view:not([hidden])')?.id ?? null`);
 const focusedText = (page) => evaluate(page, 'document.activeElement?.textContent.trim() || document.activeElement?.id || null');
 
 // A real mouse click in the middle of the element, after checking nothing covers it.
@@ -83,8 +91,8 @@ async function click(page, selector) {
   const box = await evaluate(page, `(() => {
     const el = document.querySelector(${q(selector)});
     if (!el) return { missing: true };
-    // As an in-page link would: choose the tab it's in, or open the folded setup steps.
-    el.dispatchEvent(new CustomEvent('perch:reveal', { bubbles: true }));
+    // As an in-page link would: show the section it's in.
+    el.dispatchEvent(new CustomEvent('roost:reveal', { bubbles: true }));
     el.scrollIntoView({ block: 'center' });
     const r = el.getBoundingClientRect();
     if (!r.width || !r.height) return { hidden: true };
@@ -105,11 +113,11 @@ async function click(page, selector) {
 // Focuses a field, selects what's in it and types over it.
 async function type(page, selector, textToType) {
   await evaluate(page, `(() => { const el = document.querySelector(${q(selector)});
-    el.dispatchEvent(new CustomEvent('perch:reveal', { bubbles: true })); el.focus(); el.select?.(); })()`);
+    el.dispatchEvent(new CustomEvent('roost:reveal', { bubbles: true })); el.focus(); el.select?.(); })()`);
   await page.send('Input.insertText', { text: textToType });
 }
 
-const KEYS = { Enter: 13, Escape: 27, Tab: 9 };
+const KEYS = { Enter: 13, Escape: 27, Tab: 9, ArrowDown: 40, ArrowUp: 38 };
 async function press(page, key) {
   const base = { key, code: key, windowsVirtualKeyCode: KEYS[key], nativeVirtualKeyCode: KEYS[key] };
   await page.send('Input.dispatchKeyEvent', { type: 'keyDown', ...base, ...(key === 'Enter' ? { text: '\r' } : {}) });
@@ -125,14 +133,16 @@ const VIEWS = [
 const THEMES = ['light', 'dark'];
 const saved = [];
 
-async function setView(page, view, theme) {
+async function setView(page, view, theme, height = view.height) {
   await page.send('Emulation.setDeviceMetricsOverride', {
-    width: view.width, height: view.height, deviceScaleFactor: view.scale, mobile: view.mobile,
+    width: view.width, height, deviceScaleFactor: view.scale, mobile: view.mobile,
   });
   await page.send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: theme }] });
 }
 
-// Every state is shot in both themes at both widths; `scrollTo` puts that section at the top of the viewport.
+// Every state is shot in both themes at both widths; `scrollTo` puts that card at the top of the window. A full-page
+// shot makes the window as tall as the page, so the sidebar, the tab bar and the background are drawn as they are
+// seen. At every width the page must fit across: no sideways scrolling.
 async function shootAll(page, name, { scrollTo = null, fullPage = false } = {}) {
   mkdirSync(OUT, { recursive: true });
   for (const view of VIEWS) {
@@ -141,13 +151,20 @@ async function shootAll(page, name, { scrollTo = null, fullPage = false } = {}) 
       await sleep(120);
       if (scrollTo) {
         await evaluate(page, `(() => { const el = document.querySelector(${q(scrollTo)});
+          el.dispatchEvent(new CustomEvent('roost:reveal', { bubbles: true }));
           window.scrollTo(0, el.getBoundingClientRect().top + window.scrollY - 76); })()`);
       } else {
         await evaluate(page, 'window.scrollTo(0, 0)');
       }
-      await sleep(80);
+      const wide = await evaluate(page, 'document.documentElement.scrollWidth - window.innerWidth');
+      assert.ok(wide <= 0, `${name} at ${view.name} width scrolls sideways by ${wide}px`);
+      if (fullPage) {
+        const tall = await evaluate(page, 'document.documentElement.scrollHeight');
+        await setView(page, view, theme, Math.min(Math.max(view.height, tall), 6000));
+      }
+      await sleep(fullPage ? 250 : 80);
       // Asked twice at most: a screenshot whose answer went missing usually works the second time.
-      const capture = () => timed(page, 'Page.captureScreenshot', { format: 'png', captureBeyondViewport: fullPage }, 30_000);
+      const capture = () => timed(page, 'Page.captureScreenshot', { format: 'png' }, 30_000);
       const shot = await capture().catch(capture);
       const file = path.join(OUT, `${name}-${view.name}-${theme}.png`);
       writeFileSync(file, Buffer.from(shot.data, 'base64'));
@@ -197,7 +214,7 @@ async function openPage(chrome, origin) {
     if (m.method === 'Log.entryAdded') consoleLines.push({ level: m.params.entry.level, text: m.params.entry.text, source: m.params.entry.source, url: m.params.entry.url });
     if (m.method === 'Runtime.exceptionThrown') consoleLines.push({ level: 'error', text: m.params.exceptionDetails.exception?.description ?? m.params.exceptionDetails.text });
     if (m.method === 'Page.javascriptDialogOpening') dialogs.push(m.params);
-    if (m.method === 'Network.requestWillBeSent') requests.push({ url: m.params.request.url, method: m.params.request.method, body: m.params.request.postData ?? '' });
+    if (m.method === 'Network.requestWillBeSent') requests.push({ url: m.params.request.url, method: m.params.request.method, body: m.params.request.postData ?? '', headers: m.params.request.headers });
   });
   await page.send('Network.enable');
   await page.send('Page.enable');
@@ -229,7 +246,7 @@ async function checkCleanConsole(page, { consoleLines, dialogs }, base, allowed)
 
 // --- the walk-through ---
 
-test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 'Google Chrome is not installed', timeout: 240_000 }, async (t) => {
+test('Control Center: every flow in a real browser', { skip: !existsSync(CHROME) && 'Google Chrome is not installed', timeout: 300_000 }, async (t) => {
   await opaque.ready;
   const { controller, mock } = await createMockController({ test: true });
   let srv = await startSetupServer({ controller });
@@ -242,65 +259,125 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
   const base = `http://127.0.0.1:${srv.port}`;
   const tab = await openPage(chrome, base);
   const { page, requests } = tab;
+  const lastPatch = () => mock.callsOf('updateSettings').at(-1)?.[1];
 
-  await t.test('without the key, the page explains where to open Setup', async () => {
+  await t.test('without the key, the page explains where to open the Control Center', async () => {
     await page.navigate(`${base}/`);
-    assert.match(await text(page, 'h1'), /Open Setup from Perch/);
-    assert.match(await text(page, 'main'), /menu bar/);
+    assert.match(await text(page, 'h1'), /Open (the Control Center|Setup) from (Roost|Perch)/);
+    assert.match(await text(page, 'main'), /notification area|taskbar|menu bar/);
     await shootAll(page, '00-no-key');
   });
 
-  await t.test('the page loads and shows the Mac\'s name and state', async () => {
+  await t.test('the page loads on Home, with the PC\'s name, its state and the setup steps', async () => {
     await page.navigate(srv.url);
-    await waitFor(page, `document.getElementById('macName').textContent === 'amber-otter-4821'`);
+    await waitFor(page, `document.getElementById('pcName').textContent === 'amber-otter-4821'`);
+    assert.equal(await view(page), 'home');
     assert.equal(await text(page, '#statePillText'), 'Needs setup');
-    assert.equal(await text(page, '#headVersion'), 'version 0.1.0');
+    assert.equal(await text(page, '#heroState'), 'Needs setup');
+    assert.equal(await text(page, '#sidePcName'), 'amber-otter-4821');
+    assert.equal(await text(page, '#headVersion'), 'Roost 0.1.0');
     assert.equal(await visible(page, '#testBadge'), true);
-    assert.equal(await evaluate(page, 'document.title'), 'Perch Setup · amber-otter-4821');
-    assert.equal(await visible(page, '#pairLocked'), true, 'pairing waits for step 2');
+    assert.equal(await evaluate(page, 'document.title'), 'amber-otter-4821 · Roost Control Center');
+    assert.equal(await visible(page, '#setupCard'), true);
+    assert.equal(await text(page, '#stepsProgress'), '0 of 4 done');
+    assert.equal(await evaluate(page, `document.getElementById('stepTotp').dataset.state`), 'current');
+    assert.equal(await evaluate(page, `document.getElementById('stepPairBtn').disabled`), true, 'pairing waits for the app');
+    assert.equal(await visible(page, '#stepAdmin'), true, 'Windows: admin control is offered');
+    assert.equal(await visible(page, '#navHomeDot'), true);
+    assert.equal(await visible(page, '#pairLocked'), true, 'pairing waits for the authenticator app');
     assert.equal(await evaluate(page, `document.getElementById('pairStartBtn').disabled`), true);
+    // Every request carries the page's key, under Roost's name.
+    assert.ok(requests.some(r => r.url.endsWith('/api/state') && r.headers['X-Roost-Key']), 'X-Roost-Key sent');
     await shootAll(page, '01-needs-setup', { fullPage: true });
   });
 
   await t.test('every control has a name a screen reader can read', async () => {
     const problems = await evaluate(page, `(() => {
       const bad = [];
-      for (const el of document.querySelectorAll('button, input:not([type=hidden]):not([hidden]), select, a[href]')) {
+      for (const el of document.querySelectorAll('button, input:not([type=hidden]):not([hidden]), select, a[href], summary')) {
         const name = el.getAttribute('aria-label') || (el.labels && [...el.labels].map(l => l.textContent).join(' ')) || el.textContent;
         if (!name || !name.trim()) bad.push(el.outerHTML.slice(0, 80));
       }
       for (const img of document.querySelectorAll('img')) if (!img.hasAttribute('alt')) bad.push(img.outerHTML);
+      for (const svg of document.querySelectorAll('svg.i')) if (!svg.closest('[aria-hidden=true]')) bad.push(svg.outerHTML.slice(0, 80));
       return bad;
     })()`);
     assert.deepEqual(problems, []);
   });
 
-  await t.test('step 1: permissions', async () => {
-    await click(page, '#permScreen [data-open]');
-    await until(() => mock.callsOf('requestPermission').some(c => c[1] === 'screen'), 'screen requested');
-    mock.setPermissions({ screen: true });
-    await waitFor(page, `document.querySelector('#permScreen [data-status]').textContent === '✓ Allowed'`);
-    assert.equal(await visible(page, '#permScreen [data-open]'), false);
-    assert.equal(await visible(page, '#permAccessibility [data-open]'), true);
-    await click(page, '#permAccessibility [data-open]');
-    await until(() => mock.callsOf('requestPermission').some(c => c[1] === 'accessibility'), 'accessibility requested');
-    mock.setPermissions({ accessibility: true });
-    await waitFor(page, `document.getElementById('numPerm').textContent === '✓'`);
+  await t.test('sections: the sidebar shows one at a time, by click, keyboard and address', async () => {
+    await click(page, '.nav a[data-view=devices]');
+    await waitFor(page, `document.querySelector('.view:not([hidden])').id === 'devices'`);
+    assert.equal(await evaluate(page, `document.activeElement.id`), 'devicesTitle', 'reading starts at the new heading');
+    assert.equal(await evaluate(page, `document.querySelector('.nav a[aria-current=page]').dataset.view`), 'devices');
+    assert.equal(await evaluate(page, 'location.hash'), '#devices');
+    // Arrow keys move between sections in the sidebar.
+    await evaluate(page, `document.querySelector('.nav a[data-view=devices]').focus()`);
+    await press(page, 'ArrowDown');
+    assert.equal(await evaluate(page, `document.activeElement.dataset.view`), 'security');
+    await press(page, 'Enter');
+    await waitFor(page, `document.querySelector('.view:not([hidden])').id === 'security'`);
+    // A link to a card in another section shows that section.
+    await evaluate(page, `location.hash = '#adminCard'`);
+    await waitFor(page, `document.querySelector('.view:not([hidden])').id === 'pc'`);
+    await click(page, '.nav a[data-view=home]');
+    await waitFor(page, `document.querySelector('.view:not([hidden])').id === 'home'`);
   });
 
-  await t.test('step 2: the authenticator app, with a real code', async () => {
-    await click(page, '#totpStartBtn');
+  await t.test('Control admin apps: asked for, refused by Windows, then switched on', async () => {
+    assert.equal(await text(page, '#adminChip'), 'Off');
+    assert.match(await text(page, '#adminCard'), /Task Manager/);
+    // The real app answers a moment later, after Windows' prompt: until then the switch shows what was asked for.
+    const real = controller.elevation;
+    controller.elevation = (on) => { mock.calls.push(['elevation', on]); return { ok: true }; };
+    await click(page, '#setElevation');
+    await until(() => mock.callsOf('elevation').length === 1, 'elevation asked for');
+    assert.deepEqual(mock.callsOf('elevation')[0], ['elevation', true]);
+    await waitFor(page, `document.getElementById('adminChip').textContent === 'Waiting for you'`);
+    assert.equal(await evaluate(page, `document.getElementById('setElevation').checked`), true);
+    assert.match(await text(page, '#adminStatus'), /Choose Yes/);
+    await shootAll(page, '02-admin-waiting', { scrollTo: '#adminCard' });
+    // The owner said No in Windows' prompt.
+    mock.setApp({ elevationError: 'You chose No when Windows asked.' });
+    await waitFor(page, `/chose No/.test(document.getElementById('adminError').textContent)`, 'the refusal');
+    assert.equal(await evaluate(page, `document.getElementById('setElevation').checked`), false, 'the switch went back');
+    assert.equal(await text(page, '#adminChip'), 'Off');
+    controller.elevation = real;
+    mock.setApp({ elevationError: null });
+
+    // A refusal from Roost itself goes back too, with the reason.
+    mock.failNext('elevation', 'Roost couldn\'t ask Windows right now.');
+    await click(page, '#setElevation');
+    await waitFor(page, `/couldn't ask Windows/.test(document.getElementById('adminError').textContent)`);
+    assert.equal(await evaluate(page, `document.getElementById('setElevation').checked`), false);
+
+    await click(page, '#setElevation');
+    await waitFor(page, `document.getElementById('adminChip').textContent === 'On'`, 'on');
+    assert.equal(mock.raw.app.elevatedTask, true);
+    assert.match(await text(page, '#adminOk'), /administrator rights/);
+    assert.equal(await text(page, '#numAdmin'), '✓');
+    assert.equal(await visible(page, '#adminError'), false);
+    // Not on Windows (or before the app has said): nothing to switch.
+    mock.setApp({ os: 'macos' });
+    await waitFor(page, `document.getElementById('setElevation').disabled && document.getElementById('stepAdmin').hidden`);
+    mock.setApp({ os: 'windows' });
+    await waitFor(page, `!document.getElementById('setElevation').disabled`);
+  });
+
+  await t.test('authenticator app: started from the Home stepper, with a real code', async () => {
+    await click(page, '#stepTotpBtn');
     await waitFor(page, `!document.getElementById('totpPending').hidden && !!document.querySelector('#totpQr svg')`);
+    assert.equal(await view(page), 'security', 'the stepper took us there');
     const secret = mock.pendingTotpSecret;
-    assert.ok(secret, 'Perch made a secret');
+    assert.ok(secret, 'Roost made a secret');
     const n = await checkQr(page, '#totpQr', otpauthUri(secret, 'amber-otter-4821'));
     assert.ok(n >= 21);
     const shown = await text(page, '#totpSecret');
     assert.equal(shown.replace(/ /g, ''), base32(secret));
     assert.match(shown, /^([A-Z2-7]{4} )+[A-Z2-7]{1,4}$/, 'grouped in fours');
-    assert.equal(await text(page, '#totpAccount'), 'Perch (amber-otter-4821)');
+    assert.equal(await text(page, '#totpAccount'), 'Roost (amber-otter-4821)');
     assert.equal(await evaluate(page, 'document.activeElement.id'), 'totpCode', 'the code box has focus');
-    await shootAll(page, '02-authenticator', { scrollTo: '#stepTotp' });
+    await shootAll(page, '03-authenticator', { scrollTo: '#totpCard' });
 
     await type(page, '#totpCode', '12');
     await press(page, 'Enter');
@@ -322,18 +399,21 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.equal(await text(page, '#numTotp'), '✓');
     assert.equal(await visible(page, '#totpError'), false);
     assert.match(await text(page, '#totpOk'), /set up/);
+    assert.equal(await evaluate(page, `document.getElementById('stepPair').dataset.state`), 'current');
   });
 
-  await t.test('step 3: pairing shows a QR code, a link, a countdown and a warning', async () => {
+  await t.test('pairing: started from the stepper; a QR code, a link, a countdown and a warning', async () => {
     assert.equal(await visible(page, '#pairLocked'), false);
-    await click(page, '#pairStartBtn');
+    await click(page, '.nav a[data-view=home]');
+    await click(page, '#stepPairBtn');
     await waitFor(page, `!document.getElementById('pairActive').hidden && !!document.querySelector('#pairQr svg')`);
+    assert.equal(await view(page), 'devices');
     const link = mock.raw.pairing.link;
-    assert.match(link, /^https:\/\/just-rice\.github\.io\/perch\/connect\.html#pair=[A-Za-z0-9_-]{128}$/);
+    assert.match(link, PAIR_LINK(128));
     await checkQr(page, '#pairQr', link);
     assert.equal(await value(page, '#pairLink'), link);
     assert.match(await text(page, '#pairActive .note.warn'), /Only scan this with your own device\. Never send this code or link to anyone/);
-    assert.match(await text(page, '#pairActive'), /Face ID, Touch ID/);
+    assert.match(await text(page, '#pairActive'), /Face ID, Touch ID, Windows Hello/);
     const first = await text(page, '#pairCountdown');
     assert.match(first, /^This code works for (10:00|9:5\d) more\.$/);
     // Whole seconds, rounded up, on a once-a-second tick: the first change can take up to two seconds to show.
@@ -341,8 +421,8 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.match(await text(page, '#pairCountdown'), /^This code works for 9:5\d more\.$/);
     await click(page, '#pairCopyBtn');
     await waitFor(page, `document.getElementById('pairCopyStatus').textContent.length > 0`);
-    assert.match(await text(page, '#pairCopyStatus'), /Copied|Selected/);
-    await shootAll(page, '03-pairing', { scrollTo: '#stepPair' });
+    assert.match(await text(page, '#pairCopyStatus'), /Copied|Selected: press Ctrl\+C/);
+    await shootAll(page, '04-pairing', { scrollTo: '#pairCard' });
 
     await click(page, '#pairCancelBtn');
     await waitFor(page, `document.getElementById('pairActive').hidden`, 'pairing hidden after cancel');
@@ -350,24 +430,24 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.equal(await visible(page, '#pairOk'), false, 'cancelling is not a success');
   });
 
-  await t.test('step 3: an expired code says so', async () => {
+  await t.test('pairing: an expired code says so', async () => {
     await click(page, '#pairStartBtn');
     await waitFor(page, `!document.getElementById('pairActive').hidden`);
     mock.raw.pairing.expiresAt = Date.now() + 1500;
     mock.changed();
-    await waitFor(page, `document.querySelector('.countdown').dataset.low === 'true'`, 'last-minute colour');
+    await waitFor(page, `document.querySelector('#pairActive .countdown').dataset.low === 'true'`, 'last-minute colour');
     await waitFor(page, `!document.getElementById('pairExpired').hidden && document.getElementById('pairActive').hidden`, 'expired', 5000);
     assert.match(await text(page, '#pairExpired'), /ran out/);
   });
 
-  await t.test('step 3: Perch dropping the code itself is explained too', async () => {
-    // Perch clears a code the moment it runs out, which can beat the page's own once-a-second check.
+  await t.test('pairing: Roost dropping the code itself is explained too', async () => {
+    // Roost clears a code the moment it runs out, which can beat the page's own once-a-second check.
     await click(page, '#pairStartBtn');
     await waitFor(page, `!document.getElementById('pairActive').hidden`);
     assert.equal(await visible(page, '#pairExpired'), false, 'a new code hides the old message');
     mock.raw.pairing.expiresAt = Date.now() + 1500;
     mock.changed();
-    await waitFor(page, `document.querySelector('.countdown').dataset.low === 'true'`, 'the page saw the new expiry');
+    await waitFor(page, `document.querySelector('#pairActive .countdown').dataset.low === 'true'`, 'the page saw the new expiry');
     mock.raw.pairing = null;
     mock.changed();
     await waitFor(page, `document.getElementById('pairActive').hidden && !document.getElementById('pairExpired').hidden`, 'expired');
@@ -386,7 +466,7 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.equal(await evaluate(page, `document.querySelector('#activityList li').dataset.tone`), 'bad');
   });
 
-  await t.test('step 3: the page notices when a device finishes pairing', async () => {
+  await t.test('pairing: the page notices when a device finishes', async () => {
     await click(page, '#pairStartBtn');
     await waitFor(page, `!document.getElementById('pairActive').hidden`);
     assert.equal(await visible(page, '#pairExpired'), false);
@@ -398,6 +478,20 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.equal(await text(page, '#numPair'), '✓');
     assert.equal(await text(page, '#statePillText'), 'Ready');
     assert.match(await text(page, '#deviceList'), /Safari on iPhone/);
+    assert.equal(await text(page, '#navDeviceCount'), '1');
+    assert.equal(await visible(page, '#navHomeDot'), false, 'nothing left that must be done');
+  });
+
+  await t.test('the setup steps: the optional ones can be hidden, and shown again', async () => {
+    assert.match(await text(page, '#stepsProgress'), /^3 of 4 done · the rest is optional$/);
+    assert.equal(await evaluate(page, `document.getElementById('stepRelay').dataset.state`), 'current');
+    await click(page, '#stepsHideBtn');
+    await waitFor(page, `document.getElementById('setupCard').hidden && !document.getElementById('stepsShowBtn').hidden`);
+    assert.equal(await evaluate(page, 'document.activeElement.id'), 'stepsShowBtn');
+    await click(page, '#stepsShowBtn');
+    await waitFor(page, `!document.getElementById('setupCard').hidden`);
+    assert.equal(await text(page, '#tileDevicesValue'), '1 paired');
+    assert.equal(await text(page, '#tileSecurityValue'), 'Passkey + code');
   });
 
   await t.test('devices: rename, cancel, keep typing through live updates, remove, remove all', async () => {
@@ -455,6 +549,45 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await waitFor(page, `document.querySelectorAll('#deviceList .device').length === 0 && !document.getElementById('devicesEmpty').hidden`);
     assert.equal(mock.callsOf('devicesRemoveAll').length, 1);
     assert.equal(await text(page, '#statePillText'), 'Needs setup');
+    assert.equal(await visible(page, '#navHomeDot'), true);
+  });
+
+  await t.test('guest link: made, watched, copied and stopped', async () => {
+    await evaluate(page, `(() => { const s = document.getElementById('guestMinutes'); s.value = '60'; })()`);
+    await click(page, '#guestStartBtn');
+    await waitFor(page, `!document.getElementById('guestActive').hidden`);
+    assert.deepEqual(mock.callsOf('guestStart').at(-1), ['guestStart', 60]);
+    assert.equal(await value(page, '#guestLink'), mock.raw.guest.link);
+    assert.match(await text(page, '#guestCountdown'), /^The link works for (60:00|59:5\d) more\.$/);
+    assert.equal(await text(page, '#guestWatching'), 'Nobody is watching yet.');
+    mock.guestWatching(2);
+    await waitFor(page, `document.getElementById('guestWatching').textContent === '2 people are watching now.'`);
+    await click(page, '#guestCopyBtn');
+    await waitFor(page, `/Copied|Ctrl\\+C/.test(document.getElementById('guestCopyStatus').textContent)`);
+    await shootAll(page, '06-guest-link', { scrollTo: '#guestCard' });
+    await click(page, '#guestStopBtn');
+    await waitFor(page, `document.getElementById('guestActive').hidden && !document.getElementById('guestIdle').hidden`);
+    assert.equal(mock.callsOf('guestStop').length, 1);
+  });
+
+  await t.test('sites that can sign in: adding one offers pairing for it; removing it', async () => {
+    assert.match(await text(page, '#sitesList'), /· the official Roost site/);
+    assert.equal(await visible(page, '#pairSiteLabel'), false, 'no choice with one site');
+    await evaluate(page, `document.getElementById('sitesAdd').open = true`);
+    await type(page, '#siteUrl', 'http://example.org/connect.html');
+    await click(page, '#siteAddBtn');
+    await waitFor(page, `/https/.test(document.getElementById('sitesError').textContent)`, 'refused');
+    await type(page, '#siteUrl', 'https://roost.example.org/remote/');
+    await click(page, '#siteAddBtn');
+    await waitFor(page, `/Added roost\\.example\\.org/.test(document.getElementById('sitesOk').textContent)`, 'site added');
+    await waitFor(page, `!document.getElementById('pairSiteLabel').hidden`, 'the site choice under Devices');
+    await evaluate(page, `(() => { const s = document.getElementById('pairSite'); s.value = 'https://roost.example.org'; s.dispatchEvent(new Event('change')); })()`);
+    await click(page, '#sitesList .site-row:last-child button');
+    await waitFor(page, `!!document.querySelector('#sitesList .confirm')`, 'confirmation');
+    await click(page, '#sitesList .confirm .btn.danger');
+    await waitFor(page, `document.querySelectorAll('#sitesList .site-row').length === 1`, 'site removed');
+    assert.deepEqual(mock.callsOf('siteRemove').at(-1), ['siteRemove', 'https://roost.example.org']);
+    await waitFor(page, `document.getElementById('pairSiteLabel').hidden`, 'no choice again');
   });
 
   const passwords = [];
@@ -477,7 +610,7 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await waitFor(page, `/Too short/.test(document.getElementById('backupError').textContent)`);
     await type(page, '#backupPw', 'amber-otter-4821-secret');
     await click(page, '#backupSaveBtn');
-    await waitFor(page, `/Mac's name/.test(document.getElementById('backupError').textContent)`);
+    await waitFor(page, `/PC's name/.test(document.getElementById('backupError').textContent)`);
     assert.equal(mock.callsOf('backupRegisterStart').length, 0, 'nothing sent for a refused password');
 
     await click(page, '#backupShowBtn');
@@ -512,12 +645,11 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.equal(login(`${pw}x`), null, 'a wrong password does not');
 
     // The password itself never left the page.
-    const sent = requests.filter(r => r.body || r.url.includes('?'));
-    assert.ok(sent.some(r => r.url.endsWith('/api/backupRegisterStart')));
+    assert.ok(requests.some(r => r.url.endsWith('/api/backupRegisterStart')));
     for (const r of requests) {
       assert.ok(!r.body.includes(pw) && !decodeURIComponent(r.url).includes(pw), `password in ${r.method} ${r.url}`);
     }
-    // But it was shown once, from Perch's suggestion, which is fine: that came from the Mac.
+    // But it was shown once, from Roost's suggestion, which is fine: that came from the PC.
     assert.ok(mock.callsOf('suggestPassword').length >= 1);
   });
 
@@ -525,7 +657,7 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await click(page, '#backupOn');
     await until(() => mock.callsOf('updateSettings').some(c => c[1].backupOn === false), 'turned off');
     await waitFor(page, `!document.getElementById('backupOn').checked && /Off/.test(document.getElementById('backupOnHint').textContent)`);
-    mock.failNext('updateSettings', 'Perch couldn\'t turn that on right now.');
+    mock.failNext('updateSettings', 'Roost couldn\'t turn that on right now.');
     await click(page, '#backupOn');
     await waitFor(page, `/couldn't turn that on/.test(document.getElementById('backupError').textContent)`);
     assert.equal(await evaluate(page, `document.getElementById('backupOn').checked`), false, 'the switch went back');
@@ -540,22 +672,90 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.equal(await evaluate(page, `document.getElementById('backupOn').disabled`), true);
   });
 
-  await t.test('settings save as soon as they change', async () => {
-    const lastPatch = () => mock.callsOf('updateSettings').at(-1)?.[1];
+  await t.test('relays: the TURN key, the Worker relay and its two backups', async () => {
+    assert.equal(await text(page, '#relayChip'), 'Not set up');
+    await type(page, '#relayKeyId', 'abc123');
+    await type(page, '#relayToken', 'short');
+    await click(page, '#relaySaveBtn');
+    await waitFor(page, `/didn't accept/.test(document.getElementById('relayError').textContent)`, 'a bad key');
+    await type(page, '#relayToken', 'a-long-enough-api-token');
+    await click(page, '#relaySaveBtn');
+    await waitFor(page, `document.getElementById('relayChip').textContent === 'Ready' && !document.getElementById('relayOk').hidden`);
+    assert.deepEqual(mock.callsOf('relaySet').at(-1), ['relaySet', 'abc123', 'a-long-enough-api-token']);
+    assert.equal(await value(page, '#relayToken'), '', 'the token isn\'t left in the page');
+    assert.equal(await text(page, '#relaySaveBtn'), 'Check and replace');
+    assert.equal(await text(page, '#numRelay'), '✓');
+
+    assert.equal(await visible(page, '#relayBackups'), false, 'no backups before the relay');
+    await click(page, '#workerRelaySaveBtn');
+    await waitFor(page, `/Paste the relay/.test(document.getElementById('workerRelayError').textContent)`);
+    await type(page, '#workerRelayUrl', 'https://roost-relay.jo.workers.dev');
+    await click(page, '#workerRelaySaveBtn');
+    await waitFor(page, `document.getElementById('workerRelayChip').textContent === 'Ready'`);
+    assert.match(await text(page, '#workerRelayStatus'), /^Set up: https:\/\/roost-relay\.jo\.workers\.dev, since /);
+    assert.equal(await visible(page, '#relayBackups'), true);
+    await type(page, '#backupRelayUrl', 'https://jo.share.zrok.io');
+    await click(page, '#backupRelaySaveBtn');
+    await waitFor(page, `document.getElementById('backupRelayStatus').textContent === 'Set up: https://jo.share.zrok.io'`);
+    assert.equal(await visible(page, '#backupRelayForm'), false);
+    await type(page, '#tunnelUrl', 'https://not-local.example');
+    await click(page, '#tunnelSaveBtn');
+    await waitFor(page, `/127\\.0\\.0\\.1:8788/.test(document.getElementById('relayBackupsError').textContent)`, 'a tunnel elsewhere refused');
+    await type(page, '#tunnelUrl', 'http://127.0.0.1:8788');
+    await click(page, '#tunnelSaveBtn');
+    await waitFor(page, `/^Set up: asks http:\\/\\/127\\.0\\.0\\.1:8788/.test(document.getElementById('tunnelStatus').textContent)`);
+    assert.equal(await text(page, '#tileNetworkValue'), '2 relays ready');
+    await shootAll(page, '07-network', { fullPage: true });
+
+    await click(page, '#tunnelRemoveBtn');
+    await click(page, '#tunnelRemoveHost .confirm .btn.danger');
+    await waitFor(page, `!document.getElementById('tunnelForm').hidden`);
+    await click(page, '#backupRelayRemoveBtn');
+    await click(page, '#backupRelayRemoveHost .confirm .btn.danger');
+    await waitFor(page, `!document.getElementById('backupRelayForm').hidden`);
+    await click(page, '#workerRelayRemoveBtn');
+    await click(page, '#workerRelayRemoveHost .confirm .btn.danger');
+    await waitFor(page, `document.getElementById('relayBackups').hidden && document.getElementById('workerRelayChip').textContent === 'Not set up'`);
+    await click(page, '#relayRemoveBtn');
+    await click(page, '#relayRemoveHost .confirm .btn.danger');
+    await waitFor(page, `document.getElementById('relayChip').textContent === 'Not set up'`);
+    for (const m of ['relayRemove', 'workerRelayRemove', 'workerRelayBackupRemove', 'workerRelayTunnelRemove']) {
+      assert.equal(mock.callsOf(m).length, 1, m);
+    }
+  });
+
+  await t.test('settings save as soon as they change, wherever they are', async () => {
     await click(page, '#setLoginItem');
-    await until(() => lastPatch()?.loginItem === false, 'login item off');
+    await until(() => lastPatch()?.loginItem === false, 'start with Windows off');
     await waitFor(page, `document.getElementById('settingsSaved').textContent === 'Saved.'`);
     await click(page, '#setLoginItem');
-    await until(() => lastPatch()?.loginItem === true, 'login item on');
+    await until(() => lastPatch()?.loginItem === true, 'start with Windows on');
 
     await click(page, '#setKeepAwake');
     await until(() => lastPatch()?.keepAwake === false, 'keep awake off');
 
+    // The hero's quick toggles.
     await click(page, '#setPaused');
     await until(() => lastPatch()?.paused === true, 'paused');
     await waitFor(page, `document.getElementById('statePillText').textContent === 'Paused'`);
+    assert.equal(await text(page, '#heroState'), 'Paused');
     await click(page, '#setPaused');
     await until(() => lastPatch()?.paused === false, 'resumed');
+    // A setting shown twice stays the same in both places.
+    await click(page, '#quickCurtain');
+    await until(() => lastPatch()?.curtain === true, 'curtain on from Home');
+    await waitFor(page, `document.getElementById('setCurtain').checked`);
+    await click(page, '#setLock');
+    await until(() => lastPatch()?.lockOnDisconnect === true, 'lock on from This PC');
+    await waitFor(page, `document.getElementById('quickLock').checked`);
+    // Without Windows 10 2004 the curtain can't be left out of the picture: the switch is off, and says why.
+    mock.setApp({ features: { curtain: false } });
+    await click(page, '#quickCurtain');
+    await until(() => lastPatch()?.curtain === false, 'curtain off');
+    await waitFor(page, `document.getElementById('setCurtain').disabled && document.getElementById('quickCurtain').disabled && !document.getElementById('curtainHint').hidden`);
+    assert.match(await text(page, '#curtainHint'), /Windows 10 version 2004 or later/);
+    mock.setApp({ features: { curtain: true } });
+    await waitFor(page, `!document.getElementById('setCurtain').disabled && document.getElementById('curtainHint').hidden`);
 
     for (const [v, expect] of [['30', 30], ['0', 0], ['120', 120]]) {
       await evaluate(page, `(() => { const s = document.getElementById('setIdle'); s.focus(); s.value = '${v}'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
@@ -569,15 +769,15 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await click(page, '#setCodePasskey');
     await until(() => lastPatch()?.codeWithPasskey === true, 'and on again');
 
-    // Where "talk through this Mac" plays: hidden until the app has listed the Mac's sound outputs.
+    // Where "talk through your PC" plays: hidden until the app has listed the PC's sound outputs.
     assert.equal(await evaluate(page, `document.getElementById('micOutputRow').hidden`), true);
-    mock.raw.audioOutputs = [{ uid: 'BuiltIn', name: 'MacBook Air Speakers', main: true }, { uid: 'BlackHole2ch', name: 'BlackHole 2ch', main: false }];
+    mock.raw.audioOutputs = [{ uid: 'Realtek', name: 'Speakers (Realtek)', main: true }, { uid: 'VBCable', name: 'CABLE Input (VB-Audio Virtual Cable)', main: false }];
     mock.changed();
     await waitFor(page, `!document.getElementById('micOutputRow').hidden && document.getElementById('setMicOutput').options.length === 3`);
     assert.deepEqual(await evaluate(page, `[...document.getElementById('setMicOutput').options].map(o => o.textContent)`),
-      ['Whatever this Mac is playing sound on', 'MacBook Air Speakers', 'BlackHole 2ch']);
-    await evaluate(page, `(() => { const s = document.getElementById('setMicOutput'); s.focus(); s.value = 'BlackHole2ch'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
-    await until(() => lastPatch()?.micOutput === 'BlackHole2ch', 'the sound output saved');
+      ['Whatever your PC is playing sound on', 'Speakers (Realtek)', 'CABLE Input (VB-Audio Virtual Cable)']);
+    await evaluate(page, `(() => { const s = document.getElementById('setMicOutput'); s.focus(); s.value = 'VBCable'; s.dispatchEvent(new Event('change', { bubbles: true })); })()`);
+    await until(() => lastPatch()?.micOutput === 'VBCable', 'the sound output saved');
     // Unplugged later: the choice still shows, marked as not connected.
     mock.raw.audioOutputs = [mock.raw.audioOutputs[0]];
     mock.changed();
@@ -585,26 +785,28 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
 
     // Sound while someone is connected: the two sliders, saved when let go, shown as percentages.
     const slide = (id, v) => evaluate(page, `(() => { const s = document.getElementById('${id}');
-      s.dispatchEvent(new CustomEvent('perch:reveal', { bubbles: true })); s.focus(); s.value = '${v}';
+      s.dispatchEvent(new CustomEvent('roost:reveal', { bubbles: true })); s.focus(); s.value = '${v}';
       s.dispatchEvent(new Event('input', { bubbles: true })); s.dispatchEvent(new Event('change', { bubbles: true })); s.blur(); })()`);
     assert.equal(await text(page, '#setSpeakersOut'), '100%');
     await slide('setSpeakers', 0);
-    await until(() => lastPatch()?.macSpeakers === 0, 'Mac speakers silent');
+    await until(() => lastPatch()?.macSpeakers === 0, 'PC speakers silent');
     assert.equal(await text(page, '#setSpeakersOut'), 'Silent');
     await slide('setStream', 150);
     await until(() => lastPatch()?.streamVolume === 1.5, 'sent at 150%');
-    assert.match(await text(page, '#soundHint'), /allow it at the Mac/);
-    // A Mac that can't keep its speakers quiet (older macOS): that slider is off, and the note says why.
+    assert.match(await text(page, '#soundHint'), /afterwards your PC sounds as usual/);
+    // A PC that can't turn its speakers down (before Windows 10 2004): that slider is off, and the note says why.
     mock.raw.soundTap = false;
     mock.changed();
-    await waitFor(page, `document.getElementById('setSpeakers').disabled && /14\\.2/.test(document.getElementById('soundHint').textContent)`);
+    await waitFor(page, `document.getElementById('setSpeakers').disabled && /2004/.test(document.getElementById('soundHint').textContent)`);
     mock.raw.soundTap = true;
     mock.changed();
     await click(page, 'label.choice:has(input[value=sharp])');
     await until(() => lastPatch()?.quality === 'sharp', 'quality sharp');
     assert.equal(await evaluate(page, `document.querySelector('#setQuality input[value=sharp]').checked`), true);
+    await click(page, 'label.choice:has(input[value=fast])');
+    await until(() => lastPatch()?.quality === 'fast', 'quality fast');
 
-    // A refused change goes back, with the reason.
+    // A refused change goes back, with the reason, in that card.
     mock.failNext('updateSettings', 'That didn\'t work. Please try again.');
     await click(page, '#setKeepAwake');
     await waitFor(page, `/didn't work/.test(document.getElementById('settingsError').textContent)`);
@@ -613,22 +815,29 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await until(() => lastPatch()?.keepAwake === true, 'keep awake on');
     await waitFor(page, `document.getElementById('settingsError').hidden`);
 
-    // macOS waiting for approval of the login item gets a hint.
-    mock.setLoginItem({ on: false, status: 'requires-approval' });
+    // Windows has Roost switched off as a startup app (Task Manager): a hint says where.
+    mock.setLoginItem({ on: false, status: 'disabled' });
     await waitFor(page, `!document.getElementById('loginItemHint').hidden`);
-    assert.match(await text(page, '#loginItemHint'), /Login Items/);
+    assert.match(await text(page, '#loginItemHint'), /Startup apps/);
+    await shootAll(page, '08-this-pc', { fullPage: true });
     mock.setLoginItem({ on: true, status: 'enabled' });
     await waitFor(page, `document.getElementById('loginItemHint').hidden`);
+
+    await click(page, '#setAutoUpdate');
+    await until(() => lastPatch()?.autoUpdate === true, 'auto-update on');
   });
 
-  await t.test('current session and Disconnect', async () => {
+  await t.test('the current session, in the hero, and Disconnect', async () => {
     const d = mock.addDevice('Safari on iPhone');
     mock.signIn({ viewer: 'Safari on iPhone', route: 'passkey', deviceId: d.id });
     await waitFor(page, `document.getElementById('statePillText').textContent === 'Connected to Safari on iPhone'`);
+    assert.equal(await evaluate(page, `document.getElementById('hero').dataset.tone`), 'live');
+    assert.equal(await text(page, '#heroState'), 'Connected');
     assert.equal(await text(page, '#sessionViewer'), 'Safari on iPhone');
     assert.equal(await text(page, '#sessionRoute'), 'with a passkey');
     assert.match(await text(page, '#sessionSince'), /^today at .+\(less than a minute\)$/);
     await waitFor(page, `!document.querySelector('.device[data-id="${d.id}"] .device-now').hidden`, 'Connected now on the device');
+    assert.match(await text(page, '#tileDevicesSub'), /Safari on iPhone is connected/);
     await click(page, '#disconnectBtn');
     await waitFor(page, `!document.getElementById('sessionNone').hidden`);
     assert.equal(mock.callsOf('disconnect').length, 1);
@@ -647,7 +856,16 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     assert.match(await text(page, '#activityList'), /hours? ago|today at|yesterday at/);
   });
 
-  await t.test('About: updates', async () => {
+  await t.test('About: this PC, and updates', async () => {
+    assert.equal(await text(page, '#aboutVersion'), '0.1.0');
+    assert.equal(await text(page, '#aboutWindows'), 'Windows 11 (build 22631)');
+    assert.equal(await text(page, '#aboutArch'), '64-bit (x64)');
+    assert.equal(await text(page, '#aboutEncoder'), mock.raw.app.features.encoder);
+    mock.setApp({ osVersion: '10.0.19045', arch: 'arm64', features: { encoder: 'Media Foundation (Qualcomm)' } });
+    await waitFor(page, `document.getElementById('aboutWindows').textContent === 'Windows 10 (build 19045)'`);
+    assert.equal(await text(page, '#aboutArch'), 'Arm (ARM64)');
+    assert.equal(await text(page, '#aboutEncoder'), 'Media Foundation (Qualcomm)');
+
     mock.setAvailableUpdate(null);
     await click(page, '#checkUpdatesBtn');
     await waitFor(page, `document.getElementById('updateStatus').textContent === 'You have the latest version.'`);
@@ -658,17 +876,43 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await click(page, '#checkUpdatesBtn');
     await waitFor(page, `/Couldn't check/.test(document.getElementById('updateStatus').textContent)`, 'offline update check');
     mock.setOffline(false);
-    mock.setAvailableUpdate({ version: '0.2.0', url: 'https://github.com/Just-Rice/perch/releases/tag/v0.2.0', notes: 'Smoother video on slow networks.' });
+    const url = 'https://github.com/faarisaahmed/roost/releases/tag/v0.2.0';
+    mock.setAvailableUpdate({ version: '0.2.0', url, notes: 'Smoother video on slow networks.' });
     await click(page, '#checkUpdatesBtn');
     await waitFor(page, `!document.getElementById('updateBox').hidden`);
     assert.equal(await text(page, '#updateVersion'), '0.2.0');
     assert.equal(await text(page, '#updateNotes'), 'Smoother video on slow networks.');
-    assert.equal(await evaluate(page, `document.getElementById('updateLink').href`), 'https://github.com/Just-Rice/perch/releases/tag/v0.2.0');
+    assert.equal(await evaluate(page, `document.getElementById('updateLink').href`), url);
     assert.equal(await evaluate(page, `document.getElementById('updateLink').rel`), 'noopener noreferrer');
+    assert.equal(await visible(page, '#navAboutDot'), true);
+    assert.equal(await text(page, '#tileUpdatesValue'), '0.2.0 available');
+    // A link anywhere else is never offered.
+    mock.raw.update = { ...mock.raw.update, url: 'https://evil.example/release' };
+    mock.changed();
+    await waitFor(page, `document.getElementById('updateLink').href === 'https://github.com/faarisaahmed/roost/releases'`);
     await click(page, '#installUpdateBtn');
     await until(() => mock.callsOf('installUpdate').length === 1, 'install requested');
     await waitFor(page, `/Updating/.test(document.getElementById('updateStatus').textContent)`);
     assert.equal(await evaluate(page, `document.getElementById('installUpdateBtn').disabled`), true);
+  });
+
+  await t.test('restart to finish updating', async () => {
+    mock.raw.update = null;
+    mock.changed();
+    // The mock has no installed copy; play one by adding it to the state it sends.
+    const state = controller.state;
+    controller.state = () => ({ ...state(), restart: { version: '0.2.0', running: '0.1.0', sameSigner: true, autoAfterMs: 120000 } });
+    mock.changed();
+    await waitFor(page, `!document.getElementById('restartNote').hidden`);
+    assert.equal(await text(page, '#restartVersion'), '0.2.0');
+    assert.match(await text(page, '#restartDetail'), /still running Roost 0\.1\.0.*2 minutes/);
+    assert.equal(await text(page, '#tileUpdatesValue'), 'Restart to finish');
+    await click(page, '#restartBtn');
+    await until(() => mock.callsOf('relaunch').length === 1, 'relaunch asked for');
+    await waitFor(page, `/Restarting/.test(document.getElementById('restartStatus').textContent)`);
+    controller.state = state;
+    mock.changed();
+    await waitFor(page, `document.getElementById('restartNote').hidden`);
   });
 
   await t.test('everything set up (screenshots)', async () => {
@@ -678,26 +922,56 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     mock.addDevice('Chrome on the work laptop', { createdAt: new Date(Date.now() - 3 * day).toISOString(), lastUsedAt: new Date(Date.now() - day).toISOString() });
     mock.addDevice('iPad', { createdAt: new Date(Date.now() - 2 * 3600_000).toISOString() });
     mock.raw.activity = mock.raw.activity.slice(0, 6);
+    mock.setApp({ osVersion: '10.0.22631', arch: 'x64', features: { encoder: 'Media Foundation (NVIDIA)' } });
     await registerInPage();
     mock.signIn({ viewer: 'Safari on iPhone', route: 'passkey', deviceId: mock.raw.devices[0].id });
     await waitFor(page, `document.getElementById('statePillText').textContent === 'Connected to Safari on iPhone'`);
+    await click(page, '.nav a[data-view=home]');
     // Leftover messages from the steps above would only clutter the picture.
-    await evaluate(page, `document.getElementById('backupOk').hidden = true; document.getElementById('totpOk').hidden = true;
-      document.getElementById('pairOk').hidden = true; document.getElementById('updateStatus').textContent = '';
-      document.getElementById('installUpdateBtn').disabled = false; document.getElementById('settingsSaved').textContent = ''`);
-    await shootAll(page, '04-all-set', { fullPage: true });
+    await evaluate(page, `for (const id of ['backupOk', 'totpOk', 'pairOk', 'adminOk', 'sitesOk', 'relayOk', 'workerRelayOk', 'relayBackupsOk'])
+      document.getElementById(id).hidden = true;
+      document.getElementById('updateStatus').textContent = ''; document.getElementById('installUpdateBtn').disabled = false;
+      for (const s of document.querySelectorAll('.saved')) s.textContent = ''`);
+    await shootAll(page, '09-all-set', { fullPage: true });
+    // All four done: the steps fold away, and the hero can bring them back.
+    mock.raw.relay = { set: true, setAt: new Date().toISOString(), working: true };
+    mock.changed();
+    await waitFor(page, `document.getElementById('setupCard').hidden && document.getElementById('stepsShowBtn').textContent === 'Show the setup steps'`);
+    await shootAll(page, '10-home-done');
+    await shootAll(page, '11-devices', { scrollTo: '#devices' });
+    await shootAll(page, '12-security', { scrollTo: '#security' });
+    await shootAll(page, '13-about', { scrollTo: '#about' });
   });
 
   await t.test('About: a new name', async () => {
     const before = mock.raw.macName;
-    await click(page, '#renameMacBtn');
-    assert.match(await text(page, '#renameMacHost .confirm p'), /backup password is removed/);
-    await click(page, '#renameMacHost .confirm .btn.primary');
+    await click(page, '#renamePcBtn');
+    assert.match(await text(page, '#renamePcHost .confirm p'), /backup password is removed/);
+    await click(page, '#renamePcHost .confirm .btn.primary');
     await until(() => mock.callsOf('newMacName').length === 1, 'new name');
-    await waitFor(page, `document.getElementById('macName').textContent === ${q(mock.raw.macName)}`);
+    await waitFor(page, `document.getElementById('pcName').textContent === ${q(mock.raw.macName)}`);
     assert.notEqual(mock.raw.macName, before);
     assert.equal(await text(page, '#backupStatus'), 'Not set');
     assert.equal(await text(page, '#backupUser'), mock.raw.macName);
+    assert.equal(await text(page, '#sidePcName'), mock.raw.macName);
+  });
+
+  await t.test('renaming from the hero: a name of your own, or a new made-up one', async () => {
+    await click(page, '#nameBox summary');
+    await waitFor(page, `document.getElementById('nameBox').open && document.activeElement.id === 'nameNew'`);
+    await type(page, '#nameNew', 'x!');
+    await click(page, '#nameSaveBtn');
+    await waitFor(page, `/4 to 40 letters/.test(document.getElementById('nameError').textContent)`, 'a bad name refused');
+    assert.equal(mock.callsOf('customMacName').length, 0);
+    await type(page, '#nameNew', 'Jordan Desktop');
+    await click(page, '#nameSaveBtn');
+    await waitFor(page, `document.getElementById('pcName').textContent === 'jordan-desktop'`, 'the chosen name');
+    assert.equal(await evaluate(page, `document.getElementById('nameBox').open`), false);
+    assert.equal(await evaluate(page, 'document.activeElement.id'), 'pcName');
+    await click(page, '#nameBox summary');
+    await click(page, '#nameRandomBtn');
+    await until(() => mock.callsOf('newMacName').length === 2, 'a made-up name again');
+    await waitFor(page, `document.getElementById('pcName').textContent === ${q(mock.raw.macName)}`);
   });
 
   await t.test('About: choosing a name of your own, behind a "not recommended" warning', async () => {
@@ -705,21 +979,21 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await evaluate(page, `document.getElementById('customNameBox').open = true`);
     assert.match(await text(page, '#customNameBox summary'), /not recommended/);
     assert.match(await text(page, '#customNameBox p'), /easier to guess/);
-    // Checked as typed: nothing reaches the Mac until the name is usable.
-    await type(page, '#customName', 'my.mac');
+    // Checked as typed: nothing reaches the PC until the name is usable.
+    await type(page, '#customName', 'my.pc');
     await click(page, '#customNameBtn');
     await waitFor(page, `!document.getElementById('customNameError').hidden`);
     assert.match(await text(page, '#customNameError'), /4 to 40 letters or numbers/);
-    assert.equal(mock.callsOf('customMacName').length, 0);
-    await type(page, '#customName', 'Room 204 Mac');
+    const calls = mock.callsOf('customMacName').length;
+    await type(page, '#customName', 'Room 204 PC');
     assert.equal(await visible(page, '#customNameError'), false, 'the message goes as soon as they type');
     await click(page, '#customNameBtn');
     await waitFor(page, `!!document.querySelector('#customNameHost .confirm')`);
-    assert.match(await text(page, '#customNameHost .confirm p'), /room-204-mac.*easier to guess/);
+    assert.match(await text(page, '#customNameHost .confirm p'), /room-204-pc.*easier to guess/);
     await click(page, '#customNameHost .confirm .btn.primary');
-    await until(() => mock.callsOf('customMacName').length === 1, 'custom name');
-    await waitFor(page, `document.getElementById('macName').textContent === 'room-204-mac'`);
-    assert.equal(await text(page, '#backupUser'), 'room-204-mac');
+    await until(() => mock.callsOf('customMacName').length === calls + 1, 'custom name');
+    await waitFor(page, `document.getElementById('pcName').textContent === 'room-204-pc'`);
+    assert.equal(await text(page, '#backupUser'), 'room-204-pc');
     assert.equal(await evaluate(page, `document.getElementById('customNameBox').open`), false, 'closed again');
   });
 
@@ -728,7 +1002,7 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await waitFor(page, `!!document.querySelector('#resetHost .confirm')`);
     assert.match(await text(page, '#resetHost .confirm p'), /can't be undone/);
     assert.equal(await visible(page, '#resetBtn'), false);
-    await shootAll(page, '05-confirm-start-over', { scrollTo: '#aboutCard .zone' });
+    await shootAll(page, '14-confirm-start-over', { scrollTo: '#zoneCard' });
     await click(page, '#resetHost .confirm .btn:not(.danger)');
     await waitFor(page, `!document.querySelector('#resetHost .confirm')`);
     assert.equal(await focusedText(page), 'Start over', 'focus back on the button');
@@ -738,8 +1012,10 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await click(page, '#resetBtn');
     await click(page, '#resetHost .confirm .btn.danger');
     await until(() => mock.callsOf('reset').length === 1, 'reset');
-    await waitFor(page, `document.getElementById('macName').textContent === ${q(mock.raw.macName)}`);
+    await waitFor(page, `document.getElementById('pcName').textContent === ${q(mock.raw.macName)}`);
     assert.notEqual(mock.raw.macName, before);
+    assert.equal(await view(page), 'home', 'back to Home and its setup steps');
+    assert.equal(await visible(page, '#setupCard'), true);
     assert.equal(await text(page, '#statePillText'), 'Needs setup');
     assert.equal(await visible(page, '#totpIdle'), true);
     assert.equal(await visible(page, '#pairLocked'), true);
@@ -754,28 +1030,30 @@ test('Setup page: every step in a real browser', { skip: !existsSync(CHROME) && 
     await click(page, '#uninstallBtn');
     await click(page, '#uninstallHost .confirm .btn.danger');
     await until(() => mock.uninstalled, 'uninstalled');
-    await waitFor(page, `!document.getElementById('farewell').hidden && document.getElementById('aboutCard').hidden`);
+    await waitFor(page, `!document.getElementById('farewell').hidden && document.getElementById('about').hidden`);
     assert.equal(await text(page, '#statePillText'), 'Uninstalled');
-    await shootAll(page, '06-uninstalled');
+    await shootAll(page, '15-uninstalled');
   });
 
   await t.test('no console errors, no security-policy violations, no pop-up dialogs', async () => {
-    // The deliberate refusals: the page without its key (403), the wrong authenticator code and the two refusals the
-    // mock was told to make (400).
-    const refusals = await checkCleanConsole(page, tab, base, ['/', '/api/totpConfirm', '/api/updateSettings']);
-    assert.deepEqual(refusals, ['/', '/api/totpConfirm', '/api/updateSettings', '/api/updateSettings'],
-      'exactly the deliberate refusals');
-    // Every request stayed on this Mac's Setup server.
+    // The deliberate refusals: the page without its key (403), the wrong authenticator code, a refused elevation,
+    // two refused settings, a bad relay key, a site without https and a tunnel that isn't on this PC (400).
+    const allowed = ['/', '/api/totpConfirm', '/api/updateSettings', '/api/elevation', '/api/relaySet', '/api/siteAdd',
+      '/api/workerRelayTunnelSet'];
+    const refusals = await checkCleanConsole(page, tab, base, allowed);
+    assert.deepEqual(refusals, ['/', '/api/elevation', '/api/relaySet', '/api/siteAdd', '/api/totpConfirm',
+      '/api/updateSettings', '/api/updateSettings', '/api/workerRelayTunnelSet'], 'exactly the deliberate refusals');
+    // Every request stayed on this PC's Control Center server.
     for (const r of requests) assert.ok(r.url.startsWith(`http://127.0.0.1:${srv.port}/`), r.url);
   });
 
-  await t.test('losing Perch, then a restarted Perch with a new key', async () => {
+  await t.test('losing Roost, then a restarted Roost with a new key', async () => {
     const page2 = await chrome.cdp.newPage();
     await page2.navigate(srv.url);
-    await waitFor(page2, `document.getElementById('macName').textContent === ${q(mock.raw.macName)}`);
+    await waitFor(page2, `document.getElementById('pcName').textContent === ${q(mock.raw.macName)}`);
     const port = srv.port;
     await srv.close();
-    await waitFor(page2, `/Can't reach Perch/.test(document.getElementById('banner').textContent) && !document.getElementById('banner').hidden`, 'lost banner', 15000);
+    await waitFor(page2, `/Can't reach Roost/.test(document.getElementById('banner').textContent) && !document.getElementById('banner').hidden`, 'lost banner', 15000);
     srv = await startSetupServer({ controller, port });
     await waitFor(page2, `/out of date/.test(document.getElementById('banner').textContent)`, 'stale banner', 15000);
     await chrome.cdp.send('Target.closeTarget', { targetId: page2.targetId });
@@ -796,18 +1074,16 @@ async function freePort() {
   return port;
 }
 
-// Starts src/main.mjs the way the Swift app does, but in test mode: a temporary home, secrets in a file there (never
-// the Keychain), the local test broker, no update checks. This plays the app's end of the pipe: it says HELLO and
-// records every command the host sends back, so nothing on this Mac is actually asked for anything.
+// Starts src/main.mjs the way roost.exe does, but in test mode: a temporary home, secrets in a file there (never
+// DPAPI), the local test broker, no update checks. This plays the app's end of the pipe: it says HELLO as roost.exe
+// would and records every command the host sends back, so nothing on this computer is actually asked for anything.
 async function startRealHost(brokerUrl) {
-  const home = mkdtempSync(path.join(tmpdir(), 'perch-setup-host-'));
+  const home = mkdtempSync(path.join(tmpdir(), 'roost-setup-host-'));
   const port = await freePort();
   const key = randomBytes(32).toString('base64url');
+  const env = { TEST: '1', HOME: home, SECRETS: 'file', BROKERS: brokerUrl, SETUP_PORT: String(port), SETUP_KEY: key, ICE: 'none', LOG: 'info' };
   const child = spawn(process.execPath, [MAIN], {
-    env: {
-      ...process.env, PERCH_TEST: '1', PERCH_HOME: home, PERCH_SECRETS: 'file', PERCH_BROKERS: brokerUrl,
-      PERCH_SETUP_PORT: String(port), PERCH_SETUP_KEY: key, PERCH_ICE: 'none', PERCH_LOG: 'info',
-    },
+    env: { ...process.env, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [`ROOST_${k}`, v])) },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   const commands = [];
@@ -819,11 +1095,13 @@ async function startRealHost(brokerUrl) {
   child.stderr.on('data', (d) => { log = (log + d).slice(-100_000); });
   child.stdin.on('error', () => {});
   child.stdin.write(encodeJson(T.HELLO, {
-    app: 'Perch', version: '0.1.0', ipc: 1, macos: '15.0', synthetic: true,
-    permissions: { screen: true, accessibility: false },
-    displays: [{ id: 1, name: 'Test Display', width: 1920, height: 1080, main: true }],
+    app: 'Roost', version: '0.1.0', ipc: 1, os: 'windows', osVersion: '10.0.22631', arch: 'x64', synthetic: true,
+    soundTap: true, permissions: { screen: true, accessibility: true, elevated: false },
+    displays: [{ id: 1, name: 'Test Display', x: 0, y: 0, width: 1920, height: 1080, main: true }],
     loginItem: { on: false, status: 'not-registered' },
+    features: { curtain: true, encoder: 'OpenH264', elevatedTask: false },
   }));
+  const event = (obj) => child.stdin.write(encodeJson(T.EVENT, obj));
   const exited = new Promise((resolve) => child.once('exit', resolve));
   const stop = async () => {
     child.stdin.end(); // the app going away is how the host is told to quit
@@ -836,15 +1114,15 @@ async function startRealHost(brokerUrl) {
   const end = Date.now() + 20_000;
   for (;;) {
     if (child.exitCode !== null) { await stop(); throw new Error(`the host quit:\n${log.slice(-3000)}`); }
-    const r = await fetch(`${base}/api/state`, { headers: { 'X-Perch-Key': key } }).catch(() => null);
+    const r = await fetch(`${base}/api/state`, { headers: { 'X-Roost-Key': key } }).catch(() => null);
     if (r?.ok) break;
-    if (Date.now() > end) { await stop(); throw new Error(`Setup never answered:\n${log.slice(-3000)}`); }
+    if (Date.now() > end) { await stop(); throw new Error(`the Control Center never answered:\n${log.slice(-3000)}`); }
     await sleep(100);
   }
-  return { url: `${base}/?k=${key}`, base, key, commands, stop, get log() { return log; } };
+  return { url: `${base}/?k=${key}`, base, key, commands, event, stop, get log() { return log; } };
 }
 
-test('Setup page against the real host process', { skip: !existsSync(CHROME) && 'Google Chrome is not installed', timeout: 120_000 }, async (t) => {
+test('Control Center against the real host process', { skip: !existsSync(CHROME) && 'Google Chrome is not installed', timeout: 120_000 }, async (t) => {
   const broker = await startBroker();
   const host = await startRealHost(broker.url);
   const chrome = await launchChrome();
@@ -855,43 +1133,49 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
   });
   const tab = await openPage(chrome, host.base);
   const { page } = tab;
-  const state = async () => (await fetch(`${host.base}/api/state`, { headers: { 'X-Perch-Key': host.key } })).json();
+  const state = async () => (await fetch(`${host.base}/api/state`, { headers: { 'X-Roost-Key': host.key } })).json();
   const command = (c, fields = {}) => until(
     () => host.commands.some(x => x.c === c && Object.entries(fields).every(([k, v]) => x[k] === v)),
     `the app was sent ${c} ${JSON.stringify(fields)}`);
 
-  await t.test('loads with the host\'s name, state and permissions', async () => {
+  await t.test('loads with the host\'s name, state and Windows details', async () => {
     await page.navigate(host.url);
     const first = await state();
-    await waitFor(page, `document.getElementById('macName').textContent === ${q(first.macName)}`, 'the Mac\'s name');
+    await waitFor(page, `document.getElementById('pcName').textContent === ${q(first.macName)}`, 'the PC\'s name');
     assert.match(first.macName, /^[a-z]+-[a-z]+-\d{4}$/);
     await waitFor(page, `document.getElementById('statePillText').textContent === 'Needs setup'`, 'needs setup (broker connected)', 15000);
     assert.match(await text(page, '#stateText'), /authenticator app/);
-    assert.equal(await text(page, '#permScreen [data-status]'), '✓ Allowed');
-    assert.equal(await text(page, '#permAccessibility [data-status]'), 'Not allowed yet');
-    await click(page, '#permAccessibility [data-open]');
-    await command('request-permission', { which: 'accessibility' });
-    // On in System Settings but not here: reset the old entry and ask again, or restart Perch.
-    assert.equal(await visible(page, '#permAccessibility [data-stuck]'), true);
-    assert.equal(await visible(page, '#permScreen [data-stuck]'), false, 'nothing to fix for an allowed permission');
-    await click(page, '#permAccessibility [data-reset]');
-    await command('reset-permission', { which: 'accessibility' });
-    await click(page, '#permAccessibility [data-relaunch]');
-    await command('relaunch');
+    assert.equal(await text(page, '#aboutWindows'), 'Windows 11 (build 22631)');
+    assert.equal(await text(page, '#aboutEncoder'), 'OpenH264');
+    assert.equal(await text(page, '#adminChip'), 'Off');
   });
 
-  await t.test('the Mac\u2019s name can be changed right at the top: one of your own, or a new made-up one', async () => {
+  await t.test('Control admin apps: the app is asked, and its answer shows', async () => {
+    await click(page, '#setElevation');
+    await command('elevation', { on: true });
+    await waitFor(page, `document.getElementById('adminChip').textContent === 'Waiting for you'`);
+    // Windows said no: the switch goes back, with the reason.
+    host.event({ e: 'elevation', ok: false, elevated: false, task: false, error: 'You chose No when Windows asked.' });
+    await waitFor(page, `/chose No/.test(document.getElementById('adminError').textContent) && !document.getElementById('setElevation').checked`, 'refused');
+    await click(page, '#setElevation');
+    await until(() => host.commands.filter(x => x.c === 'elevation').length === 2, 'asked again');
+    host.event({ e: 'elevation', ok: true, elevated: true, task: true });
+    await waitFor(page, `document.getElementById('adminChip').textContent === 'On' && document.getElementById('setElevation').checked`, 'on');
+    assert.equal((await state()).app.elevatedTask, true);
+  });
+
+  await t.test('the PC’s name can be changed right in the hero: one of your own, or a new made-up one', async () => {
     const before = (await state()).macName;
-    await evaluate(page, `document.getElementById('nameBox').open = true`);
+    await click(page, '#nameBox summary');
     await type(page, '#nameNew', 'x!');
     await click(page, '#nameSaveBtn');
     await waitFor(page, `/4 to 40 letters/.test(document.getElementById('nameError').textContent)`, 'a bad name refused');
-    await type(page, '#nameNew', 'Jordan MacBook');
+    await type(page, '#nameNew', 'Jordan Desktop');
     await click(page, '#nameSaveBtn');
-    await waitFor(page, `document.getElementById('macName').textContent === 'jordan-macbook'`, 'the chosen name');
-    assert.equal((await state()).macName, 'jordan-macbook');
+    await waitFor(page, `document.getElementById('pcName').textContent === 'jordan-desktop'`, 'the chosen name');
+    assert.equal((await state()).macName, 'jordan-desktop');
     assert.equal(await evaluate(page, `document.getElementById('nameBox').open`), false);
-    await evaluate(page, `document.getElementById('nameBox').open = true`);
+    await click(page, '#nameBox summary');
     await click(page, '#nameRandomBtn');
     await until(async () => /^[a-z]+-[a-z]+-\d{4}$/.test((await state()).macName), 'a made-up name again');
     assert.notEqual((await state()).macName, before);
@@ -906,14 +1190,14 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     await press(page, 'Enter');
     await waitFor(page, `!document.getElementById('totpDone').hidden`, 'set up');
     assert.equal((await state()).totp.set, true);
-    assert.match(await text(page, '#stateText'), /pair/i);
+    await waitFor(page, `/pair/i.test(document.getElementById('stateText').textContent)`, 'next: pair');
   });
 
   await t.test('pairing link, QR code and countdown from the real host', async () => {
     await click(page, '#pairStartBtn');
     await waitFor(page, `!document.getElementById('pairActive').hidden && !!document.querySelector('#pairQr svg')`);
     const link = await value(page, '#pairLink');
-    assert.match(link, /^https:\/\/just-rice\.github\.io\/perch\/connect\.html#pair=[A-Za-z0-9_-]{150}$/);
+    assert.match(link, PAIR_LINK(150));
     assert.equal((await state()).pairing.link, link);
     await checkQr(page, '#pairQr', link);
     assert.match(await text(page, '#pairCountdown'), /^This code works for (10:00|9:5\d) more\.$/);
@@ -923,38 +1207,39 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
   });
 
   await t.test('sites that can sign in: the official one is fixed; adding one offers pairing for it; removing it', async () => {
-    assert.deepEqual((await state()).sites.filter(x => x.builtIn).map(x => x.origin).includes('https://just-rice.github.io'), true);
-    assert.match(await text(page, '#sitesList'), /just-rice\.github\.io · the official Perch site/);
+    const official = new URL(CONNECT_URL).origin;
+    assert.ok((await state()).sites.filter(x => x.builtIn).map(x => x.origin).includes(official));
+    assert.match(await text(page, '#sitesList'), new RegExp(`${escapeRe(new URL(official).host)} · the official Roost site`));
     assert.equal(await page.eval(`document.getElementById('pairSiteLabel').hidden`), true, 'no choice with one site');
     assert.equal(await page.eval(`document.querySelectorAll('#sitesList button').length`), 0, 'the official site has no Remove');
     await page.eval(`document.getElementById('sitesAdd').open = true`);
     // Refused: not https, an IP address, a site already there.
     for (const [bad, why] of [['http://example.org/connect.html', /https/], ['https://192.168.1.5/x', /domain name/],
-      ['https://just-rice.github.io/other/', /already/]]) {
+      [`${official}/other/`, /already/]]) {
       await page.eval(`document.getElementById('siteUrl').value = ''`);
       await type(page, '#siteUrl', bad);
       await click(page, '#siteAddBtn');
       await waitFor(page, `${why}.test(document.getElementById('sitesError').textContent)`, `refusal for ${bad}`);
     }
     await page.eval(`document.getElementById('siteUrl').value = ''`);
-    await type(page, '#siteUrl', 'https://perch.example.org/remote/');
+    await type(page, '#siteUrl', 'https://roost.example.org/remote/');
     await click(page, '#siteAddBtn');
-    await waitFor(page, `/Added perch\.example\.org/.test(document.getElementById('sitesOk').textContent)`, 'site added');
+    await waitFor(page, `/Added roost\\.example\\.org/.test(document.getElementById('sitesOk').textContent)`, 'site added');
     const added = (await state()).sites.find(x => !x.builtIn);
-    assert.deepEqual([added.origin, added.url], ['https://perch.example.org', 'https://perch.example.org/remote/connect.html']);
+    assert.deepEqual([added.origin, added.url], ['https://roost.example.org', 'https://roost.example.org/remote/connect.html']);
     // Pairing can now be made for either site.
-    await waitFor(page, `!document.getElementById('pairSiteLabel').hidden`, 'the site choice in step 3');
-    await page.eval(`(() => { const s = document.getElementById('pairSite'); s.value = 'https://perch.example.org'; s.dispatchEvent(new Event('change')); })()`);
+    await waitFor(page, `!document.getElementById('pairSiteLabel').hidden`, 'the site choice under Devices');
+    await page.eval(`(() => { const s = document.getElementById('pairSite'); s.value = 'https://roost.example.org'; s.dispatchEvent(new Event('change')); })()`);
     await click(page, '#pairStartBtn');
     await waitFor(page, `!document.getElementById('pairActive').hidden`);
-    assert.match(await value(page, '#pairLink'), /^https:\/\/perch\.example\.org\/remote\/connect\.html#pair=[A-Za-z0-9_-]{150}$/);
+    assert.match(await value(page, '#pairLink'), /^https:\/\/roost\.example\.org\/remote\/connect\.html#pair=[A-Za-z0-9_-]{150}$/);
     // Removing the site (after confirming) cancels its pairing link too.
     await click(page, '#sitesList .site-row:last-child button');
     await waitFor(page, `!!document.querySelector('#sitesList .confirm')`, 'confirmation');
     await click(page, '#sitesList .confirm .btn.danger');
     await waitFor(page, `document.querySelectorAll('#sitesList .site-row').length === 1`, 'site removed');
     const after = await state();
-    assert.equal(after.sites.length, (await state()).sites.filter(x => x.builtIn).length);
+    assert.equal(after.sites.length, after.sites.filter(x => x.builtIn).length);
     assert.equal(after.pairing, null);
     await waitFor(page, `document.getElementById('pairSiteLabel').hidden`, 'no choice again');
   });
@@ -982,6 +1267,8 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     await command('login-item', { on: false });
     await click(page, 'label.choice:has(input[value=sharp])');
     await until(async () => (await state()).settings.quality === 'sharp', 'quality saved');
+    await click(page, '#quickCurtain');
+    await until(async () => (await state()).settings.curtain === true, 'curtain saved');
     await evaluate(page, `(() => { const s = document.getElementById('setIdle'); s.value = '30'; s.dispatchEvent(new Event('change')); })()`);
     await until(async () => (await state()).settings.idleMinutes === 30, 'idle 30 saved');
     // "Never" is saved like any other choice.
@@ -990,11 +1277,12 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     assert.equal(await visible(page, '#settingsError'), false, 'no error for "Never"');
   });
 
-  await t.test('activity and the header follow the host', async () => {
+  await t.test('activity and the hero follow the host', async () => {
+    await click(page, '.nav a[data-view=home]');
     await waitFor(page, `document.querySelectorAll('#activityList li').length >= 3`);
     assert.match(await text(page, '#activityList'), /Authenticator app set up/);
     assert.match(await text(page, '#activityList'), /pairing link/i);
-    await shootAll(page, '07-real-host', { fullPage: true });
+    await shootAll(page, '16-real-host', { fullPage: true });
   });
 
   await t.test('Start over on the real host', async () => {
@@ -1003,7 +1291,7 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
     await click(page, '#resetHost .confirm .btn.danger');
     await until(async () => (await state()).macName !== before, 'a new name');
     const after = await state();
-    await waitFor(page, `document.getElementById('macName').textContent === ${q(after.macName)}`);
+    await waitFor(page, `document.getElementById('pcName').textContent === ${q(after.macName)}`);
     assert.equal(after.totp.set, false);
     assert.equal(after.backup.set, false);
     assert.equal(await visible(page, '#totpIdle'), true);
@@ -1011,7 +1299,7 @@ test('Setup page against the real host process', { skip: !existsSync(CHROME) && 
   });
 
   await t.test('no console errors, no security-policy violations, no pop-up dialogs', async () => {
-    // The deliberate refusals: three addresses the sites section must not accept (and "Never" idle, if refused).
+    // The deliberate refusals: three addresses the sites section must not accept.
     const refusals = await checkCleanConsole(page, tab, host.base, ['/api/siteAdd']);
     assert.deepEqual(refusals, ['/api/siteAdd', '/api/siteAdd', '/api/siteAdd']);
     assert.doesNotMatch(host.log, /uncaught exception|unhandled rejection|ERROR/);

@@ -1,4 +1,4 @@
-// Step 3: pairing a device. The pairing link (and its QR code) lets one device make a passkey for this Mac, once,
+// Pairing a device. The pairing link (and its QR code) lets one device make a passkey for this PC, once,
 // within 10 minutes. The page notices on its own when the device finishes, through the live updates.
 import { $, setText, show, say, busy } from '../lib/dom.js';
 import { qrSvg } from '../lib/qr.js';
@@ -12,7 +12,7 @@ export function pairing(ctx) {
   const linkInput = $('pairLink');
   let shownLink = null;      // the link whose QR code is on screen
   let shownExpires = 0;      // ...and when it runs out
-  let expiredLink = null;    // a link we've seen run out (Perch may not have cleared it yet)
+  let expiredLink = null;    // a link we've seen run out (Roost may not have cleared it yet)
   let devicesBefore = null;  // device ids when the current pairing started, to spot the new one
   let cancelling = false;
 
@@ -40,7 +40,7 @@ export function pairing(ctx) {
     } catch {
       linkInput.focus();
       linkInput.select();
-      setText(status, 'Selected: press ⌘C to copy it. Only open it on your own device.');
+      setText(status, 'Selected: press Ctrl+C to copy it. Only open it on your own device.');
     }
   });
 
@@ -70,7 +70,7 @@ export function pairing(ctx) {
     const ready = st.totp?.set === true || st.settings?.codeWithPairing === false;
     show($('pairLocked'), !ready);
     $('pairStartBtn').disabled = !ready;
-    $('stepPair').dataset.disabled = String(!ready);
+    $('pairCard').dataset.disabled = String(!ready);
     if (!ready) { expiredMsg.hidden = true; goneMsg.hidden = true; } // after Start over, an old code means nothing
 
     const p = activePairing(st);
@@ -92,8 +92,8 @@ export function pairing(ctx) {
     } else {
       if (shownLink && !st.pairing && devicesBefore && !cancelling) {
         const added = (st.devices ?? []).filter(d => !devicesBefore.has(d.id));
-        if (added.length) say(okMsg, `Paired: “${added.at(-1).label}” can now connect to this Mac.`);
-        // Perch dropped the code by itself, without a new device: it ran out (and Perch noticed before this page's
+        if (added.length) say(okMsg, `Paired: “${added.at(-1).label}” can now connect to your PC.`);
+        // Roost dropped the code by itself, without a new device: it ran out (and Roost noticed before this page's
         // once-a-second check did, as it does in a background tab), it was tried with wrong proofs too often, or
         // another Setup tab cancelled it. Either way the person should know why it vanished.
         else if (shownExpires - Date.now() < 2000) expiredMsg.hidden = false;
@@ -104,10 +104,6 @@ export function pairing(ctx) {
       show($('pairActive'), false);
       show($('pairIdle'), true);
     }
-    const num = $('numPair');
-    const done = (st.devices ?? []).length > 0;
-    num.dataset.done = String(done);
-    setText(num, done ? '✓' : '3');
   }
 
   return { render, tick };

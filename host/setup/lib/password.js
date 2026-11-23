@@ -1,4 +1,4 @@
-// A plain-language strength hint for the backup password. Perch's suggestion (five random words, about 50 bits) is
+// A plain-language strength hint for the backup password. Roost's suggestion (five random words, about 50 bits) is
 // the yardstick: anything shorter than 12 characters is refused, and only long or varied passwords count as strong.
 
 export const MIN_LENGTH = 12;
@@ -14,7 +14,7 @@ export function passwordStrength(pw, macName = '') {
   }
   const lower = p.toLowerCase();
   if (macName && lower.includes(macName.toLowerCase())) {
-    return { ok: false, level: 'weak', text: 'Don\'t use the Mac\'s name in the password: it\'s the username.' };
+    return { ok: false, level: 'weak', text: 'Don\'t use your PC\'s name in the password: it\'s the username.' };
   }
   if (new Set(lower).size <= 3 || /^(?:0123456789|1234567890|abcdefghijkl|qwertyuiop)/.test(lower)) {
     return { ok: false, level: 'weak', text: 'That\'s too easy to guess. Try the suggested password instead.' };

@@ -1,6 +1,7 @@
-// Settings, in three cards (the 6-digit code switches, video quality, and "This Mac"): each change is saved straight
-// away (no Save button). If Perch refuses one, the control goes back to what it was and the reason is shown in that
-// control's own card.
+// Settings, wherever they are on the page (the hero's quick toggles, the 6-digit code switches, video quality, This PC,
+// updates): each change is saved straight away (no Save button). If Roost refuses one, the control goes back to what
+// it was and the reason is shown in that control's own card. A setting shown twice (the curtain, say, in the hero and
+// under This PC) stays the same in both places.
 import { $, setText, show, say } from '../lib/dom.js';
 
 const IDLE_LABEL = (m) => (m === 0 ? 'Never' : m % 60 === 0 ? `${m / 60} hour${m === 60 ? '' : 's'}` : `${m} minutes`);
@@ -36,8 +37,11 @@ export function settings(ctx) {
   const switches = [...document.querySelectorAll('input[data-setting]')];
   // The two sound sliders: shown as percentages, saved when let go (a level of 0–1, or 0–1.5 for what is sent).
   const sliders = [...document.querySelectorAll('input[type=range][data-level]')];
-  const showLevel = (input) => setText($(`${input.id}Out`),
-    input.id === 'setSpeakers' && Number(input.value) === 0 ? 'Silent' : `${input.value}%`);
+  const showLevel = (input) => {
+    setText($(`${input.id}Out`), input.id === 'setSpeakers' && Number(input.value) === 0 ? 'Silent' : `${input.value}%`);
+    // How far along the track is filled (the slider's own CSS reads it).
+    input.style.setProperty('--fill', `${(Number(input.value) - Number(input.min)) / (Number(input.max) - Number(input.min)) * 100}%`);
+  };
   for (const input of sliders) {
     input.addEventListener('input', () => showLevel(input));
     input.addEventListener('change', () => {
@@ -78,6 +82,13 @@ export function settings(ctx) {
     for (const input of switches) {
       if (!pending.has(input.dataset.setting)) input.checked = s[input.dataset.setting] === true;
     }
+    // The privacy curtain needs Windows 10 version 2004 or later (a window left out of the capture).
+    const noCurtain = st.app?.features?.curtain === false;
+    for (const input of switches.filter(i => i.dataset.setting === 'curtain')) input.disabled = noCurtain && !input.checked;
+    show($('curtainHint'), noCurtain);
+    setText($('quickCurtainHint'), noCurtain ? 'Needs Windows 10 version 2004 or later' : 'Black out the PC\'s screen');
+    $('quickCurtain').closest('.qt').dataset.disabled = String(noCurtain);
+
     for (const input of sliders) {
       const v = s[input.dataset.level];
       // Not while it's being dragged or saved: a live update would snap it back.
@@ -86,21 +97,21 @@ export function settings(ctx) {
       }
       showLevel(input);
     }
-    // Keeping the Mac's speakers quiet needs the sound tap (macOS 14.2 and later).
+    // Turning the PC's own speakers down needs Windows 10 version 2004 or later.
     const tap = st.soundTap === true;
     $('setSpeakers').disabled = !tap;
     setText($('soundHint'), tap
-      ? 'These only apply while you\'re connected; afterwards the Mac sounds as usual. At Silent nobody near the Mac ' +
-        'hears anything, and you still hear everything on your device. The first time you lower the speakers, macOS asks ' +
-        'to let Perch record this Mac\'s sound: allow it at the Mac.'
-      : 'This Mac\'s speakers always play as usual while you\'re connected: keeping them quiet needs macOS 14.2 or later.');
+      ? 'These only apply while you\'re connected; afterwards your PC sounds as usual. At Silent nobody near the PC ' +
+        'hears anything, and you still hear everything on your device.'
+      : 'Your PC\'s speakers always play as usual while you\'re connected: turning them down needs Windows 10 version ' +
+        '2004 or later.');
     if (!pending.has('idleMinutes') && typeof s.idleMinutes === 'number') {
       const v = String(s.idleMinutes);
-      // A value Perch allows but this list doesn't offer still shows correctly.
+      // A value Roost allows but this list doesn't offer still shows correctly.
       if (![...idle.options].some(o => o.value === v)) idle.append(new Option(IDLE_LABEL(s.idleMinutes), v));
       idle.value = v;
     }
-    // The Mac's sound outputs, for "talk through this Mac". Only rebuilt when the list really changed, so an open
+    // The PC's sound outputs, for "talk through your PC". Only rebuilt when the list really changed, so an open
     // menu isn't yanked away by a live update.
     const outs = Array.isArray(st.audioOutputs) ? st.audioOutputs : [];
     $('micOutputRow').hidden = outs.length === 0;
@@ -116,12 +127,16 @@ export function settings(ctx) {
     if (!pending.has('quality')) {
       for (const r of document.querySelectorAll('#setQuality input[type=radio]')) r.checked = r.value === s.quality;
     }
-    // macOS can hold a login item back until it's approved in System Settings.
-    const needsApproval = s.loginItem === true && /approval/i.test(st.loginItem?.status ?? '');
+    // Starting with Windows can be switched off behind Roost's back (Task Manager › Startup apps), or fail.
+    const status = String(st.loginItem?.status ?? '');
+    const blocked = s.loginItem === true && /approval|disabled/i.test(status);
+    const failed = s.loginItem === true && /error|fail/i.test(status);
     const loginHint = $('loginItemHint');
-    setText(loginHint, needsApproval
-      ? 'macOS wants your OK: in System Settings, open General › Login Items and switch on Perch.' : '');
-    show(loginHint, needsApproval);
+    setText(loginHint, blocked
+      ? 'Windows has Roost switched off as a startup app: open Task Manager › Startup apps (or Settings › Apps › ' +
+        'Startup) and switch Roost on.'
+      : failed ? 'Windows didn\'t let Roost add itself to the startup apps. Try switching this off and on again.' : '');
+    show(loginHint, blocked || failed);
   }
 
   return { render };

@@ -3,7 +3,7 @@
 
 export const $ = (id) => {
   const el = document.getElementById(id);
-  if (!el) throw new Error(`Setup page is missing #${id}`);
+  if (!el) throw new Error(`Control Center is missing #${id}`);
   return el;
 };
 

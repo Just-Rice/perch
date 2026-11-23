@@ -1,5 +1,5 @@
-// Talking to Perch's Setup server on this Mac. Every call carries the page's key (from ?k= in its address) in the
-// X-Perch-Key header; without it the server answers nothing. See host/src/setup-server.mjs.
+// Talking to Roost's Control Center server on this PC. Every call carries the page's key (from ?k= in its address) in
+// the X-Roost-Key header; without it the server answers nothing. See host/src/setup-server.mjs.
 
 const KEY = new URLSearchParams(location.search).get('k') ?? '';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -8,9 +8,10 @@ export class ApiError extends Error {
   constructor(message, status) { super(message); this.status = status; }
 }
 
-// Also what an old Setup tab sees after Perch quit or restarted (each run has its own address and key).
-const NOT_RUNNING = 'Can\'t reach Perch on this Mac. Check that Perch is running (its icon is in the menu bar), then open ' +
-  'Setup again from that icon: a Setup page left open from before Perch last restarted can\'t reach it any more.';
+// Also what an old Control Center tab sees after Roost quit or restarted (each run has its own address and key).
+const NOT_RUNNING = 'Can\'t reach Roost on this PC. Check that Roost is running (its icon is in the notification area ' +
+  'of the taskbar), then open the Control Center again from that icon: a page left open from before Roost last ' +
+  'restarted can\'t reach it any more.';
 
 async function request(path, options = {}) {
   let res;
@@ -18,20 +19,20 @@ async function request(path, options = {}) {
     res = await fetch(path, {
       ...options,
       cache: 'no-store',
-      headers: { 'X-Perch-Key': KEY, ...(options.headers ?? {}) },
+      headers: { 'X-Roost-Key': KEY, ...(options.headers ?? {}) },
     });
   } catch {
     throw new ApiError(NOT_RUNNING, 0);
   }
   let body = null;
   try { body = await res.json(); } catch {}
-  if (!res.ok) throw new ApiError(body?.error || `Perch couldn't do that (error ${res.status}).`, res.status);
+  if (!res.ok) throw new ApiError(body?.error || `Roost couldn't do that (error ${res.status}).`, res.status);
   return body;
 }
 
 export const getState = () => request('/api/state');
 
-// POST /api/<action>. Resolves to {result, state}; a refusal throws ApiError with Perch's plain-language reason.
+// POST /api/<action>. Resolves to {result, state}; a refusal throws ApiError with Roost's plain-language reason.
 export function post(action, body = {}) {
   return request(`/api/${action}`, {
     method: 'POST',
@@ -42,7 +43,7 @@ export function post(action, body = {}) {
 
 // Live updates: a Server-Sent Events stream, read with fetch() because EventSource can't send the key header.
 // Calls onState(state) for every snapshot and onStatus('live' | 'lost' | 'stale') when the connection changes.
-// 'stale' means the key was refused (Perch restarted with a new one): reconnecting won't help.
+// 'stale' means the key was refused (Roost restarted with a new one): reconnecting won't help.
 export function watch(onState, onStatus) {
   let stopped = false;
   let controller = null;
@@ -70,7 +71,7 @@ export function watch(onState, onStatus) {
           else if (field === 'data') data.push(val);
         }
         if (event === 'state' && data.length) {
-          try { onState(JSON.parse(data.join('\n'))); } catch (e) { console.warn('Setup: bad state update', e); }
+          try { onState(JSON.parse(data.join('\n'))); } catch (e) { console.warn('Control Center: bad state update', e); }
         }
       }
     }
@@ -81,7 +82,7 @@ export function watch(onState, onStatus) {
       controller = new AbortController();
       try {
         const res = await fetch('/api/events', {
-          headers: { 'X-Perch-Key': KEY, Accept: 'text/event-stream' },
+          headers: { 'X-Roost-Key': KEY, Accept: 'text/event-stream' },
           cache: 'no-store',
           signal: controller.signal,
         });

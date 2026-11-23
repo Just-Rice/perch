@@ -1,4 +1,6 @@
-# Publishes the website (the site/ folder) to https://faarisaahmed.github.io/roost/ whenever it changes on main.
+# Publishes the website (site/ on main) to https://faarisaahmed.github.io/roost/ whenever it changes: copies it to
+# the gh-pages branch, which GitHub Pages serves. (Pages' Actions deployment kept failing on GitHub's side for this
+# repo; the branch works.)
 name: Pages
 
 on:
@@ -8,25 +10,26 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  publish:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: site
-      - id: deploy
-        uses: actions/deploy-pages@v4
+      - name: Copy site/ to the gh-pages branch
+        run: |
+          out="$(mktemp -d)"
+          cp -R site/. "$out/"
+          touch "$out/.nojekyll"   # serve files as they are, no Jekyll
+          cd "$out"
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Website from ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" gh-pages

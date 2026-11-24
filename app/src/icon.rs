@@ -78,9 +78,11 @@ fn sample(x: f64, y: f64, v: Variant) -> [f64; 4] {
     }
     let white = [1.0, 1.0, 1.0];
     let dark = tone([0x2A as f64 / 255.0, 0x14 as f64 / 255.0, 0x08 as f64 / 255.0]);
-    // The branch, then the bird sitting on it: one round body, one round head, a beak and an eye.
+    // The branch, then the bird sitting on it: a round body with a small tail (as Perch's bird has), a round head, a
+    // beak and an eye.
     if seg_dist(x, y, (14.0, 48.5), (50.0, 48.5)) <= 1.8 { p = mix(p, dark, 1.0); }
     if in_ellipse(x, y, 30.0, 36.0, 14.0, 10.0) || in_ellipse(x, y, 40.0, 26.0, 8.5, 8.5)
+        || in_triangle(x, y, (19.5, 34.4), (9.8, 29.9), (13.7, 39.5))
         || in_triangle(x, y, (47.5, 24.5), (54.0, 27.4), (47.5, 30.0)) {
         p = mix(p, white, 1.0);
     }

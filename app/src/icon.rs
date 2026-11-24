@@ -78,14 +78,13 @@ fn sample(x: f64, y: f64, v: Variant) -> [f64; 4] {
     }
     let white = [1.0, 1.0, 1.0];
     let dark = tone([0x2A as f64 / 255.0, 0x14 as f64 / 255.0, 0x08 as f64 / 255.0]);
-    // The branch, then the bird on it.
-    if seg_dist(x, y, (10.0, 46.5), (54.0, 46.5)) <= 1.6 { p = mix(p, dark, 1.0); }
-    if seg_dist(x, y, (28.0, 41.0), (28.0, 46.5)) <= 1.2 || seg_dist(x, y, (34.0, 41.0), (34.0, 46.5)) <= 1.2 { p = mix(p, white, 1.0); }
-    if in_ellipse(x, y, 30.0, 34.5, 13.0, 9.0) || in_ellipse(x, y, 38.5, 25.5, 8.0, 7.5)
-        || in_triangle(x, y, (18.4, 33.5), (11.0, 38.0), (20.0, 38.5)) || in_triangle(x, y, (45.9, 23.6), (51.5, 26.8), (45.9, 29.0)) {
+    // The branch, then the bird sitting on it: one round body, one round head, a beak and an eye.
+    if seg_dist(x, y, (14.0, 48.5), (50.0, 48.5)) <= 1.8 { p = mix(p, dark, 1.0); }
+    if in_ellipse(x, y, 30.0, 36.0, 14.0, 10.0) || in_ellipse(x, y, 40.0, 26.0, 8.5, 8.5)
+        || in_triangle(x, y, (47.5, 24.5), (54.0, 27.4), (47.5, 30.0)) {
         p = mix(p, white, 1.0);
     }
-    if in_ellipse(x, y, 40.6, 24.2, 1.9, 1.9) { p = mix(p, dark, 1.0); }
+    if in_ellipse(x, y, 42.0, 25.0, 2.0, 2.0) { p = mix(p, dark, 1.0); }
     if v == Variant::Connected {
         // A green "someone is here" dot with a white ring, bottom right.
         if in_ellipse(x, y, 52.0, 52.0, 12.0, 12.0) { p = mix(p, white, 1.0); }
@@ -134,12 +133,14 @@ mod tests {
         let at = |x: usize, y: usize| &px[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4];
         assert_eq!(at(0, 0)[3], 0, "outside the rounded corner");
         assert_eq!(at(10, 10)[0], 255);
-        assert_eq!(at(30, 35), &[255, 255, 255, 255], "the bird's body");
+        assert_eq!(at(30, 37), &[255, 255, 255, 255], "the bird's body");
         let grey = render(32, Variant::Dimmed);
         let p = &grey[(8 * 32 + 8) * 4..];
         assert!(p[0] == p[1] && p[1] == p[2]);
         let ico = ico(Variant::Connected);
         assert_eq!(&ico[..4], &[0, 0, 1, 0]);
-        std::fs::write(std::env::temp_dir().join("roost-icon-test.png"), png(256, Variant::Connected)).unwrap();
+        for (size, v, name) in [(256, Variant::Normal, "256"), (256, Variant::Connected, "256c"), (32, Variant::Normal, "32"), (16, Variant::Normal, "16")] {
+            std::fs::write(std::env::temp_dir().join(format!("roost-icon-{name}.png")), png(size, v)).unwrap();
+        }
     }
 }

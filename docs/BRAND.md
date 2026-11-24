@@ -54,7 +54,9 @@ Defined as CSS custom properties on `:root`, redefined for dark mode under
 - Background motif: **embers** (`ember.js`): a few slow-drifting warm glows and tiny sparks on a canvas behind the
   page, very subtle, paused when the tab is hidden or reduced motion is on, hidden while viewing a PC.
 - Icons: 1.75px stroke, rounded caps and joins, 20px grid (inline SVG).
-- The logo is `site/img/icon.svg`: an ember-gradient rounded square with a small bird sitting on a branch.
+- The logo is `site/img/icon.svg`: an ember-gradient rounded square with a simple white bird (round body, round head,
+  beak, eye) sitting on a dark branch. Keep it that simple: it has to read at 16 pixels in the tray. `app/src/icon.rs`
+  draws the same picture for the tray and the .exe.
 
 ## Layout signatures (what makes Roost look like Roost)
 

@@ -6,12 +6,12 @@
     </linearGradient>
   </defs>
   <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#roost-ember)"/>
-  <!-- the bird: round head, plump body, short tail, sitting on the branch -->
-  <path d="M24 41c-3.6-1.2-6-4.5-6-8.4 0-5.1 4.1-9.2 9.2-9.2h1.3c.9-4 4.4-6.9 8.6-6.9 4.9 0 8.8 3.9 8.8 8.8v2.2c0 7.5-6.1 13.5-13.6 13.5H24z" fill="#fff"/>
-  <path d="M45.9 25.1l5.1 1.9-5.1 2z" fill="#fff"/>
-  <circle cx="39.2" cy="24.6" r="1.7" fill="#2A1408"/>
-  <path d="M18.4 33.5l-6.2 3.9 7.4.4" fill="#fff"/>
-  <!-- the branch and its feet -->
-  <path d="M10 46.5h44" stroke="#2A1408" stroke-width="3.2" stroke-linecap="round"/>
-  <path d="M28 41v5.5M34 41v5.5" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+  <!-- the branch, and the bird sitting on it: one round body, one round head, a beak and an eye -->
+  <path d="M14 48.5h36" stroke="#2A1408" stroke-width="3.6" stroke-linecap="round"/>
+  <g fill="#fff">
+    <ellipse cx="30" cy="36" rx="14" ry="10"/>
+    <circle cx="40" cy="26" r="8.5"/>
+    <path d="M47.5 24.5 54 27.4 47.5 30z"/>
+  </g>
+  <circle cx="42" cy="25" r="2" fill="#2A1408"/>
 </svg>

@@ -1,4 +1,4 @@
-// Relay (TURN) servers for strict networks. The Mac gets short-lived logins for its owner's own Cloudflare relay and
+// Relay (TURN) servers for strict networks. The computer gets short-lived logins for its owner's own Cloudflare relay and
 // passes them to the viewer inside the sealed offer; both sides check them with cleanIceServers first, so nothing but
 // plain STUN/TURN entries ever reaches RTCPeerConnection. See docs/PROTOCOL.md, "Relay".
 

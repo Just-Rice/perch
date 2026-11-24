@@ -1,4 +1,4 @@
-// WebCrypto wrappers shared by the website and the Mac host. All functions take and return Uint8Array.
+// WebCrypto wrappers shared by the website and the host. All functions take and return Uint8Array.
 import { utf8, concat } from './bytes.js';
 
 const subtle = globalThis.crypto.subtle;

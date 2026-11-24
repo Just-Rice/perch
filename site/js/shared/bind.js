@@ -19,12 +19,12 @@ export function bindProof(key, label, bind) {
   return hmacSha256(key, utf8(`perch ${label} v1`), bind);
 }
 
-// --- one-tap sign-in ("quick"): the passkey is asked for before connecting, so it can't sign the Mac's nonce ---
+// --- one-tap sign-in ("quick"): the passkey is asked for before connecting, so it can't sign the computer's nonce ---
 //
 // The browser makes its WebRTC certificate first and signs SHA-256("perch quick v1" ‖ r ‖ ts ‖ its fingerprint), with
-// a fresh 16-byte r and the time. The passkey's user handle also carries the first 16 bytes of the Mac's own (fixed)
+// a fresh 16-byte r and the time. The passkey's user handle also carries the first 16 bytes of the computer's own (fixed)
 // DTLS certificate fingerprint, so the browser only ever sends that assertion over a connection whose other end proves
-// it holds that certificate, i.e. the real Mac. The Mac checks the signed fingerprint is the one in the answer it
+// it holds that certificate, i.e. the real Mac. The computer checks the signed fingerprint is the one in the answer it
 // received, that ts is recent and that r is new. See docs/PROTOCOL.md, "One-tap sign-in".
 
 export const QUICK_MAX_AGE_MS = 3 * 60 * 1000;

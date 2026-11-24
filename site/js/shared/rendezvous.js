@@ -1,4 +1,4 @@
-// Rendezvous: how a viewer and a Mac find each other through public MQTT brokers before WebRTC takes over.
+// Rendezvous: how a viewer and a computer find each other through public MQTT brokers before WebRTC takes over.
 // Every message is sealed with AES-GCM (the topic is the additional data), published to every connected broker,
 // and de-duplicated on arrival, so one broker going down changes nothing. Brokers only ever see ciphertext.
 // See docs/PROTOCOL.md, "Rendezvous".
@@ -9,7 +9,7 @@ import { BROKERS, ENVELOPE_MAX_BYTES, ENVELOPE_MAX_SKEW_MS, TOPIC_PREFIX } from 
 
 // --- names, topics and keys ---
 
-// The names Perch makes up: adjective-animal-number, like amber-otter-4821.
+// The names Perch and the project make up: adjective-animal-number, like amber-otter-4821.
 export const MAC_NAME_RE = /^[a-z]{2,12}-[a-z]{2,12}-[0-9]{4}$/;
 // A name the owner chose instead (not recommended: it is easier to guess). Letters and digits, single hyphens between
 // them, 4 to 40 characters once normalized.
@@ -19,7 +19,7 @@ export function normalizeMacName(s) {
   return String(s ?? '').trim().toLowerCase().replace(/[\s_]+/g, '-');
 }
 
-// Could this (normalized) be a Mac's name, made up by Perch or chosen by its owner?
+// Could this (normalized) be a computer's name, made up by Perch or the project or chosen by its owner?
 export function isMacName(name) {
   return MAC_NAME_RE.test(name) || CUSTOM_MAC_NAME_RE.test(name);
 }
@@ -35,7 +35,7 @@ export async function nameTopic(macName) {
 }
 
 // A guest link has a meeting point of its own, made from the link's random id and secret alone: a guest learns
-// nothing about the Mac's usual address or key.
+// nothing about the computer's usual address or key.
 export async function guestTopic(guestId) {
   return `${TOPIC_PREFIX}g/${await shortHash('perch guest v1', guestId)}`;
 }
@@ -161,7 +161,7 @@ export class Rendezvous {
 
   // After the computer has slept (or changed network) the broker connections are dead, but nothing says so until a
   // ping goes unanswered half a minute later. A timer that fires much later than it should means we were asleep:
-  // reconnect everything at once, so a Mac that has just woken up can be reached within a couple of seconds.
+  // reconnect everything at once, so a computer that has just woken up can be reached within a couple of seconds.
   _watchForSleep() {
     clearInterval(this.sleepTimer);
     let last = this.now();
@@ -176,7 +176,7 @@ export class Rendezvous {
     this.sleepTimer.unref?.();
   }
 
-  // A broker added or taken away while running (the Mac owner's own relay, shared/wsrelay.js). Topics already
+  // A broker added or taken away while running (the owner's own relay, shared/wsrelay.js). Topics already
   // listened to are subscribed on it as soon as it connects.
   addBroker(url) {
     if (this.closed || this.brokers.includes(url)) return;

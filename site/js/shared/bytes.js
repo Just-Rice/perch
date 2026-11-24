@@ -1,4 +1,4 @@
-// Byte helpers shared by the website and the Mac host (plain ES module, browser and Node 20+).
+// Byte helpers shared by the website and the host (plain ES module, browser and Node 20+).
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();

@@ -1,0 +1,11 @@
+{
+  "repo": "https://github.com/perch-nest/core.git",
+  "ref": "v0.1.1",
+  "files": {
+    "protocol/": "site/js/shared/",
+    "relay/src/index.js": "relay/src/index.js",
+    "relay/node/server.mjs": "relay/node/server.mjs",
+    "scripts/sync-core.mjs": "scripts/sync-core.mjs"
+  },
+  "keep": ["site/js/shared/product.js"]
+}

@@ -1,4 +1,4 @@
-// Which way a session's connection runs, named the same way on the Mac (logs, Setup) and in the viewer (Connection
+// Which way a session's connection runs, named the same way on the computer (logs, Setup) and in the viewer (Connection
 // details):
 //   lan       direct, between two addresses on the same network
 //   internet  direct, through a router's public address (the two ends are on different networks, or the router sends

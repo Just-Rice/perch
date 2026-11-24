@@ -1,5 +1,6 @@
 // A small MQTT 3.1.1 client over WebSocket, enough for Perch's rendezvous: QoS 0 publish and subscribe.
 // Runs unchanged in browsers and in Node 22+ (global WebSocket). One instance talks to one broker.
+import { CLIENT_PREFIX } from './product.js';
 import { utf8, fromUtf8, concat, randomBytes, toHex } from './bytes.js';
 
 const CONNECT = 1, CONNACK = 2, PUBLISH = 3, PUBACK = 4, SUBSCRIBE = 8, SUBACK = 9;
@@ -64,7 +65,7 @@ export class MqttClient {
       this.ws = ws;
       ws.binaryType = 'arraybuffer';
       ws.onopen = () => {
-        const clientId = 'roost-' + toHex(randomBytes(8));
+        const clientId = CLIENT_PREFIX + toHex(randomBytes(8));
         // Connect flags: clean session (0x02), plus username (0x80) and password (0x40) when given.
         const flags = 0x02 | (this.username != null ? 0x80 : 0) | (this.password != null ? 0x40 : 0);
         const body = concat(str('MQTT'), Uint8Array.of(4, flags), u16(this.keepalive), str(clientId),

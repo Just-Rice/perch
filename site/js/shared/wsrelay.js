@@ -1,10 +1,10 @@
-// The Worker relay (docs/PROTOCOL.md, "Worker relay"): when a network blocks WebRTC, the viewer and the Mac reach each
+// The Worker relay (docs/PROTOCOL.md, "Worker relay"): when a network blocks WebRTC, the viewer and the computer reach each
 // other over WebSockets to the owner's own Cloudflare Worker (relay/), which passes bytes between them. This file is
 // what both ends share: the offer and answer texts, the keys, and the encrypted framing. The Worker never sees a key.
 //
-// Offer (inside the sealed rendezvous offer): the Mac's fresh ECDH P-256 key, the relay's address and the room, and —
-// when the Mac has its fixed DTLS certificate — that certificate and an ECDSA signature over all of it, so a viewer that
-// knows the Mac's pin (passkey, pairing link, guest link) only talks to the real Mac. Answer: the viewer's fresh ECDH
+// Offer (inside the sealed rendezvous offer): the computer's fresh ECDH P-256 key, the relay's address and the room, and —
+// when the computer has its fixed DTLS certificate — that certificate and an ECDSA signature over all of it, so a viewer that
+// knows the computer's pin (passkey, pairing link, guest link) only talks to the real Mac. Answer: the viewer's fresh ECDH
 // key. Both texts are used exactly as sent and received: they feed the keys and the sign-in binding (bind.js), so
 // anything in the middle that swaps a key makes every sign-in proof fail, as it does for WebRTC.
 //
@@ -60,7 +60,7 @@ export function roomUrl(base, room, role, auth = null) {
   return `${ws}/v1/room/${room}?role=${role}${auth ? `&auth=${auth}` : ''}`;
 }
 
-// What the Mac shows the relay to prove it is the relay's owner (the Worker checks the same HMAC).
+// What the computer shows the relay to prove it is the relay's owner (the Worker checks the same HMAC).
 export async function relayAuth(secretHex, label, room = '') {
   return toHex(await hmacSha256(utf8(secretHex), utf8(label + room)));
 }
@@ -75,7 +75,7 @@ export async function newEcdh() {
   return { privateKey: pair.privateKey, pub };
 }
 
-// What the Mac's certificate signs: everything in the offer that matters.
+// What the computer's certificate signs: everything in the offer that matters.
 export function offerSignedBytes({ sid, url, room, eph }) {
   return sha256(utf8('perch ws offer v1'), utf8(sid), utf8('\n'), utf8(url), utf8('\n'), utf8(room), eph);
 }
@@ -103,7 +103,7 @@ function point(b64) {
   return p;
 }
 
-// The viewer's check of the Mac's offer. With a pin, the offer must carry a certificate whose SHA-256 begins with the
+// The viewer's check of the computer's offer. With a pin, the offer must carry a certificate whose SHA-256 begins with the
 // pin, and a valid signature by it. Resolves to {url, room, eph}.
 export async function readOffer(text, { sid, pin = null, allowLocal = false }) {
   const o = parse(text, ['sid', 'url', 'room', 'eph']);

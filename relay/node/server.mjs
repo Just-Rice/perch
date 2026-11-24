@@ -1,22 +1,23 @@
-// Roost's relay as a plain Node.js server: the same protocol as the Cloudflare Worker (../src/index.js), for running
+// The relay as a plain Node.js server (for Perch and Roost alike): the same protocol as the Cloudflare Worker (../src/index.js), for running
 // on your own computer behind a tunnel (for example zrok) as a second relay. See README.md.
 //
-//   GET  /v1/info                         {roost: "relay", v, claimed}
-//   POST /v1/claim  {secret}              the first PC to call this owns the relay (or RELAY_SECRET, if set)
+//   GET  /v1/info                         {perch: "relay", roost: "relay", nest: "relay", v, claimed}  (each project checks its own)
+//   POST /v1/claim  {secret}              the first computer to call this owns the relay (or RELAY_SECRET, if set)
 //   GET  /v1/check?auth=…                 200 when auth = HMAC(secret, "perch relay check v1")
 //   GET  /v1/room/<room>?role=mac&auth=…  WebSocket; auth = HMAC(secret, "perch relay room v1" ‖ room)
-//   GET  /v1/room/<room>?role=viewer      WebSocket; only paired with a PC that opened the room
+//   GET  /v1/room/<room>?role=viewer      WebSocket; only paired with a computer that opened the room
 //   GET  /v1/mqtt                         WebSocket (subprotocol "mqtt"): the small rendezvous broker
 //   GET  /v1/public                       {url}: this relay's public address, when it runs its own Quick Tunnel
-//   anything else                         the Roost website (../../site)
+//   anything else                         the the project website (../../site)
 //
-// Settings (environment): PORT (8788), HOST (127.0.0.1), RELAY_SECRET (64 hex characters; otherwise the first PC to
-// claim the relay owns it, remembered in RELAY_DATA/secret), RELAY_DATA (~/.roost-relay), SITE_DIR (../../site),
+// Settings (environment): PORT (8788), HOST (127.0.0.1), RELAY_SECRET (64 hex characters; otherwise the first computer to
+// claim the relay owns it, remembered in RELAY_DATA/secret), RELAY_DATA (~/.perch-relay or ~/.roost-relay if one exists, else ~/.perch-nest-relay), SITE_DIR (../../site),
 // QUICK_TUNNEL=1 (run a Cloudflare Quick Tunnel to this relay, with CLOUDFLARED as the cloudflared binary).
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { join, normalize, extname, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -31,7 +32,9 @@ const MAX_MESSAGE = 1024 * 1024;
 const here = dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT ?? 8788);
 const HOST = process.env.HOST ?? '127.0.0.1';
-const DATA = process.env.RELAY_DATA ?? join(homedir(), '.roost-relay');
+// Where its claimed secret is kept. A relay that already ran as Perch's or Roost's keeps its folder (and so its owner).
+const DATA = process.env.RELAY_DATA ?? ['.perch-relay', '.roost-relay'].map(d => join(homedir(), d)).find(d => existsSync(d))
+  ?? join(homedir(), '.perch-nest-relay');
 const SITE = process.env.SITE_DIR ?? join(here, '..', '..', 'site');
 const FIXED_SECRET = process.env.RELAY_SECRET || null;
 if (FIXED_SECRET && !HEX64_RE.test(FIXED_SECRET)) throw new Error('RELAY_SECRET must be 64 hex characters');
@@ -147,7 +150,7 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://relay');
     const path = url.pathname;
-    if (path === '/v1/info') return json(res, { roost: 'relay', v: VERSION, claimed: !!(await ownerSecret()) });
+    if (path === '/v1/info') return json(res, { perch: 'relay', roost: 'relay', nest: 'relay', v: VERSION, claimed: !!(await ownerSecret()) });
     if (path === '/v1/public') return json(res, { url: publicUrl });
     if (path === '/v1/claim' && req.method === 'POST') {
       if (FIXED_SECRET) return json(res, { ok: false, error: 'This relay has a fixed secret (RELAY_SECRET).' }, 409);
@@ -180,7 +183,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-// --- rooms: one PC and one viewer, bytes passed between them unchanged ---
+// --- rooms: one computer and one viewer, bytes passed between them unchanged ---
 
 const rooms = new Map(); // room -> {mac, viewer, timer}
 const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE + 1, perMessageDeflate: false });
@@ -220,11 +223,12 @@ function joinRoom(ws, name, role) {
   ws.on('error', () => closeRoom(name, 1011, 'the other side failed', ws));
 }
 
-// --- the rendezvous broker: just enough MQTT 3.1.1 for Roost (see ../src/index.js, Broker) ---
+// --- the rendezvous broker: just enough MQTT 3.1.1 for the project (see ../src/index.js, Broker) ---
 
 const MQTT = { CONNECT: 1, CONNACK: 2, PUBLISH: 3, SUBSCRIBE: 8, SUBACK: 9, UNSUBSCRIBE: 10, UNSUBACK: 11,
   PINGREQ: 12, PINGRESP: 13, DISCONNECT: 14 };
-const TOPIC_RE = /^roost\/v1\/[A-Za-z0-9_\/-]{1,120}$/;
+// Perch's, Roost's and Perch Nest's own topics (each project's TOPIC_PREFIX, and the Nest's nest/v1/); nothing else.
+const TOPIC_RE = /^(perch|roost|nest)\/v1\/[A-Za-z0-9_\/-]{1,120}$/;
 const MAX_TOPICS = 8;
 const MAX_PUBLISH = 70 * 1024;
 const PUBLISH_BURST = 60;
@@ -384,6 +388,6 @@ server.on('upgrade', async (req, socket, head) => {
 });
 
 server.listen(PORT, HOST, () => {
-  log(`Roost relay listening on http://${HOST}:${PORT} (site: ${SITE})`);
+  log(`Relay listening on http://${HOST}:${PORT} (site: ${SITE})`);
   if (QUICK_TUNNEL) startTunnel();
 });

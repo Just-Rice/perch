@@ -37,14 +37,14 @@ function allowedHere() {
 }
 
 function refuse() {
-  const real = location.hostname === 'faarisaahmed.github.io';
-  const url = real ? 'https://faarisaahmed.github.io/roost/connect.html' : location.href.split('#')[0];
+  const real = location.hostname === 'just-rice.github.io';
+  const url = real ? 'https://just-rice.github.io/roost/connect.html' : location.href.split('#')[0];
   const p = document.getElementById('bootText');
   const link = document.createElement('a');
   link.href = url;
   link.target = '_blank';
   link.rel = 'noopener noreferrer';
-  link.textContent = real ? 'faarisaahmed.github.io/roost' : url;
+  link.textContent = real ? 'just-rice.github.io/roost' : url;
   p.replaceChildren("Roost can't run inside another website. Open it directly: ", link);
   document.getElementById('boot').classList.add('refused');
   document.title = 'Roost: open it directly';

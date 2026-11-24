@@ -11,7 +11,7 @@
 //   anything else                         the the project website (../../site)
 //
 // Settings (environment): PORT (8788), HOST (127.0.0.1), RELAY_SECRET (64 hex characters; otherwise the first computer to
-// claim the relay owns it, remembered in RELAY_DATA/secret), RELAY_DATA (~/.perch-relay or ~/.roost-relay if one exists, else ~/.perch-nest-relay), SITE_DIR (../../site),
+// claim the relay owns it, remembered in RELAY_DATA/secret), RELAY_DATA (~/.perch-relay or ~/.roost-relay if one exists, else ~/.roost-relay), SITE_DIR (../../site),
 // QUICK_TUNNEL=1 (run a Cloudflare Quick Tunnel to this relay, with CLOUDFLARED as the cloudflared binary).
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
@@ -34,7 +34,7 @@ const PORT = Number(process.env.PORT ?? 8788);
 const HOST = process.env.HOST ?? '127.0.0.1';
 // Where its claimed secret is kept. A relay that already ran as Perch's or Roost's keeps its folder (and so its owner).
 const DATA = process.env.RELAY_DATA ?? ['.perch-relay', '.roost-relay'].map(d => join(homedir(), d)).find(d => existsSync(d))
-  ?? join(homedir(), '.perch-nest-relay');
+  ?? join(homedir(), '.roost-relay');
 const SITE = process.env.SITE_DIR ?? join(here, '..', '..', 'site');
 const FIXED_SECRET = process.env.RELAY_SECRET || null;
 if (FIXED_SECRET && !HEX64_RE.test(FIXED_SECRET)) throw new Error('RELAY_SECRET must be 64 hex characters');

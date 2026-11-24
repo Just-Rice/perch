@@ -12,7 +12,7 @@ import {
 
 const release = (over = {}) => ({
   tag_name: 'v0.2.0',
-  html_url: 'https://github.com/faarisaahmed/roost/releases/tag/v0.2.0',
+  html_url: 'https://github.com/Just-Rice/roost/releases/tag/v0.2.0',
   draft: false,
   prerelease: false,
   body: 'Smoother video on slow networks.\r\n\r\nFixes a crash when a display is unplugged.',
@@ -62,12 +62,12 @@ test('a newer release is offered, with its page and short notes', async () => {
   const u = await checkForUpdate('0.1.0', { fetchImpl: f, log: quiet });
   assert.deepEqual(u, {
     version: '0.2.0',
-    url: 'https://github.com/faarisaahmed/roost/releases/tag/v0.2.0',
+    url: 'https://github.com/Just-Rice/roost/releases/tag/v0.2.0',
     notes: 'Smoother video on slow networks.\n\nFixes a crash when a display is unplugged.',
   });
   assert.equal(f.calls.length, 1);
   assert.equal(f.calls[0].url, LATEST_RELEASE_API);
-  assert.equal(LATEST_RELEASE_API, 'https://api.github.com/repos/faarisaahmed/roost/releases/latest');
+  assert.equal(LATEST_RELEASE_API, 'https://api.github.com/repos/Just-Rice/roost/releases/latest');
   const headers = f.calls[0].opts.headers;
   assert.match(headers['User-Agent'], /^Roost\/0\.1\.0 /);
   assert.equal(headers.Accept, 'application/vnd.github+json');
@@ -155,7 +155,7 @@ test('notes are cut to about 500 characters and links stay on our release pages'
   assert.equal(empty.notes, '');
   for (const html_url of ['https://evil.example/roost', 'javascript:alert(1)', 'https://github.com/Someone-Else/roost/releases/tag/v0.2.0', undefined]) {
     const r = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ html_url })), log: quiet });
-    assert.equal(r.url, 'https://github.com/faarisaahmed/roost/releases/tag/v0.2.0', String(html_url));
+    assert.equal(r.url, 'https://github.com/Just-Rice/roost/releases/tag/v0.2.0', String(html_url));
   }
 });
 
@@ -185,7 +185,7 @@ test('the install script: install.ps1 from the installed copy, or else from the 
     assert.ok(args[5].includes(`DownloadString('${INSTALL_SCRIPT_URL}')`));
     assert.match(args[5], /\) -Update$/, 'run with -Update');
   }
-  assert.equal(INSTALL_SCRIPT_URL, 'https://faarisaahmed.github.io/roost/install.ps1');
+  assert.equal(INSTALL_SCRIPT_URL, 'https://just-rice.github.io/roost/install.ps1');
 });
 
 test('installUpdate starts the install script detached and lets go of it', () => {

@@ -1,6 +1,6 @@
 # Roost installer for Windows.
 #
-#   irm https://faarisaahmed.github.io/roost/install.ps1 | iex
+#   irm https://just-rice.github.io/roost/install.ps1 | iex
 #
 # What it does, in order:
 #   1. checks this PC runs Windows 10 version 1903 (build 18362) or later, or Windows 11, and whether it has an
@@ -23,7 +23,7 @@
 # Options: -Update (quiet; used by Roost's own "Update" menu item), -NoStart, -Dir <folder>.
 # Piped into iex there is nowhere to put options, so to pass them, run it as a script block:
 #
-#   & ([scriptblock]::Create((irm https://faarisaahmed.github.io/roost/install.ps1))) -NoStart
+#   & ([scriptblock]::Create((irm https://just-rice.github.io/roost/install.ps1))) -NoStart
 #
 # or save it and run: powershell -ExecutionPolicy Bypass -File install.ps1 -Update
 #
@@ -53,7 +53,7 @@ function Install-Roost {
     [Net.ServicePointManager]::SecurityProtocol = $oldProtocols -bor [Net.SecurityProtocolType]::Tls12
   } catch { }
 
-  $Repo = 'faarisaahmed/roost'
+  $Repo = 'Just-Rice/roost'
   $TaskPath = '\Roost\'
   $TaskName = 'Roost'
   $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'

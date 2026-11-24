@@ -50,8 +50,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: '24'
-      - name: The files from Perch Nest's core are unchanged (fix shared code in perch-nest/core, not here)
-        run: node scripts/sync-core.mjs --check
       - name: Install the host's packages
         working-directory: host
         run: npm ci

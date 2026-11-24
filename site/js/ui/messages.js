@@ -110,7 +110,7 @@ export function deniedMessage(reason, { retryAfter, final = true, route } = {}) 
         'For safety, each sign-in has to finish within 2 minutes. Try again.', route === 'pair' ? 'home' : 'retry', wait);
     case 'origin': case 'cross-origin':
       return msg("Your PC doesn't accept sign-ins from this site",
-        'It accepts them from faarisaahmed.github.io/roost and from sites added in Roost\'s Control Center on the PC ' +
+        'It accepts them from just-rice.github.io/roost and from sites added in Roost\'s Control Center on the PC ' +
         '(Sites that can sign in), and never from inside another website.', 'home');
     case 'protocol':
       return msg("This page and your PC didn't understand each other",

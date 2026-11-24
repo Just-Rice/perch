@@ -9,10 +9,10 @@ import { existsSync, readFile } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 
-export const REPO = 'faarisaahmed/roost';
+export const REPO = 'Just-Rice/roost';
 export const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 export const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
-export const SITE = 'https://faarisaahmed.github.io/roost/';
+export const SITE = 'https://just-rice.github.io/roost/';
 // Used when the installed copy has no install.ps1 beside it (an older or hand-made install).
 export const INSTALL_SCRIPT_URL = `${SITE}install.ps1`;
 const TIMEOUT_MS = 10_000;

@@ -19,7 +19,7 @@ volunteer project, so please allow a few days.
 - **The PC is the lock.** The website is only a keypad: every check happens in the Roost app on the PC. Nothing is
   shown, and no click or key is accepted, until a viewer has passed both steps.
 - **Two steps every time.** A passkey (Face ID, Touch ID, a phone, or a security key) and a 6-digit code from an
-  authenticator app. Passkeys only work on `https://faarisaahmed.github.io`, so a look-alike site can't use them.
+  authenticator app. Passkeys only work on `https://just-rice.github.io`, so a look-alike site can't use them.
 - **Sign-ins are tied to one connection.** The passkey signs a value built from a fresh random number the PC sent and
   from both ends' connection descriptions (SDPs), which carry the certificates the encrypted connection uses. If
   anything in between swapped those to listen in, the value wouldn't match and the sign-in fails
@@ -40,7 +40,7 @@ volunteer project, so please allow a few days.
 
 ## Known limitations
 
-- **Every page on `faarisaahmed.github.io` shares one web origin.** Browsers treat all of the projects published there
+- **Every page on `just-rice.github.io` shares one web origin.** Browsers treat all of the projects published there
   as one site. If any of them were compromised, a malicious page could imitate Roost's sign-in. It would still need
   your passkey approval and your 6-digit code, so stay alert to unexpected prompts.
 - **Recognising the PC.** Passkeys and pairing links made by Roost 0.2 or later carry a pin of the PC's own

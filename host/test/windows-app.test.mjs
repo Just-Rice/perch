@@ -20,8 +20,8 @@ const WINDOWS_HELLO = {
 async function rig() {
   const home = mkdtempSync(join(tmpdir(), 'roost-winapp-'));
   const store = await Store.open({ home, secrets: 'file' });
-  const config = { test: false, version: '0.1.0', origins: ['https://faarisaahmed.github.io'], rpId: 'faarisaahmed.github.io',
-    site: 'https://faarisaahmed.github.io/roost/connect.html' };
+  const config = { test: false, version: '0.1.0', origins: ['https://just-rice.github.io'], rpId: 'just-rice.github.io',
+    site: 'https://just-rice.github.io/roost/connect.html' };
   const auth = new Auth({ store, config, log: null });
   const commands = [];
   const app = { command: (name, body) => commands.push([name, body]) };

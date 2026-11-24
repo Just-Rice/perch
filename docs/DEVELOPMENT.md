@@ -9,17 +9,9 @@
 | `site/` | The website (GitHub Pages): front page, `connect.html` sign-in and viewer, `install.ps1`, `uninstall.ps1` |
 | `site/js/shared/` | Code shared by the website and the host: MQTT, sealed rendezvous, channel binding, constants |
 | `relay/` | The optional Cloudflare Worker relay, and `relay/node/` its Node.js backup |
-| `scripts/` | `set-version.mjs`, `package.ps1` (the release zip), `sync-core.mjs` (brings in Perch Nest's core) |
-| `core.json`, `core.lock` | Which version of [Perch Nest's core](https://github.com/perch-nest/core) Roost uses, and what it copied |
+| `scripts/` | `set-version.mjs`, `package.ps1` (the release zip) |
 | `tests/site/`, `tests/e2e/` | Website tests; end to end (website + host + stand-in app, or + the real roost.exe) |
 | `docs/` | `PROTOCOL.md` (the contract between the parts), `WINDOWS-APP.md` (roost.exe's side), `BRAND.md` |
-
-## Shared code: Perch Nest's core
-
-The protocol (`site/js/shared/`, except `product.js`) and the relay (`relay/src/index.js`, `relay/node/server.mjs`)
-come from [perch-nest/core](https://github.com/perch-nest/core), which Perch uses too. **Don't edit them here**: CI
-fails if they differ from `core.lock`. Change them in core, tag a release there, then bump `ref` in `core.json` and run
-`node scripts/sync-core.mjs`. `site/js/shared/product.js` is Roost's own (its website address and meeting points).
 
 ## Running it
 

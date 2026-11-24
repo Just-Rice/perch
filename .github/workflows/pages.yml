@@ -1,4 +1,4 @@
-# Publishes the website (site/ on main) to https://faarisaahmed.github.io/roost/ whenever it changes: copies it to
+# Publishes the website (site/ on main) to https://just-rice.github.io/roost/ whenever it changes: copies it to
 # the gh-pages branch, which GitHub Pages serves. (Pages' Actions deployment kept failing on GitHub's side for this
 # repo; the branch works.)
 name: Pages

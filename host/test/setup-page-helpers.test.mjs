@@ -90,8 +90,8 @@ test('the state pill says what Roost is doing, in plain words', () => {
 
 test('the hero\'s line under the state word doesn\'t repeat it', () => {
   assert.equal(stateLine({ state: 'paused', stateText: 'Paused: nobody can connect' }, 'Paused'), 'Nobody can connect');
-  assert.equal(stateLine({ state: 'ready', stateText: 'Ready: open faarisaahmed.github.io/roost to connect' }, 'Ready'),
-    'Open faarisaahmed.github.io/roost to connect');
+  assert.equal(stateLine({ state: 'ready', stateText: 'Ready: open just-rice.github.io/roost to connect' }, 'Ready'),
+    'Open just-rice.github.io/roost to connect');
   assert.equal(stateLine({ state: 'needs-setup', stateText: 'Finish setting up: add Roost to your authenticator app' }, 'Needs setup'),
     'Finish setting up: add Roost to your authenticator app');
   assert.equal(stateLine({ state: 'offline', stateText: 'Offline' }, 'Offline'), '');

@@ -250,6 +250,12 @@ export class Store {
     this.config.workerRelayBackup = url ?? null;
     this.save();
   }
+  // A relay on this Mac (relay/node with QUICK_TUNNEL=1) whose public address changes; asked for it when needed.
+  get workerRelayTunnel() { return this.config.workerRelayTunnel ?? null; }
+  setWorkerRelayTunnel(url) {
+    this.config.workerRelayTunnel = url ?? null;
+    this.save();
+  }
 
   // --- devices ---
   get devices() { return this.config.devices; }

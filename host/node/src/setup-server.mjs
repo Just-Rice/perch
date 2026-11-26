@@ -82,6 +82,8 @@ const ACTIONS = {
   workerRelayRemove: [],
   workerRelayBackupSet: [['url', 'string']],
   workerRelayBackupRemove: [],
+  workerRelayTunnelSet: [['url', 'string']],
+  workerRelayTunnelRemove: [],
   updateSettings: [['patch', 'object']],
   disconnect: [],
   requestPermission: [['which', 'string']],

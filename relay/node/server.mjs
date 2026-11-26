@@ -7,11 +7,14 @@
 //   GET  /v1/room/<room>?role=mac&auth=…  WebSocket; auth = HMAC(secret, "perch relay room v1" ‖ room)
 //   GET  /v1/room/<room>?role=viewer      WebSocket; only paired with a Mac that opened the room
 //   GET  /v1/mqtt                         WebSocket (subprotocol "mqtt"): the small rendezvous broker
+//   GET  /v1/public                       {url}: this relay's public address, when it runs its own Quick Tunnel
 //   anything else                         the Perch website (../../site)
 //
 // Settings (environment): PORT (8788), HOST (127.0.0.1), RELAY_SECRET (64 hex characters; otherwise the first Mac to
-// claim the relay owns it, remembered in RELAY_DATA/secret), RELAY_DATA (~/.perch-relay), SITE_DIR (../../site).
+// claim the relay owns it, remembered in RELAY_DATA/secret), RELAY_DATA (~/.perch-relay), SITE_DIR (../../site),
+// QUICK_TUNNEL=1 (run a Cloudflare Quick Tunnel to this relay, with CLOUDFLARED as the cloudflared binary).
 import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { readFile, writeFile, mkdir, stat } from 'node:fs/promises';
 import { join, normalize, extname, dirname } from 'node:path';
@@ -34,6 +37,44 @@ const FIXED_SECRET = process.env.RELAY_SECRET || null;
 if (FIXED_SECRET && !HEX64_RE.test(FIXED_SECRET)) throw new Error('RELAY_SECRET must be 64 hex characters');
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
+
+// --- an optional Cloudflare Quick Tunnel: a free https://<random>.trycloudflare.com address, new each time it starts ---
+
+const QUICK_TUNNEL = process.env.QUICK_TUNNEL === '1';
+const CLOUDFLARED = process.env.CLOUDFLARED || 'cloudflared';
+const TUNNEL_URL_RE = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/;
+let publicUrl = null;
+let tunnelProc = null;
+let stopping = false;
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => { stopping = true; tunnelProc?.kill(); process.exit(0); });
+}
+
+function startTunnel(delay = 0) {
+  setTimeout(() => {
+    if (stopping) return;
+    const proc = tunnelProc = spawn(CLOUDFLARED, ['tunnel', '--no-autoupdate', '--url', `http://${HOST}:${PORT}`],
+      { stdio: ['ignore', 'pipe', 'pipe'] });
+    let seen = '';
+    const read = chunk => {
+      if (seen === null) return;
+      seen += chunk;
+      const m = TUNNEL_URL_RE.exec(seen);
+      if (m) { publicUrl = m[0]; seen = null; log(`quick tunnel: ${publicUrl}`); }
+      else if (seen.length > 65536) seen = seen.slice(-4096);
+    };
+    proc.stdout.on('data', read);
+    proc.stderr.on('data', read);
+    proc.on('error', e => log(`quick tunnel: couldn't start ${CLOUDFLARED}: ${e.message}`));
+    proc.on('close', code => {
+      publicUrl = null;
+      tunnelProc = null;
+      if (stopping) return;
+      log(`quick tunnel: cloudflared exited (${code}); starting a new one`);
+      startTunnel(10_000);
+    });
+  }, delay);
+}
 
 // --- the owner's secret ---
 
@@ -100,6 +141,7 @@ const server = createServer(async (req, res) => {
     const url = new URL(req.url, 'http://relay');
     const path = url.pathname;
     if (path === '/v1/info') return json(res, { perch: 'relay', v: VERSION, claimed: !!(await ownerSecret()) });
+    if (path === '/v1/public') return json(res, { url: publicUrl });
     if (path === '/v1/claim' && req.method === 'POST') {
       if (FIXED_SECRET) return json(res, { ok: false, error: 'This relay has a fixed secret (RELAY_SECRET).' }, 409);
       let secret;
@@ -334,4 +376,7 @@ server.on('upgrade', async (req, socket, head) => {
   }
 });
 
-server.listen(PORT, HOST, () => log(`Perch relay listening on http://${HOST}:${PORT} (site: ${SITE})`));
+server.listen(PORT, HOST, () => {
+  log(`Perch relay listening on http://${HOST}:${PORT} (site: ${SITE})`);
+  if (QUICK_TUNNEL) startTunnel();
+});

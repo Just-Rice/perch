@@ -1,0 +1,203 @@
+// The three ways to sign in, step by step over the control channel (docs/PROTOCOL.md, "Control channel: signing in").
+//
+//   passkey: hi → assert (WebAuthn over bind) → totp → code → ready
+//   backup:  hi → opaque1 → opaque2 → opaque3 (proof over bind) → totp → code → ready
+//   pair:    hi → pair1 (proof over bind) → pair-options → pair-cred (new passkey) → totp → code → paired → ready
+//
+// `ui` provides the screens (ui/screens.js): askPasskey, askCreate, askCode and stage. Every wait on the person goes
+// through conn.guard(), so if the PC gives up meanwhile (2-minute limit, a bye) the flow stops at once.
+import { RoostError } from './connection.js';
+import { getAssertion, createPasskey, webauthnErrorKind } from './passkey.js';
+import { deniedMessage } from './messages.js';
+import { bindProof } from '../shared/bind.js';
+import { toB64url, fromB64url, concat } from '../shared/bytes.js';
+
+const REPLY_MS = 30000; // how long the Mac may take to answer one sign-in message
+
+let opaqueModule = null;
+// The password library is big (WebAssembly), so it is only fetched when backup sign-in is actually used.
+export function loadOpaque() {
+  opaqueModule ||= import('../vendor/opaque/index.js').then(async m => { await m.ready; return m; });
+  opaqueModule.catch(() => { opaqueModule = null; });
+  return opaqueModule;
+}
+
+const deniedError = m => new RoostError('denied', { reason: m.reason, retryAfter: m.retryAfter, final: m.final !== false });
+
+// ctx: {route, rpId, label, credentialId?, hostId?, sigKey?, password?, pair?, onPaired(msg), onHi(hi)}
+// Resolves to {hi, ready}.
+export async function signIn(conn, ctx, ui) {
+  const hi = await conn.open();
+  if (hi.route && hi.route !== ctx.route) throw new RoostError('protocol', { message: `PC answered for ${hi.route}` });
+  ctx.onHi?.(hi);
+
+  if (ctx.route === 'passkey') {
+    if (ctx.quick && conn.caps?.includes('quick') && conn.pin) {
+      // One-tap: the passkey was already used before connecting, over this connection's own certificate.
+      conn.send({ t: 'assert', response: ctx.quick.response, quick: ctx.quick.proof });
+    } else {
+      const cred = await passkeyStep(conn, ctx, ui, hi);
+      conn.send({ t: 'assert', response: cred.json });
+    }
+  } else if (ctx.route === 'backup') {
+    await backupSteps(conn, ctx, ui);
+  } else if (ctx.route === 'pair') {
+    await pairSteps(conn, ctx, ui, hi);
+  } else if (ctx.route === 'guest') {
+    // A guest link is its own pass: prove we hold it, on this connection, and start watching. No passkey, no code.
+    const proof = await bindProof(ctx.guest.guestSecret, 'guest', conn.bind);
+    conn.send({ t: 'guest1', proof: toB64url(proof) });
+    ui.stage('verifying');
+    const m = await conn.next(['ready', 'denied'], REPLY_MS);
+    if (m.t === 'denied') throw deniedError(m);
+    return { hi, ready: m };
+  } else {
+    throw new RoostError('protocol', { message: 'unknown route' });
+  }
+
+  ui.stage('verifying');
+  // The 6-digit code comes next, unless the PC's owner switched it off for this way of signing in (then the PC says
+  // ready straight away; when pairing, paired first).
+  let m = await conn.next(['totp', 'paired', 'ready', 'denied'], REPLY_MS);
+  if (m.t === 'denied') throw deniedError(m);
+  if (m.t === 'paired') {
+    ctx.onPaired?.(m);
+    m = await conn.next(['ready', 'denied'], REPLY_MS);
+    if (m.t === 'denied') throw deniedError(m);
+  }
+  if (m.t === 'ready') return { hi, ready: m };
+
+  // The 6-digit code. A wrong code (final: false) keeps the session open: just ask again.
+  let error = null;
+  for (;;) {
+    const code = await conn.guard(ui.askCode({ name: hi.name, error }));
+    conn.send({ t: 'code', code });
+    ui.stage('code-sent');
+    m = await conn.next(['ready', 'paired', 'denied'], REPLY_MS);
+    if (m.t === 'paired') {
+      ctx.onPaired?.(m);
+      m = await conn.next(['ready', 'denied'], REPLY_MS);
+    }
+    if (m.t === 'ready') return { hi, ready: m };
+    if (m.final !== false) throw deniedError(m);
+    error = deniedMessage(m.reason, { retryAfter: m.retryAfter, final: false, route: ctx.route });
+  }
+}
+
+// Ask for the passkey right away when the browser still counts the person's last tap (Chrome allows that for a few
+// seconds); Safari and anything else that refuses gets a big "Continue with passkey" button, and the request is made
+// inside that tap.
+async function passkeyStep(conn, ctx, ui, hi) {
+  const run = () => getAssertion({
+    challenge: conn.bind,
+    rpId: ctx.rpId,
+    credentialIds: ctx.credentialId ? [ctx.credentialId] : [],
+  });
+  let error = null;
+  if (globalThis.navigator?.userActivation?.isActive && !ctx.alwaysTap) {
+    ui.stage('passkey');
+    try {
+      return await conn.guard(run());
+    } catch (e) {
+      if (e instanceof RoostError) throw e;
+      if (webauthnErrorKind(e) === 'wrong-site') throw new RoostError('denied', { reason: 'origin', final: true });
+      // Fall through to the button: most often the browser just wanted a fresh tap.
+    }
+  }
+  for (;;) {
+    try {
+      return await conn.guard(ui.askPasskey({ name: hi.name, error, run }));
+    } catch (e) {
+      if (e instanceof RoostError) throw e;
+      const kind = webauthnErrorKind(e);
+      if (kind === 'wrong-site') throw new RoostError('denied', { reason: 'origin', final: true });
+      error = kind === 'cancelled'
+        ? 'The passkey request was closed before it finished. Tap the button to try again.'
+        : `The passkey didn't work (${e.name || 'error'}). Tap the button to try again.`;
+    }
+  }
+}
+
+// Backup sign-in started at the meeting point: the password's first message goes with the hello and the PC's reply
+// comes back with its offer, so a wrong password is known in a second or two, before anything is connected. A PC
+// from before 0.3.5 doesn't reply then: the whole exchange happens over the connection, as before (backupSteps).
+export async function backupEarly(password) {
+  const opaque = await loadOpaque();
+  const { clientLoginState, startLoginRequest } = opaque.client.startLogin({ password });
+  const early = {
+    fin: null,
+    hello: () => ({ opaque1: startLoginRequest }),
+    offer: (first) => {
+      if (typeof first.opaque2 !== 'string') return;
+      let fin = null;
+      try { fin = opaque.client.finishLogin({ clientLoginState, loginResponse: first.opaque2, password }); } catch {}
+      // A wrong password can't be told apart from a wrong PC name; the PC has counted it as a failed try either way.
+      if (!fin) throw new RoostError('wrong-password');
+      early.fin = fin;
+    },
+  };
+  return early;
+}
+
+async function backupSteps(conn, ctx, ui) {
+  ui.stage('password');
+  const early = ctx.early?.fin;
+  if (early) {
+    // Already checked at the meeting point: only the proof is left, made over this connection.
+    const proof = await bindProof(fromB64url(early.sessionKey), 'backup', conn.bind);
+    conn.send({ t: 'opaque3', fin: early.finishLoginRequest, proof: toB64url(proof) });
+    return;
+  }
+  const opaque = await loadOpaque();
+  const { clientLoginState, startLoginRequest } = opaque.client.startLogin({ password: ctx.password });
+  conn.send({ t: 'opaque1', req: startLoginRequest });
+  const m = await conn.next(['opaque2', 'denied'], REPLY_MS);
+  if (m.t === 'denied') throw deniedError(m);
+  let fin;
+  try {
+    fin = opaque.client.finishLogin({ clientLoginState, loginResponse: m.res, password: ctx.password });
+  } catch {
+    fin = undefined;
+  }
+  if (!fin) {
+    // A wrong password can't be told apart from a wrong PC name; the PC counts it as a failed try either way.
+    conn.send({ t: 'opaque-fail' });
+    throw new RoostError('wrong-password');
+  }
+  const proof = await bindProof(fromB64url(fin.sessionKey), 'backup', conn.bind);
+  conn.send({ t: 'opaque3', fin: fin.finishLoginRequest, proof: toB64url(proof) });
+}
+
+async function pairSteps(conn, ctx, ui, hi) {
+  const { pair } = ctx;
+  // A device that can't easily keep a passkey: offer the backup sign-in before anything is made (the link stays unused).
+  if (ctx.offerBackup) throw new RoostError('use-backup', { name: hi.name });
+  const proof = await bindProof(pair.pairSecret, 'pair', conn.bind);
+  // `origin`: which site this is, so the PC makes the passkey for this site's domain (it must be one it accepts).
+  conn.send({ t: 'pair1', pairId: toB64url(pair.pairId), proof: toB64url(proof), origin: globalThis.location?.origin });
+  const m = await conn.next(['pair-options', 'denied'], REPLY_MS);
+  if (m.t === 'denied') throw deniedError(m);
+  const o = m.options;
+  // The new passkey must be for this connection and carry this PC's address (and, from PCs that have one, the
+  // certificate pin the pairing link carried); anything else means something is off.
+  const handle = pair.pin ? concat(pair.hostId, pair.sigKey, pair.pin) : concat(pair.hostId, pair.sigKey);
+  if (!o || o.challenge !== toB64url(conn.bind) || o.user?.id !== toB64url(handle)) {
+    throw new RoostError('wrong-mac');
+  }
+  let error = null;
+  for (;;) {
+    try {
+      const cred = await conn.guard(ui.askCreate({ name: hi.name, error, run: () => createPasskey(o) }));
+      conn.send({ t: 'pair-cred', response: cred.json, label: ctx.label });
+      return;
+    } catch (e) {
+      if (e instanceof RoostError) throw e;
+      const kind = webauthnErrorKind(e);
+      if (kind === 'exists') throw new RoostError('denied', { reason: 'exists', final: true });
+      if (kind === 'wrong-site') throw new RoostError('denied', { reason: 'origin', final: true });
+      error = kind === 'cancelled'
+        ? 'The passkey wasn\'t made: the request was closed before it finished. Tap the button to try again.'
+        : `The passkey couldn't be made (${e.name || 'error'}). Tap the button to try again.`;
+    }
+  }
+}

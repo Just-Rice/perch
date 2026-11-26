@@ -1,0 +1,202 @@
+/* Roost — the connect page's sign-in screens: "Your PCs", the ways in, and the steps of signing in.
+   Tokens and buttons come from roost.css; the viewer is css/viewer.css. */
+
+body.connect { min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+body.connect .app { flex: 1; display: flex; flex-direction: column; }
+body.connect main { flex: 1; padding: 24px 0 48px; }
+body.viewing { overflow: hidden; }
+
+/* Starting up, and the "can't run inside another website" refusal */
+.boot { min-height: 100vh; min-height: 100dvh; display: grid; place-content: center; justify-items: center; gap: 16px; padding: 24px; text-align: center; color: var(--muted); }
+.boot img { border-radius: 16px; box-shadow: 0 12px 32px -10px rgba(var(--ember-glow), .6); }
+.boot p { max-width: 30em; font-size: 1.05rem; margin: 0; }
+.boot.refused { color: var(--text); }
+.boot.refused p { background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); border-radius: 16px; padding: 18px 20px; }
+
+/* Screens */
+.screen h1 { font-size: clamp(1.7rem, 4.8vw, 2.3rem); margin: 4px 0 10px; letter-spacing: -0.02em; }
+/* Headings get focus from the page itself, so screen readers announce each new step; they can't be tabbed to, so a
+   focus ring around them would only be noise. */
+.screen h1:focus, .screen h1:focus-visible, .modal-card h2:focus { outline: none; }
+.screen .lead { color: var(--muted); font-size: 1.05rem; margin: 0 0 20px; }
+.screen .lead b { color: var(--text); }
+.stack { display: flex; flex-direction: column; gap: 10px; margin: 18px 0 0; }
+
+/* One step of signing in: a single card in the middle */
+.panel {
+  width: min(460px, 100%); margin: clamp(8px, 5vh, 56px) auto 0; padding: 32px 28px 28px;
+  background: var(--glass); border: 1px solid var(--line); border-radius: 28px; box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+  animation: rise 260ms var(--ease) both;
+}
+@keyframes rise { from { opacity: 0; transform: translateY(10px) scale(.99); } }
+@media (prefers-reduced-motion: reduce) { .panel { animation: none; } }
+@media (max-width: 520px) { .panel { padding: 24px 18px 20px; border-radius: 24px; } }
+.panel-ico {
+  display: grid; place-items: center; width: 52px; height: 52px; border-radius: 16px; margin-bottom: 18px;
+  background: var(--ember); color: var(--accent-text); box-shadow: 0 10px 26px -10px rgba(var(--ember-glow), .8);
+}
+.panel-ico .icon { width: 26px; height: 26px; }
+.panel h1 { font-size: clamp(1.6rem, 4.4vw, 2rem); }
+.panel-ico.warn { background: var(--warn-soft); color: var(--warn); box-shadow: none; }
+.panel .btn.quiet { color: var(--muted); }
+.panel .btn.quiet:hover { color: var(--text); background: var(--surface-2); }
+.panel .note { font-size: .92rem; margin-bottom: 0; }
+
+.checks { list-style: none; margin: 0 0 8px; padding: 0; display: grid; gap: 10px; color: var(--muted); }
+.checks li { display: flex; gap: 10px; align-items: flex-start; }
+.checks li > span:first-child { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--good-soft); color: var(--good); }
+.checks .icon { width: 15px; height: 15px; }
+
+/* ---------- Home: your PCs ---------- */
+.home { width: min(980px, 100%); margin: 0 auto; }
+/* No PCs yet: one centred column, like a sign-in page. */
+.home:not(.has-pcs) { width: min(540px, 100%); }
+.home:not(.has-pcs) .home-head { text-align: center; }
+.home:not(.has-pcs) .home-head .lead { margin-inline: auto; }
+.home:not(.has-pcs) .home-foot { text-align: center; }
+.home:not(.has-pcs) .home-foot .row { justify-content: center; margin-left: 0; }
+.home-head { margin: clamp(8px, 4vh, 40px) 0 24px; }
+.home-head h1 { font-size: clamp(2rem, 6vw, 3rem); letter-spacing: -0.03em; margin-bottom: 8px; }
+.home-head .lead { margin: 0; max-width: 34em; }
+.pcs { list-style: none; margin: 0 0 16px; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+.pc {
+  --hue: 20; position: relative; display: flex; flex-direction: column; min-height: 168px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: var(--shadow);
+  transition: transform var(--t) var(--ease), border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+  animation: rise 300ms var(--ease) both; overflow: hidden;
+}
+.pc::before { /* a soft wash of the PC's own colour, top right */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(120% 80% at 100% 0%, hsl(var(--hue) 90% 60% / .13), transparent 55%);
+}
+.pc:hover, .pc:focus-within { transform: translateY(-2px); border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); box-shadow: var(--shadow-lg); }
+@media (prefers-reduced-motion: reduce) { .pc, .pc:hover { transform: none; animation: none; } }
+.pc-go {
+  flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr); grid-template-rows: auto auto 1fr; gap: 2px 14px; align-items: start;
+  padding: 20px 20px 18px; border: 0; border-radius: inherit; background: transparent; color: var(--text);
+  font: inherit; text-align: left; cursor: pointer;
+}
+.pc-go:focus-visible { outline-offset: -3px; border-radius: var(--r-card); }
+.mono {
+  grid-row: span 2; display: grid; place-items: center; width: 52px; height: 52px; border-radius: 16px;
+  font: 700 1.25rem/1 var(--font-display); letter-spacing: -0.02em; color: #fff;
+  background: linear-gradient(135deg, hsl(var(--hue) 78% 54%), hsl(calc(var(--hue) + 32) 88% 58%));
+  box-shadow: 0 10px 22px -10px hsl(var(--hue) 80% 45% / .9), 0 1px 0 rgba(255, 255, 255, .3) inset;
+}
+.pc-name { font: 650 1.12rem/1.25 var(--font-display); overflow-wrap: anywhere; align-self: end; }
+.pc-when { color: var(--muted); font-size: .9rem; align-self: start; }
+.pc-cta {
+  grid-column: 1 / -1; align-self: end; margin-top: 18px; display: inline-flex; align-items: center; gap: 8px; justify-self: start;
+  color: var(--accent); font-weight: 650;
+}
+.pc-cta .icon { transition: transform var(--t) var(--ease); }
+.pc-go:hover .pc-cta .icon { transform: translateX(3px); }
+.pc-forget {
+  position: absolute; bottom: 14px; right: 14px; min-height: 32px; padding: 0 10px; border-radius: 10px;
+  border: 1px solid transparent; background: transparent; color: var(--muted); font: inherit; font-size: .84rem; font-weight: 600; cursor: pointer;
+}
+.pc-forget:hover, .pc-forget.armed { color: var(--bad); background: var(--bad-soft); }
+
+/* The ways in: big on its own, a slim strip under the PCs once there are some */
+.ways {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 18px; align-items: center;
+  padding: 28px; border-radius: 28px; background: var(--glass); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+  max-width: 560px;
+}
+.ways-ico { grid-row: span 2; display: grid; place-items: center; width: 56px; height: 56px; border-radius: 18px; background: var(--ember); color: var(--accent-text); box-shadow: 0 12px 28px -10px rgba(var(--ember-glow), .8); }
+.ways-ico .icon { width: 28px; height: 28px; }
+.ways h2 { margin: 0; font-size: 1.25rem; }
+.ways-text p { margin: 4px 0 0; color: var(--muted); }
+.ways-actions { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+.home.has-pcs .ways {
+  max-width: none; grid-template-columns: auto minmax(0, 1fr) auto; padding: 16px 18px; border-radius: var(--r-card);
+  background: transparent; border-style: dashed; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.home.has-pcs .ways-ico { width: 44px; height: 44px; border-radius: 14px; grid-row: auto; background: var(--accent-soft); color: var(--accent); box-shadow: none; }
+.home.has-pcs .ways-ico .icon { width: 22px; height: 22px; }
+.home.has-pcs .ways h2 { font-size: 1.02rem; }
+.home.has-pcs .ways-text p { font-size: .9rem; }
+.home.has-pcs .ways-actions { grid-column: auto; flex-direction: row; margin: 0; }
+.home.has-pcs .ways-actions .btn { width: auto; min-height: 44px; font-size: .95rem; }
+@media (max-width: 760px) {
+  .home.has-pcs .ways { grid-template-columns: auto minmax(0, 1fr); }
+  .home.has-pcs .ways-actions { grid-column: 1 / -1; flex-direction: column; margin-top: 8px; }
+  .home.has-pcs .ways-actions .btn { width: 100%; }
+}
+@media (max-width: 520px) { .ways { padding: 20px 18px; border-radius: 24px; } }
+.home-foot { margin-top: 28px; padding-top: 12px; border-top: 1px solid var(--line); }
+.home-foot .row { display: flex; flex-wrap: wrap; gap: 0 14px; margin-left: -.5em; }
+
+/* ---------- Connecting ---------- */
+.beacon { position: relative; width: 76px; height: 76px; margin: 4px 0 18px; display: grid; place-items: center; }
+.beacon img { position: relative; border-radius: 14px; box-shadow: 0 10px 26px -8px rgba(var(--ember-glow), .8); }
+.beacon span { position: absolute; inset: 0; border-radius: 24px; border: 2px solid rgba(var(--ember-glow), .55); animation: ping 2.2s var(--ease) infinite; }
+.beacon span + span { animation-delay: 1.1s; }
+@keyframes ping { from { transform: scale(.6); opacity: .9; } to { transform: scale(1.45); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .beacon span { animation: none; opacity: .4; transform: none; } }
+.steps { list-style: none; padding: 0; margin: 10px 0 18px; display: grid; gap: 0; position: relative; }
+.steps li { position: relative; display: flex; align-items: center; gap: 14px; min-height: 44px; color: var(--muted); }
+.steps li::before {
+  content: ""; flex: none; width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--line-strong); box-sizing: border-box;
+  background: var(--surface); position: relative; z-index: 1; transition: all var(--t) var(--ease);
+}
+.steps li + li::after { /* the line between steps */
+  content: ""; position: absolute; left: 10px; top: -11px; width: 2px; height: 22px; background: var(--line);
+}
+.steps li.done + li::after, .steps li.done + li.now::after { background: var(--accent); }
+.steps li.done { color: var(--text); }
+.steps li.done::before {
+  content: "✓"; display: grid; place-items: center; border-color: transparent; background: var(--ember);
+  color: var(--accent-text); font: 800 12px/1 var(--font); box-shadow: 0 4px 12px -4px rgba(var(--ember-glow), .8);
+}
+.steps li.now { color: var(--text); font-weight: 650; }
+.steps li.now::before { border-color: var(--accent-soft); border-top-color: var(--accent); animation: spin .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .steps li.now::before { animation-duration: 2.4s; } }
+
+/* ---------- Forms ---------- */
+label { font-weight: 600; display: block; margin: 16px 0 6px; }
+input[type=text], input[type=password], input[type=search], textarea.clip-text, select {
+  font: inherit; color: var(--text);
+}
+form input[type=text], form input[type=password] {
+  width: 100%; min-height: 50px; padding: 10px 14px; border-radius: var(--r-ctl); border: 1px solid var(--line-strong);
+  background: var(--surface); font-size: 16px; transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease);
+}
+form input[type=text]:focus, form input[type=password]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px rgba(var(--ember-glow), .18); }
+
+/* The code: six cells drawn under one real text box (so pasting, autofill and screen readers just work). */
+.otp { position: relative; width: min(100%, 336px); height: 62px; margin: 6px 0 4px; }
+.otp input.code {
+  position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; color: transparent;
+  caret-color: transparent; font-size: 16px; z-index: 1; outline: none; -webkit-text-fill-color: transparent; letter-spacing: 1em;
+}
+.otp input.code::selection { background: transparent; }
+.otp-cells { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; pointer-events: none; }
+.otp-cells i {
+  display: grid; place-items: center; border-radius: 14px; border: 1px solid var(--line-strong); background: var(--surface);
+  font: 650 1.6rem/1 var(--mono); font-style: normal; color: var(--text); transition: border-color var(--t) var(--ease), box-shadow var(--t) var(--ease), transform 120ms var(--ease);
+}
+.otp-cells i.filled { border-color: color-mix(in srgb, var(--accent) 50%, var(--line-strong)); }
+.otp:focus-within .otp-cells i.at { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(var(--ember-glow), .18); }
+.otp:focus-within .otp-cells i.at::after { content: ""; width: 2px; height: 26px; background: var(--accent); animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.otp.bad .otp-cells i { border-color: var(--bad); }
+.otp input.code:disabled + .otp-cells i { opacity: .6; }
+@media (prefers-reduced-motion: reduce) { .otp:focus-within .otp-cells i.at::after { animation: none; } }
+
+/* A phone: each PC is a compact row (monogram, name, chevron), with Forget tucked under it. */
+@media (max-width: 560px) {
+  .pc { min-height: 0; }
+  .pc-go { grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; padding: 16px 14px 8px 16px; }
+  .mono { width: 48px; height: 48px; border-radius: 15px; font-size: 1.1rem; }
+  .pc-cta { grid-column: 3; grid-row: 1 / span 2; align-self: center; margin: 0; font-size: 0; gap: 0; }
+  .pc-cta .icon { width: 22px; height: 22px; }
+  .pc-forget { position: static; align-self: flex-end; margin: -18px 10px 10px 0; }
+  .home-head { margin-top: 8px; }
+}
+/* The code's real text box is invisible: the cells show the digits and where the next one goes. */
+form .otp input.code, form .otp input.code:focus, form .otp input.code:focus-visible {
+  border: 0; background: transparent; box-shadow: none; outline: none; min-height: 0; padding: 0;
+}

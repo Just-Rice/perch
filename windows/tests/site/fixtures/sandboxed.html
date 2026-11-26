@@ -1,0 +1,6 @@
+<!doctype html>
+<!-- Test page: a sandboxed frame without allow-same-origin gets an opaque ('null') origin and must be refused. -->
+<meta charset="utf-8"><title>sandboxed</title>
+<style>html,body{margin:0;height:100%}iframe{border:0;width:100%;height:100%}</style>
+<iframe id="f" sandbox="allow-scripts allow-forms allow-popups"></iframe>
+<script>document.getElementById('f').src = new URLSearchParams(location.search).get('src');</script>

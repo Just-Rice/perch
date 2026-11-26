@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Only the background and icons are scripted on this page: it has words to read. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#FAF7F2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B0D12" media="(prefers-color-scheme: dark)">
+<title>Roost: privacy</title>
+<meta name="description" content="What Roost keeps, what it never collects, and what the services it relies on can see. No accounts, no tracking, no servers of ours.">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/roost.css">
+</head>
+<body class="doc">
+<canvas class="embers" id="embers" aria-hidden="true"></canvas>
+<a class="sr-only" href="#main">Skip to the content</a>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="img/icon.svg" alt="" width="34" height="34">Roost <span class="badge">BETA</span></a>
+    <nav class="site" aria-label="Main">
+      <a href="./">About Roost</a>
+      <a class="btn primary small" href="connect.html">Connect</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <div class="doc-hero">
+    <p class="kicker">Privacy</p>
+    <h1>Your PC, your business.</h1>
+    <p class="lead">Roost is a way to use your own PC from your own browser. It has no accounts, no tracking, no
+      analytics, no ads and no servers of its own. Here is everything it keeps, and everyone who could see anything.</p>
+    <div class="doc-cards">
+      <div class="promise"><span data-icon="shield" aria-hidden="true"></span><h3>Nothing collected</h3>
+        <p>No sign-up, no cookies, no analytics, no tracking pixels. Nobody behind Roost learns that you use it.</p></div>
+      <div class="promise"><span data-icon="link" aria-hidden="true"></span><h3>Straight from PC to browser</h3>
+        <p>Your screen, sound, clicks and typing go directly between your PC and your browser, encrypted the whole way.</p></div>
+      <div class="promise"><span data-icon="lock" aria-hidden="true"></span><h3>Your PC decides</h3>
+        <p>Every sign-in is checked by your PC itself: your passkey and the code from your authenticator app.</p></div>
+    </div>
+  </div>
+
+  <div class="doc-layout">
+    <nav class="toc" aria-label="On this page">
+      <b>On this page</b>
+      <a href="#who">Who can see what</a>
+      <a href="#kept">What is kept</a>
+      <a href="#see">What you can see on the PC</a>
+      <a href="#questions">Questions</a>
+    </nav>
+    <div class="doc-body">
+      <h2 id="who">Who can see what</h2>
+
+      <div class="who"><span class="ico" data-icon="globe" aria-hidden="true"></span><h3>GitHub Pages, which hosts this website</h3>
+        <div><p>The pages of this website come from GitHub Pages. Like any website host, GitHub sees normal web requests:
+          your internet (IP) address, your browser type and which pages were loaded. It does not see anything you do
+          after the page has loaded: signing in and using your PC don't go through GitHub at all. See
+          <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">GitHub's
+          privacy statement</a>.</p></div></div>
+
+      <div class="who"><span class="ico" data-icon="server" aria-hidden="true"></span><h3>Free public message services, to find your PC</h3>
+        <div><p>Your PC and your browser are usually on different networks, so before they can talk directly they swap
+          a few short "here's how to reach me" notes through free public message services (run by EMQX, HiveMQ, the
+          Eclipse Mosquitto project and shiftr.io). They are used at the same time, so one being down doesn't matter.</p>
+        <ul class="list">
+          <li><b>The notes are sealed.</b> Only your PC and your passkey (or your pairing link) know the key. The
+            services can't read them, and can't change them without it being noticed.</li>
+          <li><b>What they can see:</b> your internet address and your PC's, when the notes were sent, and a
+            random-looking label that doesn't contain your PC's name.</li>
+          <li><b>Backup sign-in</b> (your PC's Roost name and a password, if you turned it on): its notes are sealed with
+            the PC's name only, which hides them from casual onlookers but not from someone who knows that name. That's
+            fine: your password never travels at all (Roost uses a method called OPAQUE that proves you know it without
+            sending it), and the PC still asks for your authenticator code.</li>
+          <li>These services carry anyone's messages and check nothing. Roost's safety never depends on them.</li>
+        </ul></div></div>
+
+      <div class="who"><span class="ico" data-icon="wifi" aria-hidden="true"></span><h3>Address helpers (STUN servers)</h3>
+        <div><p>To connect directly, each side asks a public helper (Google's and Cloudflare's STUN servers) what its
+          own internet address looks like from outside. Those helpers see your internet address and nothing else: no
+          names, no picture, no sound.</p></div></div>
+
+      <div class="who"><span class="ico" data-icon="link" aria-hidden="true"></span><h3>The connection itself</h3>
+        <div><p>Once your browser and your PC have found each other, everything goes directly between them, encrypted
+          with WebRTC's built-in encryption (the same used by video-call apps). Your PC sends nothing, and accepts no
+          clicks or keys, until you have signed in with both steps.</p></div></div>
+
+      <div class="who"><span class="ico" data-icon="arrows" aria-hidden="true"></span><h3>The optional relay</h3>
+        <div><p>If you set up the relay in the Control Center (for school or office Wi-Fi that blocks direct
+          connections), the connection can pass through Cloudflare, using an account that you created. It stays
+          encrypted between your browser and your PC the whole way, so Cloudflare carries it but can't see the
+          picture, the sound or what you type. Cloudflare does see both internet addresses and how much is sent.</p></div></div>
+
+      <div class="who"><span class="ico" data-icon="mic" aria-hidden="true"></span><h3>Your microphone</h3>
+        <div><p>Roost never uses your microphone unless you choose "Talk through your PC" during a session and allow it
+          in your browser. While it is on, your voice goes straight to your PC over the same encrypted connection and is
+          played there; nothing is recorded or kept. A note stays on screen while it is on, with a button to turn it
+          off, and it stops when you disconnect.</p></div></div>
+
+      <div class="who"><span class="ico" data-icon="eye" aria-hidden="true"></span><h3>Guest links</h3>
+        <div><p>A guest link you make in the Control Center lets whoever has it watch your PC's screen, with its sound,
+          until its time runs out or you stop it. A guest can't click, type or change anything. The link is the key, so
+          only send it to someone you trust; the Control Center shows while a guest is watching.</p></div></div>
+
+      <h2 id="kept">What is kept, and where</h2>
+      <h3>On your PC</h3>
+      <ul class="list">
+        <li>In Roost's folder (<code>%LOCALAPPDATA%\Roost</code>): your PC's Roost name (like <i>amber-otter-4821</i>),
+          a random ID, your settings, and for each device you paired: its passkey's public part (which can check a
+          sign-in but can't make one), a label like "Safari on iPhone" and when it was added and last used. Also a short
+          list of recent sign-ins and failed attempts, so you can see if someone tried.</li>
+        <li>Roost's secret keys and the secret behind your authenticator codes, in a file encrypted by Windows for your
+          user account only (DPAPI).</li>
+        <li>If you turned on backup sign-in: a check value made from your password, not the password itself.</li>
+        <li>None of this is ever sent anywhere. Uninstalling Roost deletes the app, and asks before deleting this folder.</li>
+      </ul>
+      <h3>In your browser</h3>
+      <ul class="list">
+        <li>The list of PCs you've connected to from this browser: each PC's name, the details needed to find it again
+          and which passkey belongs to it. Remove one with <b>Forget</b> on the Connect page, or clear this site's data
+          in your browser settings.</li>
+        <li>A few preferences: picture quality, "⌘ is Ctrl", the volume, where you put the Dock, your Key deck, whether
+          connection details are shown and the PC name you last typed for backup sign-in.</li>
+        <li>Your passkey itself is kept by your device's password manager (such as Windows Hello, iCloud Keychain or
+          Google Password Manager), not by Roost.</li>
+        <li>All of this stays in your browser. This website has no server that could receive it.</li>
+      </ul>
+
+      <h2 id="see">What you can see on the PC</h2>
+      <p>While a device is connected, Roost's tray icon shows it, and the Control Center lists who it is. Only one
+        device can control the PC at a time, and you can disconnect it or pause Roost from the tray icon.</p>
+
+      <h2 id="questions">Questions or problems</h2>
+      <p>Roost is free and open source, so you can read exactly what it does in the
+        <a href="https://github.com/Just-Rice/roost">source code</a>. Ask a question or report a problem through
+        <a href="https://github.com/Just-Rice/roost/issues">GitHub issues</a>. For a security problem, please follow
+        the <a href="https://github.com/Just-Rice/roost/blob/main/SECURITY.md">security notes</a> instead of opening
+        a public issue.</p>
+      <p class="fine">Last updated November 2026.</p>
+    </div>
+  </div>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="img/icon.svg" alt="" width="26" height="26">Roost</a>
+    <span>Free and open source (Apache 2.0). Built on <a href="https://github.com/Just-Rice/perch">Perch</a> by Just-Rice.</span>
+    <a href="./">Home</a>
+    <a href="connect.html">Connect</a>
+    <a href="https://github.com/Just-Rice/roost">Source code</a>
+    <a href="https://github.com/Just-Rice/roost/issues">Report a problem</a>
+  </div>
+</footer>
+<script type="module" src="js/doc.js"></script>
+</body>
+</html>

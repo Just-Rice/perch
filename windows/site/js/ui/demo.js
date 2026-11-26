@@ -1,0 +1,186 @@
+// Demo mode, for checking the viewer without a PC: connect.html?demo=1, only when served from localhost/127.0.0.1
+// (ui/env.js). A canvas draws a moving test picture that stands in for the PC's screen, and every message the viewer
+// would send to the PC is listed on the page instead. Nothing touches the network.
+import { Viewer } from '../viewer/viewer.js';
+
+const DISPLAYS = [
+  { id: 1, name: 'Laptop screen', width: 1512, height: 982, main: true },
+  { id: 2, name: 'DELL U2723QE', width: 2560, height: 1440, main: false },
+];
+
+export function startDemo(app) {
+  const params = app.env.params;
+  const canvas = document.createElement('canvas');
+  let display = DISPLAYS[0];
+  const setSize = d => { canvas.width = Math.round(d.width / 2); canvas.height = Math.round(d.height / 2); };
+  setSize(display);
+  const ctx = canvas.getContext('2d');
+  let last = null; // last pointer position the "PC" got, drawn as a cursor
+  let clicks = [];  // recent clicks, drawn as rings
+
+  const draw = now => {
+    const w = canvas.width, h = canvas.height;
+    // A warm wallpaper, like the website's picture of a PC.
+    const g = ctx.createLinearGradient(0, 0, w * 0.4, h);
+    g.addColorStop(0, '#241830');
+    g.addColorStop(0.6, '#7A2E2A');
+    g.addColorStop(1, '#C4532B');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    const glow = ctx.createRadialGradient(w * 0.75, h * 0.8, 0, w * 0.75, h * 0.8, w * 0.5);
+    glow.addColorStop(0, 'rgba(255,193,94,.75)');
+    glow.addColorStop(1, 'rgba(255,193,94,0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(0, 0, w, h);
+    // A grid every tenth of the screen, so mapped positions can be checked by eye.
+    ctx.strokeStyle = 'rgba(255,255,255,.25)';
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 10; i++) {
+      ctx.beginPath(); ctx.moveTo((w * i) / 10, 0); ctx.lineTo((w * i) / 10, h); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, (h * i) / 10); ctx.lineTo(w, (h * i) / 10); ctx.stroke();
+    }
+    // A "window" and a moving ball, so a frozen picture is obvious.
+    ctx.fillStyle = 'rgba(255,255,255,.92)';
+    ctx.fillRect(w * 0.08, h * 0.12, w * 0.5, h * 0.55);
+    ctx.fillStyle = '#141820';
+    ctx.font = `600 ${Math.round(h / 16)}px system-ui, sans-serif`;
+    ctx.fillText('Roost demo', w * 0.11, h * 0.24);
+    ctx.font = `${Math.round(h / 28)}px system-ui, sans-serif`;
+    ctx.fillText(`${display.name} · ${display.width} × ${display.height}`, w * 0.11, h * 0.32);
+    ctx.fillText(new Date().toLocaleTimeString(), w * 0.11, h * 0.39);
+    const t = now / 1000;
+    ctx.fillStyle = '#FF7A3D';
+    ctx.beginPath();
+    ctx.arc(w * (0.5 + 0.38 * Math.cos(t)), h * (0.75 + 0.15 * Math.sin(t * 1.7)), h / 18, 0, Math.PI * 2);
+    ctx.fill();
+    // The taskbar, with Start in the middle, so the bottom edge reads as Windows'.
+    ctx.fillStyle = 'rgba(20,18,26,.78)';
+    ctx.fillRect(0, h - h * 0.06, w, h * 0.06);
+    const s = h * 0.03, cx = w / 2 - s / 2, cy = h - h * 0.045;
+    ctx.fillStyle = '#FFB27A';
+    for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) ctx.fillRect(cx + dx * s * 0.54, cy + dy * s * 0.54, s * 0.46, s * 0.46);
+    clicks = clicks.filter(c => now - c.t < 800);
+    for (const c of clicks) {
+      ctx.strokeStyle = c.b === 2 ? '#ffd166' : '#ffffff';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(c.x * w, c.y * h, 6 + (now - c.t) / 25, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (last) {
+      ctx.fillStyle = '#000';
+      ctx.beginPath();
+      ctx.moveTo(last.x * w, last.y * h);
+      ctx.lineTo(last.x * w + 12, last.y * h + 16);
+      ctx.lineTo(last.x * w + 4, last.y * h + 15);
+      ctx.closePath();
+      ctx.fill();
+    }
+    requestAnimationFrame(draw);
+  };
+  requestAnimationFrame(draw);
+
+  const stream = canvas.captureStream(30);
+  const list = document.getElementById('demoList');
+  const messages = [];
+  app.demoMessages = messages;
+  const log = (channel, m) => {
+    messages.push({ channel, ...m });
+    if (m.t === 'm' || m.t === 'b' || m.t === 'w') last = { x: m.x, y: m.y };
+    if (m.t === 'b' && m.d) clicks.push({ x: m.x, y: m.y, b: m.b, t: performance.now() });
+    // Pointer moves come many times a second: show only the latest one, at the top.
+    let li = m.t === 'm' ? list.querySelector('li.move') : null;
+    if (!li) {
+      li = document.createElement('li');
+      if (m.t === 'm') li.className = 'move';
+      list.prepend(li);
+    }
+    li.textContent = `${channel}: ${JSON.stringify(m)}`;
+    while (list.children.length > 60) list.lastChild.remove();
+  };
+
+  const ready = {
+    t: 'ready', name: 'demo-pc-0000', hv: 'demo', display: { id: display.id, width: display.width, height: display.height },
+    displays: DISPLAYS, quality: 'balanced', audio: params.get('sound') === 'blocked', input: params.get('viewonly') !== '1',
+    locked: params.get('locked') === '1',
+    levels: { speakers: 1, stream: 1, speakersAvailable: true },
+  };
+  // Two pretend windows for "show one window"; choosing one makes the picture that window's size and shape.
+  const WINDOWS = [
+    { id: 11, app: 'Notepad', title: 'Shopping list', width: 900, height: 620 },
+    { id: 12, app: 'Microsoft Edge', title: 'Roost', width: 1200, height: 800 },
+  ];
+  let shown = null;
+  const session = {
+    stream,
+    caps: ['window', 'textfocus', 'clipboard', 'clipimg', 'levels', 'fps60'],
+    controlBacklog: () => 0,
+    clipboard: 'Text copied on the demo PC',
+    onmessage: () => {},
+    onstream: () => {},
+    onlink: () => {},
+    send(m) {
+      log('control', m);
+      if (m.t === 'ping') setTimeout(() => this.onmessage({ t: 'pong', n: m.n, ts: m.ts }), 12);
+      if (m.t === 'display') {
+        display = DISPLAYS.find(d => d.id === m.id) || display;
+        shown = null;
+        setSize(display);
+        setTimeout(() => this.onmessage({ t: 'status', width: display.width, height: display.height, window: null }), 50);
+      }
+      if (m.t === 'levels') {
+        // As the PC does: keep them, and say back what they are now.
+        if (Number.isFinite(m.speakers)) ready.levels.speakers = Math.min(1, Math.max(0, m.speakers));
+        if (Number.isFinite(m.stream)) ready.levels.stream = Math.min(1.5, Math.max(0, m.stream));
+        setTimeout(() => this.onmessage({ t: 'status', levels: { ...ready.levels } }), 30);
+      }
+      if (m.t === 'clip-get') setTimeout(() => this.onmessage({ t: 'clip', ok: true, text: this.clipboard }), 30);
+      if (m.t === 'clip-part') (this.clipParts ??= []).push(m);
+      if (m.t === 'clip-sync') this.clipSync = m.on;
+      if (m.t === 'clip-set') {
+        const img = m.img && (this.clipParts ?? []).filter(p => p.id === m.img.id);
+        const ok = (typeof m.text === 'string' && m.text.length <= 30000) || (m.text === undefined && img?.length > 0);
+        if (ok) { this.clipboard = m.text ?? ''; this.clipboardImage = img ? img.map(p => p.data).join('') : null; }
+        this.clipParts = [];
+        setTimeout(() => this.onmessage({ t: 'clip-set', ok }), 30);
+      }
+      if (m.t === 'windows') setTimeout(() => this.onmessage({ t: 'windows', list: WINDOWS }), 20);
+      if (m.t === 'window') {
+        shown = WINDOWS.find(w => w.id === m.id) ?? null;
+        setSize(shown ? { width: shown.width * 2, height: shown.height * 2 } : display);
+        setTimeout(() => this.onmessage({ t: 'status', width: canvas.width, height: canvas.height, window: shown?.id ?? null }), 50);
+      }
+      if (m.t === 'fit' && shown) {
+        // As the PC does: the viewer's shape, as large as the display allows.
+        const scale = Math.min(display.width / m.w, display.height / m.h);
+        setSize({ width: Math.round(m.w * scale) * 2, height: Math.round(m.h * scale) * 2 });
+        setTimeout(() => {
+          this.onmessage({ t: 'fit', ok: true });
+          this.onmessage({ t: 'status', width: canvas.width, height: canvas.height, window: shown.id });
+        }, 50);
+      }
+    },
+    sendInput(m) {
+      log('input', m);
+      // The demo's pretend text box is the top half of the screen, as in the PC app's test runs.
+      if (m.t === 'b' && m.d === false && m.b === 0) setTimeout(() => this.onmessage({ t: 'textfocus', editable: m.y < 0.5, secure: false }), 40);
+    },
+    sendPointer(m) { log('pointer', m); },
+    async getStats() { return new Map(); },
+    close() {},
+  };
+
+  document.getElementById('app').hidden = true;
+  document.getElementById('demoLog').hidden = params.get('log') === '0';
+  const viewer = new Viewer({
+    root: document.getElementById('viewer'), session, hi: { name: ready.name }, ready, prefs: app.prefs, env: app.env,
+    apple: app.apple, touchFirst: app.touchFirst || params.get('touch') === '1', log: app.log,
+    onLeave: () => viewer.ended({ title: 'Disconnected', body: 'This was the demo. Reload the page to start it again.' }, { canReconnect: false }),
+    onReconnect: () => location.reload(),
+    onHome: () => location.reload(),
+  });
+  app.viewer = viewer;
+  app.demoSession = session;
+  viewer.mount();
+  if (params.get('sound') === 'blocked') viewer.soundBlocked();
+}

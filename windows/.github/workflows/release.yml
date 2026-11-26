@@ -1,0 +1,63 @@
+# Builds and publishes a release when a version tag is pushed (git tag v0.2.0 && git push origin v0.2.0):
+# Roost-<version>-win-x64.zip and -win-arm64.zip with their checksums, which install.ps1 and the update check use.
+# Tags with a suffix (v0.2.0-alpha.1) become pre-releases, installed only by name.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { arch: x64, runner: windows-latest, target: x86_64-pc-windows-msvc }
+          - { arch: arm64, runner: windows-11-arm, target: aarch64-pc-windows-msvc }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+      - name: The tag matches the version in the code
+        shell: pwsh
+        run: |
+          $v = (Get-Content host/package.json -Raw | ConvertFrom-Json).version
+          if ("v$v" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} but host/package.json says $v (run scripts/set-version.mjs)" }
+      - run: npm ci
+        working-directory: host
+      - name: Build roost.exe
+        working-directory: app
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Package
+        shell: pwsh
+        run: ./scripts/package.ps1 -Arch ${{ matrix.arch }} -Exe app/target/${{ matrix.target }}/release/roost.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.arch }}
+          path: dist/Roost-*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.ref_name }}"
+          pre=""
+          case "$tag" in *-*) pre="--prerelease";; esac
+          gh release create "$tag" dist/Roost-* --repo "${{ github.repository }}" --title "Roost ${tag#v}" --generate-notes $pre

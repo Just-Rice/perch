@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#FAF7F2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B0D12" media="(prefers-color-scheme: dark)">
+<title>Roost: your PC, from anywhere</title>
+<meta name="description" content="See and use your Windows PC from any browser: screen, sound, mouse and keyboard, from a phone, a tablet or another computer. Free and open source, no account, no servers in between.">
+<meta property="og:title" content="Roost: your PC, from anywhere">
+<meta property="og:description" content="Your Windows PC in any browser. Free, open source, no account, no servers in between.">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/roost.css">
+</head>
+<body class="front">
+<canvas class="embers" id="embers" aria-hidden="true"></canvas>
+<a class="sr-only" href="#main">Skip to the content</a>
+
+<header class="site" id="top">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="img/icon.svg" alt="" width="34" height="34">Roost <span class="badge">BETA</span></a>
+    <nav class="site" aria-label="Main">
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#install">Install</a>
+      <a class="hide-sm" href="#privacy">Privacy</a>
+      <a class="btn primary small" href="connect.html">Connect</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="wrap hero">
+    <div>
+      <span class="eyebrow"><i aria-hidden="true"></i>Free, open source, no account</span>
+      <h1>Your PC, <span class="glow">from anywhere.</span></h1>
+      <p class="lead">Use your Windows PC from your phone, a tablet or another computer: its screen, its sound, the
+        mouse and the keyboard. It goes straight from your PC to your browser, with no servers in between.</p>
+      <div class="actions">
+        <a class="btn primary" href="connect.html"><span data-icon="pc" aria-hidden="true"></span>Connect to my PC</a>
+        <a class="btn" href="#install"><span data-icon="windows" aria-hidden="true"></span>Install on Windows</a>
+      </div>
+      <p class="fine">Prefer a tab that doesn't show this address?
+        <button type="button" class="btn quiet small" id="openBlank">Open in an about:blank tab</button></p>
+      <p class="fine" id="blankStatus" role="status"></p>
+    </div>
+
+    <!-- A PC on the desk and a phone in front of it, showing the same screen with Roost's Dock (CSS only). -->
+    <div class="art" aria-hidden="true">
+      <div class="monitor">
+        <div class="desk">
+          <div class="win w1"><i></i><i></i><i></i><i></i></div>
+          <div class="win w2"><i></i><i></i><i></i><i></i></div>
+          <div class="taskbar"><b></b><b></b><b></b><b></b><b></b></div>
+        </div>
+        <div class="stand"></div>
+      </div>
+      <div class="phone">
+        <div class="desk">
+          <div class="pc">
+            <div class="desk">
+              <div class="win w1"><i></i><i></i><i></i><i></i></div>
+              <div class="win w2"><i></i><i></i><i></i><i></i></div>
+              <div class="taskbar"><b></b><b></b><b></b><b></b><b></b></div>
+            </div>
+          </div>
+          <div class="mini-dock"><b></b><b></b><b></b><b></b><b></b></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="band tint" id="how" aria-labelledby="h-how">
+    <div class="wrap">
+      <p class="kicker">How it works</p>
+      <h2 id="h-how">Three steps, then it's just there.</h2>
+      <p class="sub">A small app on your PC sends its screen and sound straight to this page, and your taps, clicks and
+        typing go straight back. The two connect directly to each other, encrypted, the way video calls in a browser do.</p>
+      <ol class="steps3">
+        <li><h3>Install Roost on your PC</h3>
+          <p>One line in PowerShell. Roost sits in the tray, next to the clock, and starts by itself when you sign in to
+            Windows.</p></li>
+        <li><h3>Pair your phone once</h3>
+          <p>Roost's Control Center shows a code. Scan it, approve with Face ID, a fingerprint or your screen lock, and add
+            Roost to your authenticator app.</p></li>
+        <li><h3>Your PC, from anywhere</h3>
+          <p>Open this site, sign in with your passkey and a 6-digit code, and your PC is right there: touch, mouse,
+            keyboard and sound.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band" id="features" aria-labelledby="h-features">
+    <div class="wrap">
+      <p class="kicker">What you get</p>
+      <h2 id="h-features">Made for the device in your hand.</h2>
+      <div class="bento">
+        <div class="tile wide hot"><span class="ico" data-icon="touch" aria-hidden="true"></span>
+          <h3>Phones first</h3>
+          <p>Tap to click, hold for a right click, two fingers to scroll, pinch to zoom, or turn your screen into a
+            touchpad. The Key deck keeps Win, Alt+Tab and Task Manager a thumb away.</p></div>
+        <div class="tile wide"><span class="ico" data-icon="dock" aria-hidden="true"></span>
+          <h3>Controls that keep out of the way</h3>
+          <p>A small Dock floats over your PC's screen. Drag it to any edge or corner, or shrink it to a glowing orb.
+            Every action is one search away in the Command palette.</p></div>
+        <div class="tile"><span class="ico" data-icon="bolt" aria-hidden="true"></span>
+          <h3>Smooth on ordinary Wi-Fi</h3>
+          <p>The picture is sized to your screen and your connection, with a 60 frames a second mode for fast links.</p></div>
+        <div class="tile"><span class="ico" data-icon="clipboard" aria-hidden="true"></span>
+          <h3>Copy here, paste there</h3>
+          <p>Text and pictures go both ways between your device and your PC's clipboard.</p></div>
+        <div class="tile"><span class="ico" data-icon="mic" aria-hidden="true"></span>
+          <h3>Talk through your PC</h3>
+          <p>Turn on your microphone and your PC plays what you say, on its speakers or into a call.</p></div>
+        <div class="tile"><span class="ico" data-icon="window" aria-hidden="true"></span>
+          <h3>One window at a time</h3>
+          <p>Show a single window instead of the whole desktop, and reshape it to fit the screen you're holding.</p></div>
+        <div class="tile"><span class="ico" data-icon="eye" aria-hidden="true"></span>
+          <h3>Show, don't share</h3>
+          <p>Make a link that lets someone watch your screen for a while, without being able to touch anything.</p></div>
+        <div class="tile"><span class="ico" data-icon="wifi" aria-hidden="true"></span>
+          <h3>Works on strict Wi-Fi</h3>
+          <p>An optional relay gets through school and office networks that block direct connections.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band tint" id="install" aria-labelledby="h-install">
+    <div class="wrap install">
+      <div>
+        <p class="kicker">Install</p>
+        <h2 id="h-install">One line in PowerShell.</h2>
+        <p class="sub">Right-click the Start button and choose <b>Terminal</b> (or open <b>Windows PowerShell</b>), paste
+          this line and press Enter. No administrator rights needed.</p>
+        <div class="term">
+          <div class="term-bar"><span class="ps" aria-hidden="true">&gt;_</span>Windows PowerShell<span class="controls" aria-hidden="true">— ▢ ✕</span></div>
+          <div class="term-body">
+            <div class="term-line"><span class="prompt" aria-hidden="true">PS&gt;</span><code id="installCmd">irm https://just-rice.github.io/roost/install.ps1 | iex</code></div>
+            <div class="term-actions">
+              <button type="button" class="btn primary small" id="copyCmd"><span data-icon="copy" aria-hidden="true"></span>Copy</button>
+              <span class="term-status" id="copyStatus" role="status"></span>
+            </div>
+            <p class="term-out" aria-hidden="true">Installing Roost for x64...<br>Checking the download... <b>it matches</b><br>Roost is installed. It's starting now.</p>
+          </div>
+        </div>
+        <ul class="reqs" aria-label="What you need">
+          <li><span data-icon="windows" aria-hidden="true"></span>Windows 10 (1903+) or 11</li>
+          <li><span data-icon="pc" aria-hidden="true"></span>x64 or ARM64</li>
+          <li><span data-icon="globe" aria-hidden="true"></span>Any recent browser to view from</li>
+        </ul>
+      </div>
+      <div>
+        <p>The line downloads the latest Roost for your PC's processor from
+          <a href="https://github.com/Just-Rice/roost/releases">GitHub</a>, checks it against the checksum published
+          with it, installs it just for you (in <code>%LOCALAPPDATA%\Programs\Roost</code>), sets it to start when you
+          sign in, and opens the Control Center, which walks you through the rest.</p>
+        <details>
+          <summary>Why a command, and not a download button?</summary>
+          <p>Roost is free and isn't signed with a paid code-signing certificate. Windows SmartScreen stops unsigned apps
+            downloaded in a browser with a blue "Windows protected your PC" screen. Files fetched by PowerShell aren't
+            marked as downloaded from the internet, so Roost simply starts. You can read exactly what the line runs:
+            <a href="install.ps1">install.ps1</a>.</p>
+          <div class="smartscreen" aria-hidden="true">
+            <div class="ss-top"><b>Windows protected your PC</b><span>Microsoft Defender SmartScreen prevented an unrecognised app from starting.</span></div>
+            <div class="ss-body"><u>More info</u> › Run anyway</div>
+          </div>
+          <p>Rather download it yourself? Get the zip for your PC from the
+            <a href="https://github.com/Just-Rice/roost/releases/latest">latest release</a>, unzip it and open
+            <code>roost.exe</code>. If SmartScreen appears, choose <b>More info</b>, then <b>Run anyway</b>.</p>
+        </details>
+        <details>
+          <summary>What you need</summary>
+          <ul class="list">
+            <li><b>The PC:</b> Windows 10 version 1903 or later, or Windows 11, with an x64 (Intel or AMD) or ARM64
+              processor.</li>
+            <li><b>The device you view from:</b> a recent Safari, Chrome, Edge or Firefox, on a phone, tablet or computer.</li>
+            <li><b>An authenticator app</b> for the 6-digit codes: Microsoft Authenticator, Google Authenticator, Apple
+              Passwords, 1Password and others all work.</li>
+            <li>The PC has to be <b>on, awake and signed in</b>. Roost can keep it from going to sleep.</li>
+          </ul>
+        </details>
+        <details>
+          <summary>Update or uninstall</summary>
+          <p>The Control Center tells you when an update is out. To remove Roost, run this in PowerShell:</p>
+          <p><code>irm https://just-rice.github.io/roost/uninstall.ps1 | iex</code></p>
+          <p>It stops Roost, stops it starting with Windows and deletes the app, and asks before deleting your settings.
+            Read it first: <a href="uninstall.ps1">uninstall.ps1</a>.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="privacy" aria-labelledby="h-privacy">
+    <div class="wrap">
+      <p class="kicker">Private by design</p>
+      <h2 id="h-privacy">This site is only the keypad. The lock is on your PC.</h2>
+      <p class="sub">Your PC checks every sign-in itself. Nobody behind Roost can see your screen, and there's no account
+        to leak.</p>
+      <div class="promises">
+        <div class="promise"><span data-icon="shield" aria-hidden="true"></span><h3>Two steps, every time</h3>
+          <p>A passkey (Face ID, Windows Hello or your phone), then a code from your authenticator app. Nothing is shown
+            or sent until both pass.</p></div>
+        <div class="promise"><span data-icon="link" aria-hidden="true"></span><h3>No servers in between</h3>
+          <p>Your screen goes straight from your PC to your browser, encrypted. Free public message services only pass
+            along sealed "here's how to reach me" notes they can't read.</p></div>
+        <div class="promise"><span data-icon="eye" aria-hidden="true"></span><h3>You always know</h3>
+          <p>The tray icon shows when someone is connected. Only one device controls the PC at a time, and you can end it
+            from the PC.</p></div>
+      </div>
+      <div class="note warn"><span data-icon="warn" aria-hidden="true"></span><div><b>Only pair your own devices.</b>
+        Roost gives full control of a PC. Nobody genuine will ever ask you to install it or to send them a pairing code;
+        anyone who does is trying to scam you.</div></div>
+      <p class="fine">More in the <a href="privacy.html">privacy page</a> and the
+        <a href="https://github.com/Just-Rice/roost/blob/main/SECURITY.md">security notes</a>.</p>
+    </div>
+  </section>
+
+  <section class="band" id="limits" aria-labelledby="h-limits">
+    <div class="narrow">
+      <p class="kicker">Good to know</p>
+      <h2 id="h-limits">The small print, in plain words.</h2>
+      <ul class="list">
+        <li><b>It's a beta.</b> Please <a href="https://github.com/Just-Rice/roost/issues">report problems</a>.</li>
+        <li>To click on apps that run as administrator (Task Manager, installers) and to see Windows' own permission
+          prompts, turn on <b>Control admin apps</b> in the Control Center. Windows asks you once.</li>
+        <li>Windows never lets another program press <b>Ctrl+Alt+Del</b> or <b>Win+L</b>. Open Task Manager
+          (Ctrl+Shift+Esc) from the Key deck instead.</li>
+        <li>Very strict networks (some schools, workplaces and mobile carriers) can block direct connections. The
+          Control Center has an optional relay for those, using a free Cloudflare account of your own.</li>
+        <li>It works inside an <b>about:blank</b> tab too. With no address showing you can't check you're on the real
+          site, so prefer your passkey to the backup password there.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="band" aria-label="Get started">
+    <div class="wrap">
+      <div class="cta">
+        <h2>Ready when your PC is.</h2>
+        <p>Install Roost on the PC, pair your phone once, and your desktop is a tap away from then on.</p>
+        <div class="actions">
+          <a class="btn primary" href="connect.html">Connect to my PC</a>
+          <a class="btn" href="#install">Install on Windows</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="img/icon.svg" alt="" width="26" height="26">Roost</a>
+    <span>Free and open source (Apache 2.0). Built on <a href="https://github.com/Just-Rice/perch">Perch</a> by <a href="https://github.com/Just-Rice">Just-Rice</a>, the Mac original.</span>
+    <a href="https://github.com/Just-Rice/roost">Source code</a>
+    <a href="privacy.html">Privacy</a>
+    <a href="https://github.com/Just-Rice/roost/blob/main/SECURITY.md">Security</a>
+  </div>
+</footer>
+<script type="module" src="js/front.js"></script>
+</body>
+</html>

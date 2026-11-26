@@ -1,0 +1,466 @@
+// The connect page: home screen, the ways in (a known PC, passkey discovery, backup, pairing link, guest link), and
+// handing a signed-in connection to the viewer. Loaded by js/connect.js only after its frame check passed.
+import { pageEnv } from './env.js';
+import { MacStore, lastUsedText } from './macs.js';
+import { Prefs } from './prefs.js';
+import { deviceLabel, isAppleDevice, isTouchFirst, passkeyFriendly, platformAuthenticatorAvailable } from './device.js';
+import { parsePairHash, parseGuestHash, parseUserHandle } from './pairlink.js';
+import { Connection, RoostError } from './connection.js';
+import { signIn, loadOpaque, backupEarly } from './signin.js';
+import { Screens } from './screens.js';
+import { getAssertion, webauthnAvailable, webauthnErrorKind } from './passkey.js';
+import { prepareQuick, quickRequest } from './quick.js';
+import { failureMessage, messageFor } from './messages.js';
+import { fillIcons, icon } from './icons.js';
+import { openInBlankTab } from '../blank.js';
+import { Viewer } from '../viewer/viewer.js';
+import { toB64url, fromB64url, randomBytes } from '../shared/bytes.js';
+import { normalizeMacName, isMacName } from '../shared/rendezvous.js';
+import { relayBase, relayBroker } from '../shared/wsrelay.js';
+import { startEmbers } from '../shared/ember.js';
+
+const $ = id => document.getElementById(id);
+
+export function start() {
+  // The embers behind the sign-in screens, calm behind their text, and off while the viewer shows the PC's screen
+  // (there they would only cost the device's power).
+  startEmbers(document.getElementById('embers'), {
+    calm: () => document.querySelector('#main > .screen:not([hidden]) .panel, #main > .panel:not([hidden]), .home-head'),
+    paused: () => document.body.classList.contains('viewing'),
+  });
+  const env = pageEnv();
+  const ua = navigator.userAgent;
+  const touchOpts = { maxTouchPoints: navigator.maxTouchPoints || 0, coarsePointer: matchMedia('(pointer: coarse)').matches };
+  const app = {
+    env,
+    apple: isAppleDevice(ua, touchOpts),
+    touchFirst: isTouchFirst(ua, touchOpts),
+    label: deviceLabel(ua, touchOpts),
+    macs: new MacStore(),
+    ui: new Screens(document),
+    conn: null,
+    viewer: null,
+    log: env.test || env.demo ? (...a) => console.debug('[roost]', ...a) : () => {},
+  };
+  app.prefs = new Prefs({ apple: app.apple });
+  // Passkey or backup sign-in, by device. Tests on this computer can say which (?device=chromebook|passkey).
+  const forced = env.test ? env.params.get('device') : null;
+  app.passkeyFriendly = forced === 'chromebook' ? Promise.resolve(false) : forced === 'passkey' ? Promise.resolve(true)
+    : platformAuthenticatorAvailable().then(platformAuthenticator => passkeyFriendly(ua, { platformAuthenticator }));
+  // Asked once, straight away: is this copy of the site served by a PC owner's own relay (relay/)?
+  app.ownBroker = ownRelayBroker(env);
+  // Tests and the demo look inside through this; the real site never sets it.
+  if (env.test || env.demo) window.__roost = app;
+
+  fillIcons(document);
+  wireHome(app);
+  app.ui.onCancel = () => cancel(app);
+  addEventListener('pagehide', () => { app.conn?.close({ bye: true }); });
+
+  // A pairing link carries secrets in the address: take it out of the address bar (and history) straight away.
+  const pair = parsePairHash(location.hash);
+  const guest = parseGuestHash(location.hash);
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+
+  $('boot').hidden = true;
+  if (env.demo) {
+    import('./demo.js').then(m => m.startDemo(app));
+    return;
+  }
+  $('app').hidden = false;
+  if (pair?.error) return showMessage(app, failureMessage('bad-link'), null);
+  if (pair) return app.passkeyFriendly.then(ok => runSession(app, { route: 'pair', pair, offerBackup: !ok }));
+  if (guest?.error) return showMessage(app, failureMessage('bad-link'), null);
+  if (guest) return runSession(app, { route: 'guest', guest });
+  app.passkeyFriendly.then(ok => {
+    // A device that can't easily keep a passkey goes straight to the backup sign-in, unless it already knows a PC by
+    // its passkey. The home page (Back) still offers a passkey.
+    if (!ok && app.macs.list().length === 0) showBackup(app);
+    else showHome(app);
+  });
+}
+
+// A copy of this site served by the owner's own relay Worker (relay/ deploys it alongside the relay): that relay is
+// then also a rendezvous broker, and it is reachable wherever this page itself loaded, even on networks that block
+// the public brokers. Resolves to its broker address, or null (the official site, or anything else).
+async function ownRelayBroker(env) {
+  try {
+    const origin = location.origin;
+    // Only a workers.dev address can be a relay (tests on this computer say so with ?relaysite=1).
+    const local = env.allowLocalRelay && env.params.get('relaysite') === '1';
+    if (!relayBase(origin, { allowLocal: local })) return null;
+    const r = await fetch(new URL('/v1/info', origin), { cache: 'no-store', signal: AbortSignal.timeout(2500) });
+    const info = r.ok ? await r.json() : null;
+    return info?.roost === 'relay' ? relayBroker(relayBase(origin, { allowLocal: local })) : null;
+  } catch {
+    return null;
+  }
+}
+
+// --- home ---
+
+function wireHome(app) {
+  const { env } = app;
+  $('btnDiscover').addEventListener('click', () => discover(app));
+  $('btnBackup').addEventListener('click', () => showBackup(app));
+  $('btnBlank').addEventListener('click', () => {
+    // A local test copy keeps its test switches (local brokers) in the new tab; the real site has none to keep.
+    const r = openInBlankTab(new URL(`connect.html${env.local ? location.search : ''}`, location.href).href);
+    $('blankStatus').textContent = r.ok ? 'Opened Roost in a new about:blank tab.'
+      : r.reason === 'blocked' ? 'Your browser blocked the new tab. Allow pop-ups for this page and try again.'
+        : `Couldn't open the tab (${r.reason}).`;
+  });
+  $('backupForm').addEventListener('submit', e => {
+    e.preventDefault();
+    submitBackup(app);
+  });
+  for (const b of document.querySelectorAll('[data-home]')) b.addEventListener('click', () => showHome(app));
+  $('storageNote').hidden = app.macs.persistent;
+  // In an about:blank tab nobody can see the address, so the password form says so.
+  let framed = false;
+  try { framed = window.top !== window || location.protocol === 'blob:'; } catch { framed = true; }
+  $('blankWarning').hidden = !framed;
+  if (env.test) $('h-home').dataset.test = '1';
+}
+
+function showHome(app, { status } = {}) {
+  closeCurrent(app);
+  prepareQuick(); // make the certificate now, so "Sign in with a passkey" needs only one passkey request
+  const list = app.macs.list();
+  const ul = $('macList');
+  ul.replaceChildren();
+  for (const mac of list) ul.append(macItem(app, mac));
+  $('macsBlock').hidden = list.length === 0;
+  // With a PC in the list, its own card is the main way in; the passkey and backup buttons step back to a strip.
+  const has = list.length > 0;
+  $('s-home').classList.toggle('has-pcs', has);
+  $('h-home').textContent = has ? 'Your PCs' : 'Connect to your PC';
+  $('btnDiscover').classList.toggle('primary', !has);
+  $('btnDiscover').textContent = has ? 'Use another passkey' : 'Sign in with a passkey';
+  $('btnBackup').textContent = has ? 'Another way' : 'Sign in another way';
+  $('waysTitle').textContent = has ? 'Another PC?' : 'Sign in with a passkey';
+  $('waysBody').textContent = has ? 'Sign in with its passkey, or with its name and backup password.'
+    : 'Face ID, Windows Hello, your fingerprint or your screen lock. Roost finds your PC from the passkey.';
+  fillIcons($('s-home'));
+  $('homeLead').hidden = has;
+  app.ui.showError('homeStatus', status || '');
+  app.ui.show('home');
+}
+
+function macItem(app, mac) {
+  const li = document.createElement('li');
+  li.className = 'pc';
+  const name = mac.label || mac.name || 'Your PC';
+  li.style.setProperty('--hue', String(hueOf(mac.hostId || name)));
+  const go = document.createElement('button');
+  go.type = 'button';
+  go.className = 'pc-go';
+  const mono = document.createElement('span');
+  mono.className = 'mono';
+  mono.setAttribute('aria-hidden', 'true');
+  mono.textContent = monogram(name);
+  const n = document.createElement('span');
+  n.className = 'pc-name';
+  n.textContent = name;
+  const when = document.createElement('span');
+  when.className = 'pc-when';
+  when.textContent = lastUsedText(mac.lastUsed);
+  const cta = document.createElement('span');
+  cta.className = 'pc-cta';
+  cta.setAttribute('aria-hidden', 'true');
+  cta.append('Connect', icon('chevron', { size: 18 }));
+  go.append(mono, n, when, cta);
+  go.setAttribute('aria-label', `Connect to ${name}, ${when.textContent.toLowerCase()}`);
+  go.addEventListener('click', () => runSession(app, { route: 'passkey', mac }));
+
+  const forget = document.createElement('button');
+  forget.type = 'button';
+  forget.className = 'pc-forget';
+  forget.textContent = 'Forget';
+  forget.setAttribute('aria-label', `Forget ${name}`);
+  let armed = null;
+  forget.addEventListener('click', () => {
+    if (!armed) {
+      // Two taps, so a slip of the finger doesn't lose the PC.
+      forget.textContent = 'Tap again to forget';
+      forget.classList.add('armed');
+      armed = setTimeout(() => { armed = null; forget.textContent = 'Forget'; forget.classList.remove('armed'); }, 4000);
+      return;
+    }
+    clearTimeout(armed);
+    app.macs.forget(mac.hostId);
+    showHome(app, {});
+    $('homeStatus').hidden = true;
+  });
+  li.append(go, forget);
+  return li;
+}
+
+// Two letters for a PC's card: the first letters of the first two parts of its name ("amber-otter-4821" → "AO").
+export function monogram(name) {
+  const parts = String(name || '').split(/[-\s_.]+/).filter(p => /^[\p{L}]/u.test(p));
+  const letters = (parts.length > 1 ? parts[0][0] + parts[1][0] : (parts[0] || 'PC').slice(0, 2));
+  return letters.toUpperCase();
+}
+
+// A steady colour for each PC (a hue, from its id), so the same PC always looks the same.
+export function hueOf(key) {
+  let h = 0;
+  for (const ch of String(key)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+  // Warm and cool hues alike, but never the muddy greens and yellows that look like warnings.
+  const HUES = [8, 22, 28, 198, 212, 228, 262, 284, 312, 336, 168];
+  return HUES[h % HUES.length];
+}
+
+// "Sign in with a passkey" with no PC in mind: any Roost passkey's user handle says which PC it is for.
+// One request does it all when it can (one-tap sign-in, quick.js): the passkey signs this browser's certificate,
+// prepared in advance, and its user handle carries the PC's address and certificate pin. Older passkeys (no pin)
+// still work, but the PC then asks for the passkey a second time, over the live connection.
+async function discover(app) {
+  app.ui.showError('homeStatus', '');
+  if (!webauthnAvailable()) return showMessage(app, failureMessage('no-webauthn'), null);
+  // Already prepared when the home screen opened, so this resolves at once and the request stays inside the tap
+  // (Safari only allows passkey requests straight from one).
+  const q = await prepareQuick();
+  const request = q ? await quickRequest(q) : { challenge: randomBytes(32), proof: null };
+  getAssertion({ challenge: request.challenge, rpId: app.env.rpId }).then(cred => {
+    const ids = parseUserHandle(cred.userHandle);
+    if (!ids) return showMessage(app, failureMessage('not-roost-passkey'), null);
+    const mac = app.macs.save({
+      hostId: toB64url(ids.hostId), sigKey: toB64url(ids.sigKey), credentialId: cred.id, lastUsed: Date.now(),
+      ...(ids.pin ? { pin: toB64url(ids.pin) } : {}),
+    });
+    const quick = q && ids.pin && request.proof ? { cert: q.cert, response: cred.json, proof: request.proof } : null;
+    runSession(app, { route: 'passkey', mac, quick });
+  }, e => {
+    const kind = webauthnErrorKind(e);
+    app.ui.showError('homeStatus', kind === 'cancelled'
+      ? 'No passkey was used. If this device has no Roost passkey yet, pair it from the Control Center on your PC first.'
+      : kind === 'wrong-site' ? "Passkeys can't be used from this address." : `The passkey didn't work (${e.name}).`);
+  });
+}
+
+// --- backup sign-in ---
+
+function showBackup(app, { error, name } = {}) {
+  closeCurrent(app);
+  const field = $('macName');
+  field.value = name ?? app.prefs.get('backupName') ?? '';
+  $('password').value = '';
+  app.ui.showError('backupError', error || '');
+  app.ui.show('backup', { focus: field.value ? 'password' : 'macName' });
+  loadOpaque().catch(() => {}); // fetch the password library while they type
+}
+
+function submitBackup(app) {
+  const name = normalizeMacName($('macName').value);
+  const password = $('password').value;
+  if (!isMacName(name)) {
+    app.ui.showError('backupError', "That doesn't look like a PC name. It's shown in Roost's Control Center, like amber-otter-4821.");
+    $('macName').focus();
+    return;
+  }
+  if (!password) {
+    app.ui.showError('backupError', 'Type the backup password you chose in the Control Center.');
+    $('password').focus();
+    return;
+  }
+  app.prefs.set('backupName', name);
+  $('password').value = '';
+  runSession(app, { route: 'backup', macName: name, password });
+}
+
+// --- connecting and signing in ---
+
+async function runSession(app, target) {
+  closeCurrent(app);
+  const { env, ui } = app;
+  const { route, mac, pair } = target;
+  const shownName = mac?.label || mac?.name || target.macName || '';
+  ui.setMacName(shownName || 'your PC');
+  ui.progress(route === 'pair' ? 'Pairing with your PC' : route === 'guest' ? 'Joining as a guest'
+    : shownName ? `Connecting to ${shownName}` : 'Connecting to your PC');
+
+  const ids = route === 'pair' ? { hostId: pair.hostId, sigKey: pair.sigKey }
+    : route === 'passkey' ? { hostId: fromB64url(mac.hostId), sigKey: fromB64url(mac.sigKey) } : {};
+  // The PC's certificate pin, from its passkey, a remembered PC or the pairing link: only that PC is trusted.
+  const pin = route === 'pair' ? pair.pin ?? null : route === 'guest' ? target.guest.pin ?? null
+    : route === 'passkey' && mac?.pin ? fromB64url(mac.pin) : null;
+  // Where to look for the PC: this page's own relay (when the owner's relay serves this copy of the site), the
+  // relay the PC named last time, then the public brokers.
+  const run = app.run = {};
+  const own = await app.ownBroker;
+  if (app.run !== run) return; // cancelled, or another session started, while we waited
+  const known = mac?.relay && relayBase(mac.relay, { allowLocal: env.allowLocalRelay }) === mac.relay ? relayBroker(mac.relay) : null;
+  const brokers = [...new Set([own, known, ...env.brokers].filter(Boolean))];
+  // Backup sign-in: the password is checked at the meeting point, before connecting (signin.js backupEarly). If the
+  // password library can't be had right now, it is checked over the connection instead, as before.
+  const early = route === 'backup' && target.password
+    ? await backupEarly(target.password).catch(e => { app.log(`early password check unavailable: ${e?.message}`); return null; })
+    : null;
+  if (app.run !== run) return;
+  const conn = new Connection({
+    route, ...ids, macName: target.macName, pairId: pair?.pairId, label: app.label, pin,
+    guestId: target.guest?.guestId, guestSecret: target.guest?.guestSecret,
+    certificate: target.quick?.cert ?? null,
+    brokers, iceServers: env.iceServers, log: app.log, onStage: s => ui.stage(s),
+    transport: target.transport ?? env.transport, allowLocalRelay: env.allowLocalRelay, early,
+  });
+  app.conn = conn;
+  // Tests on this computer can't answer a microphone prompt, so they may ask for a generated tone instead.
+  if (env.test && env.params.get('tonemic') === '1') conn.micSource = toneMicrophone;
+  let saved = mac || null;
+  const ctx = {
+    route, rpId: env.rpId, label: app.label, credentialId: mac?.credentialId, password: target.password, pair, early,
+    guest: target.guest ?? null,
+    quick: target.quick ?? null,
+    alwaysTap: env.params.get('tap') === '1',
+    offerBackup: !!target.offerBackup,
+    onHi: hi => ui.setMacName(hi.name),
+    onPaired: m => {
+      saved = app.macs.save({
+        hostId: toB64url(pair.hostId), sigKey: toB64url(pair.sigKey), credentialId: m.credentialId,
+        name: m.name || '', lastUsed: Date.now(), ...(pair.pin ? { pin: toB64url(pair.pin) } : {}),
+      });
+    },
+  };
+  try {
+    const { hi, ready } = await signIn(conn, ctx, ui);
+    if (app.conn !== conn) return;
+    const name = ready.name || hi.name || shownName;
+    // The PC names its Worker relay (if it has one) once signed in: remembered, so next time the PC can be found
+    // through it even where the public brokers are blocked. A PC without one any more clears it.
+    const relay = typeof ready.relay === 'string' && relayBase(ready.relay, { allowLocal: env.allowLocalRelay }) === ready.relay
+      ? ready.relay : undefined;
+    if (saved) saved = app.macs.update(saved.hostId, { name, lastUsed: Date.now(), relay }) || saved;
+    // What "Reconnect" does later: a paired or known PC signs in with its passkey; backup asks for the password again.
+    const again = route === 'guest' ? { route: 'guest', guest: target.guest }
+      : saved ? { route: 'passkey', mac: saved } : { route: 'backup-form', macName: target.macName };
+    startViewer(app, conn, hi, ready, again);
+  } catch (e) {
+    if (app.conn !== conn) return;
+    app.conn = null;
+    conn.close({ bye: true });
+    if (!(e instanceof RoostError)) {
+      app.log(e);
+      return showFailure(app, new RoostError('unexpected', { message: e.message }), target);
+    }
+    // The direct connection couldn't get through, but the PC offered its Worker relay: try once more over that.
+    // (One-tap sign-in is tied to the direct connection, so the passkey is asked for again over the relay.)
+    if (e.kind === 'webrtc' && conn.relayOffer && conn.via !== 'relay' && target.transport !== 'relay') {
+      app.log('the direct connection failed: trying the PC’s Worker relay');
+      return runSession(app, { ...target, transport: 'relay', quick: null });
+    }
+    if (e.kind === 'cancelled') return showHome(app);
+    if (e.kind === 'use-backup') return showPairChoice(app, target, e.name);
+    showFailure(app, e, target);
+  }
+}
+
+// A pairing link opened on a device that can't easily keep a passkey (a Chromebook): sign in with the PC's name and
+// backup password instead, or make a passkey anyway. The link is left unused, so either works.
+function showPairChoice(app, target, name) {
+  app.ui.message({
+    title: 'Use the backup sign-in on this device?',
+    body: `This device can't easily keep a passkey of its own, so it's quicker to sign in to ${name || 'your PC'} with ` +
+      'the PC\u2019s name and the backup password you chose in Roost\u2019s Control Center on the PC (turn on Backup sign-in ' +
+      'there first if you haven\u2019t).',
+  }, {
+    primary: { label: 'Use the backup sign-in', onClick: () => {
+      if (name) app.prefs.set('backupName', name);
+      showBackup(app, { name });
+    } },
+    secondary: { label: 'Make a passkey anyway', onClick: () => runSession(app, { ...target, offerBackup: false }) },
+  });
+}
+
+function cancel(app) {
+  const conn = app.conn;
+  app.conn = null;
+  conn?.close({ bye: true });
+  showHome(app);
+}
+
+function closeCurrent(app) {
+  app.run = null;
+  if (app.viewer) { app.viewer.destroy(); app.viewer = null; }
+  if (app.conn) { const c = app.conn; app.conn = null; c.close({ bye: true }); }
+  $('viewer').hidden = true;
+  $('app').hidden = false;
+}
+
+function showFailure(app, err, target) {
+  const m = messageFor(err, target.route);
+  if (m.action === 'password' && target.route === 'backup') {
+    return showBackup(app, { error: `${m.title}. ${m.body}`, name: target.macName });
+  }
+  showMessage(app, m, target);
+}
+
+function showMessage(app, m, target) {
+  closeCurrent(app);
+  const home = { label: 'Back to start', onClick: () => showHome(app) };
+  let primary = home, secondary = null;
+  if (m.action === 'reload') {
+    primary = { label: 'Reload the page', onClick: () => location.reload() };
+    secondary = home;
+  } else if ((m.action === 'retry' || m.action === 'code' || m.action === 'password') && target) {
+    primary = { label: 'Try again', onClick: () => retry(app, target) };
+    secondary = home;
+  }
+  app.ui.message(m, { primary, secondary });
+}
+
+function retry(app, target) {
+  if (target.route === 'backup' || target.route === 'backup-form') return showBackup(app, { name: target.macName });
+  if (target.route === 'passkey') {
+    // Use the freshest copy (the name may have arrived since).
+    const mac = app.macs.get(target.mac.hostId) || target.mac;
+    return runSession(app, { ...target, mac });
+  }
+  runSession(app, target);
+}
+
+// --- the viewer ---
+
+function startViewer(app, conn, hi, ready, again) {
+  $('app').hidden = true;
+  const viewer = new Viewer({
+    root: $('viewer'),
+    session: conn,
+    hi,
+    ready,
+    prefs: app.prefs,
+    env: app.env,
+    apple: app.apple,
+    touchFirst: app.touchFirst,
+    log: app.log,
+    onLeave: () => {
+      app.viewer = null;
+      viewer.destroy();
+      cancel(app);
+    },
+    onReconnect: () => retry(app, again),
+    onHome: () => showHome(app),
+  });
+  app.viewer = viewer;
+  conn.onclose = (err) => {
+    if (app.conn === conn) app.conn = null;
+    if (err.kind === 'bye' && err.reason === 'removed' && again.mac) app.macs.forget(again.mac.hostId);
+    const m = messageFor(err, again.route);
+    viewer.ended(m, { canReconnect: m.action !== 'home' && !(err.kind === 'bye' && err.reason === 'removed') });
+  };
+  viewer.mount();
+  conn.goLive();
+}
+
+// A steady tone in place of a real microphone (tests only: see where it is used).
+async function toneMicrophone() {
+  const ctx = new AudioContext();
+  const osc = ctx.createOscillator();
+  const out = ctx.createMediaStreamDestination();
+  osc.frequency.value = 440;
+  osc.connect(out);
+  osc.start();
+  return out.stream;
+}

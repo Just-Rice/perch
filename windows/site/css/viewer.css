@@ -1,0 +1,532 @@
+/* Roost — the viewer: the PC's screen edge to edge, with the Dock, the Command palette, Tweaks and the Key deck
+   floating over it. Tokens come from roost.css; the chrome follows light and dark like the rest of the site. */
+
+.viewer {
+  --m: 12px;                                    /* the Dock's distance from the edges */
+  --safe-t: env(safe-area-inset-top, 0px); --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px); --safe-r: env(safe-area-inset-right, 0px);
+  --chrome: color-mix(in srgb, var(--surface) 90%, transparent);   /* panels a little more solid than the Dock */
+  --hover: color-mix(in srgb, var(--text) 8%, transparent);
+  position: fixed; inset: 0; z-index: 10; overflow: hidden; background: #07080B; color: var(--text);
+  font-family: var(--font);
+}
+.viewer[hidden] { display: none; }
+.viewer :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.viewer .surface:focus, .viewer .surface:focus-visible { outline: none; }
+
+/* The picture. A Dock that keeps the picture clear of it, and a Key deck used with a mouse, get their own strips. */
+.surface {
+  position: absolute; overflow: hidden; outline: none;
+  top: var(--room-top, 0px); left: var(--room-left, 0px); right: var(--room-right, 0px);
+  bottom: calc(var(--room-bottom, 0px) + var(--keys-h, 0px));
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent;
+}
+.zoom { position: absolute; inset: 0; transform-origin: 0 0; will-change: transform; }
+.zoom video { width: 100%; height: 100%; object-fit: contain; background: #07080B; display: block; pointer-events: none; }
+.shape-fill .zoom video { object-fit: cover; }
+.shape-stretch .zoom video { object-fit: fill; }
+.viewer.view-only .surface { cursor: not-allowed; }
+.viewer.captured .surface, .viewer.nocursor .surface { cursor: none; }
+
+/* ---------- glass, shared by everything floating ---------- */
+.dock, .orb, .pop, .palette, .tweaks, .deck, .banner, .stats, .kbd-fab:not(.open):not(.invite), .dock-lip span {
+  backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+/* ---------- the Dock ---------- */
+.dock {
+  position: absolute; z-index: 6; display: flex; align-items: center; gap: 2px; padding: 5px;
+  border-radius: 999px; background: var(--glass); border: 1px solid var(--line); box-shadow: var(--shadow-lg);
+  transition: transform 220ms var(--ease), opacity 180ms var(--ease), visibility 0s linear 0s;
+  max-width: calc(100% - 2 * var(--m)); user-select: none; -webkit-user-select: none; touch-action: none;
+}
+.dock, .orb, .dock-lip { top: auto; left: auto; right: auto; bottom: auto; }
+/* Where it sits: eight places, chosen by dragging (viewer.js adds at-<place> to the viewer). */
+.at-top .dock, .at-top .orb { top: calc(var(--safe-t) + var(--m)); left: 50%; translate: -50% 0; }
+.at-bottom .dock, .at-bottom .orb { bottom: calc(var(--safe-b) + var(--m)); left: 50%; translate: -50% 0; }
+.at-left .dock, .at-left .orb { left: calc(var(--safe-l) + var(--m)); top: 50%; translate: 0 -50%; }
+.at-right .dock, .at-right .orb { right: calc(var(--safe-r) + var(--m)); top: 50%; translate: 0 -50%; }
+.at-top-left .dock, .at-top-left .orb { top: calc(var(--safe-t) + var(--m)); left: calc(var(--safe-l) + var(--m)); }
+.at-top-right .dock, .at-top-right .orb { top: calc(var(--safe-t) + var(--m)); right: calc(var(--safe-r) + var(--m)); }
+.at-bottom-left .dock, .at-bottom-left .orb { bottom: calc(var(--safe-b) + var(--m)); left: calc(var(--safe-l) + var(--m)); }
+.at-bottom-right .dock, .at-bottom-right .orb { bottom: calc(var(--safe-b) + var(--m)); right: calc(var(--safe-r) + var(--m)); }
+/* Above the Key deck when that is showing along the bottom. */
+.viewer.deck-on:is(.at-bottom, .at-bottom-left, .at-bottom-right) :is(.dock, .orb) { bottom: calc(var(--kb-inset, 0px) + var(--keys-up, 0px) + var(--m)); }
+.viewer.dock-vertical .dock { flex-direction: column; max-height: calc(100% - 2 * var(--m)); overflow-y: auto; scrollbar-width: none; }
+.viewer.dock-vertical .dock::-webkit-scrollbar { display: none; }
+
+.dock-grip {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px 0 10px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--text); font: 600 .95rem/1 var(--font); cursor: grab; touch-action: none; max-width: 220px;
+}
+.dock-grip:hover { background: var(--hover); }
+.viewer.dragging .dock-grip, .viewer.dragging .orb { cursor: grabbing; }
+.grip-dots {
+  flex: none; width: 8px; height: 14px; opacity: .55;
+  background: radial-gradient(circle, currentColor 1.2px, transparent 1.6px) 0 0 / 4px 4.7px;
+}
+.dock-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 25%, transparent), 0 0 10px color-mix(in srgb, var(--good) 70%, transparent); }
+.dot.fair { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--warn) 25%, transparent); }
+.dot.poor { background: var(--bad); box-shadow: 0 0 0 3px color-mix(in srgb, var(--bad) 25%, transparent); }
+.dock-sep { flex: none; width: 1px; height: 24px; margin: 0 4px; background: var(--line); }
+.viewer.dock-vertical .dock-sep { width: 24px; height: 1px; margin: 4px 0; }
+.viewer.dock-vertical .dock-grip { padding: 0; width: 44px; justify-content: center; flex-direction: column; gap: 6px; min-height: 52px; }
+.viewer.dock-vertical .grip-dots { width: 14px; height: 8px; background-size: 4.7px 4px; }
+.viewer.dock-vertical .dock-name { display: none; }
+
+.dk {
+  position: relative; flex: none; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px;
+  background: transparent; color: var(--text); cursor: pointer; font: inherit;
+  transition: background-color 160ms var(--ease), color 160ms var(--ease), transform 120ms var(--ease);
+}
+.dk:hover { background: var(--hover); }
+.dk:active { transform: scale(.92); }
+.dk[aria-pressed="true"], .dk[aria-expanded="true"] { background: var(--accent-soft); color: var(--accent); }
+.dk-bye { color: var(--bad); }
+.dk-bye:hover { background: var(--bad-soft); }
+.dk-badge {
+  position: absolute; right: 4px; bottom: 4px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px;
+  background: var(--ember); color: var(--accent-text); font: 700 10px/16px var(--font); text-align: center; pointer-events: none;
+}
+/* A narrow phone: the Dock keeps what a thumb needs; the rest is in the Command palette and Tweaks. */
+@media (max-width: 560px) {
+  .dock-name, .viewer:not(.dock-vertical) .dock-sep { display: none; }
+  .dock-grip { padding: 0 8px; gap: 6px; }
+  #dkSound, #dkFull, #dkKeyboard { display: none; }
+}
+@media (max-width: 360px) { .dk { width: 40px; } }
+
+/* Tucked away (the Dock "hides when not in use"), or shrunk to the orb. */
+.viewer.dock-away .dock, .viewer.dock-orb .dock { opacity: 0; visibility: hidden; pointer-events: none;
+  transition: transform 220ms var(--ease), opacity 160ms var(--ease), visibility 0s linear 220ms; }
+.viewer.dock-away:is(.at-top, .at-top-left, .at-top-right) .dock { transform: translateY(calc(-100% - var(--m) - 20px)); }
+.viewer.dock-away:is(.at-bottom, .at-bottom-left, .at-bottom-right) .dock { transform: translateY(calc(100% + var(--m) + 20px)); }
+.viewer.dock-away.at-left .dock { transform: translateX(calc(-100% - var(--m) - 20px)); }
+.viewer.dock-away.at-right .dock { transform: translateX(calc(100% + var(--m) + 20px)); }
+.viewer.dock-orb .dock { transform: scale(.35); }
+.viewer.dock-orb:is(.at-top, .at-top-left, .at-top-right) .dock { transform-origin: top; }
+.viewer.dock-orb:is(.at-bottom, .at-bottom-left, .at-bottom-right) .dock { transform-origin: bottom; }
+.viewer.dragging .dock, .viewer.no-anim .dock, .viewer.no-anim .orb { transition: none; }
+@media (prefers-reduced-motion: reduce) { .dock, .orb { transition: opacity 120ms linear, visibility 0s linear 120ms !important; } }
+
+/* The orb: the Dock shrunk to one glowing button. Its ring shows the connection's health. */
+.orb {
+  --q: var(--good); position: absolute; z-index: 6; width: 52px; height: 52px; padding: 0; border-radius: 50%; cursor: pointer;
+  border: 1px solid var(--line); background: var(--glass); touch-action: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--q) 45%, transparent), var(--shadow-lg);
+  display: grid; place-items: center; animation: orb-in 240ms var(--ease) both;
+}
+.orb.q-fair { --q: var(--warn); }
+.orb.q-poor { --q: var(--bad); }
+.orb-core {
+  width: 26px; height: 26px; border-radius: 50%; background: var(--ember);
+  box-shadow: 0 0 14px rgba(var(--ember-glow), .9), 0 0 2px rgba(255, 255, 255, .8) inset; animation: breathe 3.6s ease-in-out infinite;
+}
+.orb:hover .orb-core { transform: scale(1.08); }
+@keyframes orb-in { from { opacity: 0; transform: scale(.4); } }
+@keyframes breathe { 50% { box-shadow: 0 0 24px rgba(var(--ember-glow), 1), 0 0 2px rgba(255, 255, 255, .8) inset; } }
+@media (prefers-reduced-motion: reduce) { .orb, .orb-core { animation: none; } }
+
+/* A Dock tucked away on a touch screen: a small lip at its edge brings it back. With a mouse, the very edge does. */
+.dock-lip { position: absolute; z-index: 5; border: 0; padding: 0; background: transparent; cursor: pointer; display: grid; place-items: center; }
+.dock-lip span { display: block; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); box-shadow: 0 0 12px rgba(var(--ember-glow), .45); }
+.dock-lip span::after { content: ""; display: block; margin: 3px; border-radius: inherit; background: var(--ember); }
+.dock-lip:is(.e-top, .e-bottom) { left: 50%; translate: -50% 0; width: 96px; height: 40px; }
+.dock-lip:is(.e-top, .e-bottom) span { width: 56px; height: 12px; }
+.dock-lip:is(.e-top, .e-bottom) span::after { height: 4px; }
+.dock-lip.e-top { top: var(--safe-t); align-items: start; padding-top: 6px; }
+.dock-lip.e-bottom { bottom: calc(var(--safe-b) + var(--kb-inset, 0px) + var(--keys-up, 0px)); align-items: end; padding-bottom: 6px; }
+.dock-lip:is(.e-left, .e-right) { top: 50%; translate: 0 -50%; width: 40px; height: 96px; }
+.dock-lip:is(.e-left, .e-right) span { width: 12px; height: 56px; }
+.dock-lip:is(.e-left, .e-right) span::after { height: calc(100% - 6px); }
+.dock-lip.e-left { left: var(--safe-l); justify-items: start; padding-left: 6px; }
+.dock-lip.e-right { right: var(--safe-r); justify-items: end; padding-right: 6px; }
+.dock-lip.e-top.p-left, .dock-lip.e-bottom.p-left { left: calc(var(--safe-l) + 60px); }
+.dock-lip.e-top.p-right, .dock-lip.e-bottom.p-right { left: auto; right: calc(var(--safe-r) + 12px); translate: 0 0; }
+
+/* ---------- popovers: the display map ---------- */
+.pop {
+  position: absolute; z-index: 7; width: min(320px, calc(100% - 24px)); padding: 14px; border-radius: var(--r-card);
+  background: var(--chrome); border: 1px solid var(--line); box-shadow: var(--shadow-lg); animation: pop-in 180ms var(--ease) both;
+}
+@keyframes pop-in { from { opacity: 0; transform: translateY(-4px) scale(.98); } }
+@media (prefers-reduced-motion: reduce) { .pop, .palette, .tweaks, .sheet, .modal-card { animation: none !important; } }
+.pop-head { margin: 0 0 10px; font: 700 .74rem/1 var(--font); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.pop .fine { font-size: .84rem; margin: 10px 0 0; }
+.display-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.display-chip {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border-radius: 12px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text); font: 650 .92rem/1 var(--font); cursor: pointer;
+}
+.display-chip:hover { border-color: var(--line-strong); }
+.display-chip[aria-pressed="true"] { background: var(--ember); border-color: transparent; color: var(--accent-text); }
+.display-chip .shape { display: inline-block; border: 1.75px solid currentColor; border-radius: 3px; }
+.map-area { position: relative; height: 128px; border-radius: 14px; background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
+.map-display {
+  position: absolute; display: flex; align-items: center; justify-content: center; padding: 0; border: 1.5px solid var(--line-strong);
+  border-radius: 7px; background: var(--surface); color: var(--muted); font: 700 .9rem/1 var(--font); cursor: pointer;
+  transition: border-color 160ms var(--ease), background-color 160ms var(--ease);
+}
+.map-display:hover { border-color: var(--accent); }
+.map-display.main::before { /* the main display has the taskbar */
+  content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; border-radius: 0 0 5px 5px; background: color-mix(in srgb, var(--text) 25%, transparent);
+}
+.map-display.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 3px rgba(var(--ember-glow), .18); }
+
+/* The edge flip's note: the display beyond the edge the pointer waits at, filling up until the view moves there */
+.edge-hint { position: absolute; z-index: 4; display: flex; align-items: center; pointer-events: none; padding: 0 14px; }
+.edge-hint.at-right { top: 0; bottom: 0; right: 0; width: min(200px, 30%); justify-content: flex-end; background: linear-gradient(90deg, transparent, rgba(var(--ember-glow), .32)); }
+.edge-hint.at-left { top: 0; bottom: 0; left: 0; width: min(200px, 30%); background: linear-gradient(270deg, transparent, rgba(var(--ember-glow), .32)); }
+.edge-hint.at-top { left: 0; right: 0; top: 0; height: 110px; justify-content: center; align-items: flex-start; padding-top: 72px; background: linear-gradient(0deg, transparent, rgba(var(--ember-glow), .32)); }
+.edge-hint.at-bottom { left: 0; right: 0; bottom: 0; height: 110px; justify-content: center; align-items: flex-end; padding-bottom: 18px; background: linear-gradient(180deg, transparent, rgba(var(--ember-glow), .32)); }
+.edge-hint span { background: var(--ember); color: var(--accent-text); font-weight: 700; font-size: .9rem; border-radius: 999px; padding: 6px 14px; white-space: nowrap; box-shadow: 0 8px 20px -6px rgba(var(--ember-glow), .8); }
+.edge-fill { position: absolute; background: var(--accent-2); }
+.edge-hint.at-left .edge-fill, .edge-hint.at-right .edge-fill { bottom: 0; height: 3px; width: 0; }
+.edge-hint.at-right .edge-fill { right: 0; }
+.edge-hint.at-left .edge-fill { left: 0; }
+.edge-hint.at-top .edge-fill, .edge-hint.at-bottom .edge-fill { left: 0; width: 3px; height: 0; }
+.edge-hint.at-top .edge-fill { top: 0; }
+.edge-hint.at-bottom .edge-fill { bottom: 0; }
+.edge-hint.charging .edge-fill { transition: width .4s linear, height .4s linear; }
+.edge-hint.charging.at-left .edge-fill, .edge-hint.charging.at-right .edge-fill { width: 100%; }
+.edge-hint.charging.at-top .edge-fill, .edge-hint.charging.at-bottom .edge-fill { height: 100%; }
+@media (prefers-reduced-motion: reduce) { .edge-hint.charging .edge-fill { transition: none; } }
+
+.scrim { position: absolute; inset: 0; z-index: 8; background: rgba(5, 6, 9, .42); animation: fade-in 180ms var(--ease) both; }
+@keyframes fade-in { from { opacity: 0; } }
+
+/* ---------- the Command palette ---------- */
+.palette {
+  position: absolute; z-index: 9; left: 50%; top: max(calc(var(--safe-t) + 16px), 11vh); translate: -50% 0;
+  width: min(640px, calc(100% - 32px)); max-height: min(560px, calc(100% - 22vh)); display: flex; flex-direction: column;
+  background: var(--chrome); border: 1px solid var(--line); border-radius: 22px; box-shadow: var(--shadow-lg), 0 0 0 1px rgba(var(--ember-glow), .06);
+  overflow: hidden; animation: pop-in 180ms var(--ease) both;
+}
+.palette-search { display: flex; align-items: center; gap: 12px; padding: 6px 14px 6px 18px; border-bottom: 1px solid var(--line); }
+.palette-search > span { color: var(--accent); }
+.palette-search input {
+  flex: 1; min-width: 0; height: 56px; border: 0; background: transparent; color: var(--text); font: 500 1.08rem/1 var(--font); outline: none;
+}
+.palette-search input:focus-visible { outline: none; }
+.palette-search:focus-within { box-shadow: inset 0 -2px 0 rgba(var(--ember-glow), .5); }
+.palette-search input::placeholder { color: var(--muted); }
+kbd {
+  display: inline-block; min-width: 1.7em; padding: 2px 6px; border-radius: 6px; border: 1px solid var(--line); border-bottom-width: 2px;
+  background: var(--surface-2); color: var(--muted); font: 600 .74rem/1.3 var(--font); text-align: center;
+}
+.palette-list { list-style: none; margin: 0; padding: 6px 8px 10px; overflow-y: auto; overscroll-behavior: contain; flex: 1; scroll-padding: 34px 0 8px; }
+.palette-list .pg { /* a group's heading */
+  position: sticky; top: -6px; z-index: 1; padding: 12px 10px 6px; font: 700 .7rem/1 var(--font); letter-spacing: .1em; text-transform: uppercase;
+  color: var(--muted); background: linear-gradient(var(--chrome) 70%, transparent);
+}
+.pi {
+  display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 6px 10px; border-radius: 12px; cursor: pointer; position: relative;
+}
+.pi .pi-ico { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--surface-2); color: var(--muted); }
+.pi .pi-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.pi .pi-label mark { background: none; color: var(--accent); font-weight: 700; }
+.pi .pi-hint { flex: 0 1 auto; min-width: 0; color: var(--muted); font-size: .84rem; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pi .pi-label { flex: 1 1 auto; min-width: 45%; }
+@media (max-width: 640px) { .pi .pi-hint { display: none; } }
+.pi .pi-state { flex: none; font: 700 .72rem/1 var(--font); letter-spacing: .04em; padding: 5px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+.pi .pi-state.on { background: var(--accent-soft); color: var(--accent); }
+.pi[aria-selected="true"] { background: var(--accent-soft); }
+.pi[aria-selected="true"]::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: var(--ember); }
+.pi[aria-selected="true"] .pi-ico { background: var(--ember); color: var(--accent-text); }
+.pi[aria-disabled="true"] { opacity: .45; cursor: default; }
+.palette-empty { padding: 28px 20px; margin: 0; color: var(--muted); text-align: center; }
+.palette-foot { display: flex; gap: 18px; justify-content: flex-end; margin: 0; padding: 10px 16px; border-top: 1px solid var(--line); font-size: .8rem; color: var(--muted); }
+.palette-foot span { display: inline-flex; align-items: center; gap: 4px; }
+.palette-esc { flex: none; }
+
+/* ---------- Tweaks ---------- */
+.tweaks {
+  position: absolute; z-index: 9; top: calc(var(--safe-t) + 12px); bottom: calc(var(--safe-b) + 12px); right: calc(var(--safe-r) + 12px);
+  width: min(380px, calc(100% - 24px)); display: flex; flex-direction: column;
+  background: var(--chrome); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow-lg);
+  animation: slide-in 240ms var(--ease) both;
+}
+.viewer.tweaks-left .tweaks { right: auto; left: calc(var(--safe-l) + 12px); animation-name: slide-in-left; }
+@keyframes slide-in { from { opacity: 0; transform: translateX(32px); } }
+@keyframes slide-in-left { from { opacity: 0; transform: translateX(-32px); } }
+.tweaks-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 10px 8px 20px; }
+.tweaks-head h2 { margin: 0; font-size: 1.3rem; letter-spacing: -0.02em; }
+.tweaks-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 16px; }
+.tw { padding: 14px 8px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 10px; }
+.tw h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 2px; font: 700 .76rem/1 var(--font); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.tw h3 .icon { color: var(--accent); width: 16px; height: 16px; }
+.tw .fine { margin: -4px 0 0; font-size: .84rem; }
+.tw .btn { justify-content: flex-start; }
+.tw-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.tw-buttons .btn { flex: 1 1 140px; }
+.tw .btn[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+
+/* Segmented choices (quality, shape) */
+.seg { border: 0; margin: 0; padding: 0; min-width: 0; }
+.seg legend { padding: 0; margin-bottom: 6px; font-weight: 600; font-size: .92rem; }
+.seg { display: flex; flex-wrap: wrap; gap: 0; }
+.seg legend { width: 100%; }
+.seg > :not(legend) { flex: 1 1 0; min-width: 64px; }
+.seg label { position: relative; margin: 0; cursor: pointer; }
+.seg input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.seg span {
+  display: grid; place-items: center; min-height: 40px; padding: 0 8px; font-size: .9rem; font-weight: 600; color: var(--muted);
+  background: var(--surface-2); border: 1px solid var(--line); margin-left: -1px; transition: all 160ms var(--ease);
+}
+.seg label:first-of-type span { border-radius: 12px 0 0 12px; margin-left: 0; }
+.seg label:last-of-type span, .seg label:has(+ label[hidden]) span { border-radius: 0 12px 12px 0; }
+.seg input:checked + span { background: var(--ember); color: var(--accent-text); border-color: transparent; position: relative; z-index: 1; box-shadow: 0 6px 16px -8px rgba(var(--ember-glow), .9); }
+.seg input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.seg label:hover input:not(:checked) + span { color: var(--text); }
+
+/* Switches */
+.switch { display: flex; align-items: center; gap: 12px; min-height: 44px; margin: 0; font-weight: 600; cursor: pointer; }
+.switch span { flex: 1; order: -1; }
+.switch input {
+  appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 46px; height: 28px; margin: 0; border-radius: 999px;
+  background: var(--line-strong); cursor: pointer; transition: background-color 180ms var(--ease);
+}
+.switch input::after {
+  content: ""; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, .3); transition: transform 180ms var(--ease);
+}
+.switch input:checked { background: var(--ember); }
+.switch input:checked::after { transform: translateX(18px); }
+.switch input:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+/* Sliders with their value, and labelled selects */
+.level { display: grid; grid-template-columns: minmax(0, 1fr) 3.4em; grid-template-areas: "t o" "r r"; gap: 2px 10px; margin: 0; font-weight: 600; align-items: center; }
+.level > span { grid-area: t; }
+.level output { grid-area: o; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); font-size: .88rem; font-weight: 600; }
+.level input[type=range] { grid-area: r; width: 100%; margin: 4px 0; accent-color: var(--accent); height: 28px; }
+.level input[type=range]:disabled { opacity: .4; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; font-weight: 600; }
+.row.stacked { flex-direction: column; align-items: stretch; gap: 6px; }
+.viewer select, .sheet select {
+  min-height: 40px; max-width: 64%; padding: 0 32px 0 12px; border-radius: 12px; border: 1px solid var(--line); background-color: var(--surface-2);
+  color: var(--text); font: 500 .92rem/1 var(--font); cursor: pointer; appearance: none; -webkit-appearance: none; text-overflow: ellipsis;
+  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+  background-position: right 16px center, right 11px center; background-size: 5px 5px; background-repeat: no-repeat;
+}
+.row.stacked select { max-width: none; }
+.viewer select option { background: var(--surface); color: var(--text); }
+
+/* Where the Dock sits: a little screen with a spot for each place */
+.dock-pos { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 14px; align-items: center; }
+.pos-grid {
+  display: grid; grid-template-columns: repeat(3, 26px); grid-template-rows: repeat(3, 20px); gap: 6px; padding: 8px; border-radius: 14px;
+  background: linear-gradient(160deg, #2A2E39, #12151C); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .06);
+}
+.pos-grid button { padding: 0; border: 0; border-radius: 6px; background: rgba(255, 255, 255, .14); cursor: pointer; transition: background-color 160ms var(--ease), transform 120ms var(--ease); }
+.pos-grid button:hover { background: rgba(255, 255, 255, .3); }
+.pos-grid button[aria-checked="true"] { background: linear-gradient(135deg, #FF7A3D, #FFC15E); box-shadow: 0 0 10px rgba(255, 122, 61, .8); }
+.pos-grid button[data-at="top"], .pos-grid button[data-at="bottom"] { justify-self: stretch; height: 10px; align-self: center; }
+.pos-grid button[data-at="left"], .pos-grid button[data-at="right"] { width: 10px; justify-self: center; }
+.dock-pos-opts { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+/* ---------- status notes ---------- */
+.banners {
+  position: absolute; z-index: 5; left: 50%; translate: -50% 0; top: calc(var(--safe-t) + 12px);
+  width: min(560px, calc(100% - 32px)); display: flex; flex-direction: column; gap: 8px; pointer-events: none;
+}
+.viewer:is(.at-top, .at-top-left, .at-top-right):not(.dock-away) .banners { top: calc(var(--safe-t) + 76px); }
+.banner {
+  pointer-events: auto; display: flex; align-items: center; gap: 12px; padding: 10px 10px 10px 12px; border-radius: 18px;
+  background: var(--chrome); border: 1px solid var(--line); box-shadow: var(--shadow-lg); font-size: .94rem; line-height: 1.4;
+  animation: pop-in 220ms var(--ease) both;
+}
+.banner > .icon { flex: none; box-sizing: content-box; padding: 7px; border-radius: 10px; background: var(--accent-soft); color: var(--accent); }
+.banner.warn > .icon { background: var(--warn-soft); color: var(--warn); }
+.banner.bad > .icon { background: var(--bad-soft); color: var(--bad); }
+.banner-text { flex: 1; min-width: 0; }
+.banner-text span { color: var(--muted); }
+.banner .btn { flex: none; min-height: 36px; }
+.banner-x { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border: 0; background: transparent; color: var(--muted); cursor: pointer; border-radius: 12px; }
+.banner-x:hover { color: var(--text); background: var(--hover); }
+
+/* "Tap for sound" */
+.sound-prompt {
+  position: absolute; left: 50%; translate: -50% 0; bottom: calc(var(--safe-b) + var(--room-bottom, 0px) + 84px); z-index: 5;
+  display: inline-flex; align-items: center; gap: 10px; min-height: 52px; padding: 0 24px; border-radius: 999px;
+  border: 0; background: var(--ember); color: var(--accent-text); font: 700 1.05rem/1 var(--font); cursor: pointer;
+  box-shadow: 0 12px 30px -8px rgba(var(--ember-glow), .8);
+}
+.viewer.deck-on .sound-prompt { bottom: calc(var(--kb-inset, 0px) + var(--keys-up, 0px) + 84px); }
+
+/* Connection details */
+.stats {
+  position: absolute; left: calc(var(--safe-l) + var(--room-left, 0px) + 12px); bottom: calc(var(--safe-b) + var(--room-bottom, 0px) + var(--keys-h, 0px) + 12px);
+  z-index: 4; pointer-events: none; background: var(--chrome); border: 1px solid var(--line); border-radius: 16px; padding: 10px 14px;
+  font: 12px/1.6 var(--mono); color: var(--text); box-shadow: var(--shadow);
+}
+.stats:empty { display: none; }
+.stats dl { display: grid; grid-template-columns: auto auto; gap: 0 16px; margin: 0; }
+.stats dt { color: var(--muted); }
+.stats dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.viewer.deck-on .stats { bottom: calc(var(--kb-inset, 0px) + var(--keys-up, 0px) + 12px); }
+
+/* ---------- the Key deck ---------- */
+.deck {
+  position: absolute; z-index: 5; left: 0; right: 0; bottom: var(--kb-inset, 0px);
+  display: flex; align-items: center; gap: 6px; padding: 8px max(12px, var(--safe-l)) calc(var(--safe-b) + 8px) 0;
+  overflow-x: auto; scrollbar-width: none; overscroll-behavior-x: contain;
+  background: var(--glass); border-top: 1px solid var(--line); box-shadow: 0 -10px 30px -16px rgba(0, 0, 0, .4);
+}
+.deck::-webkit-scrollbar { display: none; }
+.deck-mods {
+  position: sticky; left: 0; z-index: 1; display: flex; gap: 6px; padding: 0 8px 0 max(12px, var(--safe-l)); margin-right: 2px;
+  background: linear-gradient(90deg, var(--chrome) 85%, transparent); border-right: 1px solid var(--line);
+}
+@supports (backdrop-filter: blur(1px)) { .deck-mods { background: color-mix(in srgb, var(--surface) 70%, transparent); } }
+.keys-list { display: contents; }
+.key {
+  flex: none; display: inline-grid; place-items: center; min-width: 48px; height: 44px; padding: 0 12px; border-radius: 12px;
+  border: 1px solid var(--line); border-bottom-width: 2px; background: var(--surface); color: var(--text);
+  font: 600 .95rem/1 var(--font); cursor: pointer; touch-action: manipulation; white-space: nowrap;
+  transition: background-color 120ms var(--ease), transform 80ms var(--ease);
+}
+.key:hover { background: var(--surface-2); }
+.key:active { transform: translateY(1px); background: var(--surface-2); }
+.key.mod { min-width: 54px; font-size: .88rem; color: var(--muted); }
+.key.wide { font-size: .88rem; }
+.key[aria-pressed="true"] { background: var(--ember); color: var(--accent-text); border-color: transparent; box-shadow: 0 6px 16px -6px rgba(var(--ember-glow), .9); }
+.key.edit { color: var(--accent); border-style: dashed; background: transparent; }
+.win-glyph { /* the Windows key's four panes */
+  display: block; width: 15px; height: 15px;
+  background:
+    linear-gradient(currentColor, currentColor) 0 0 / 46% 46% no-repeat, linear-gradient(currentColor, currentColor) 100% 0 / 46% 46% no-repeat,
+    linear-gradient(currentColor, currentColor) 0 100% / 46% 46% no-repeat, linear-gradient(currentColor, currentColor) 100% 100% / 46% 46% no-repeat;
+}
+/* With a mouse on a wide screen: a floating strip, centred, instead of the full-width bar. */
+@media (min-width: 900px) {
+  .viewer:not(.touch) .deck {
+    left: 50%; right: auto; translate: -50% 0; bottom: calc(var(--room-bottom, 0px) + 10px); max-width: calc(100% - 32px);
+    border: 1px solid var(--line); border-radius: 20px; padding: 6px 6px 6px 0;
+  }
+  .viewer:not(.touch) .deck-mods { padding-left: 6px; border-radius: 20px 0 0 20px; }
+}
+
+/* Choosing the Key deck's keys (a sheet: in the middle on a big screen, from the bottom on a phone) */
+.sheet {
+  position: absolute; z-index: 9; left: 50%; top: 50%; translate: -50% -50%; width: min(680px, calc(100% - 24px)); max-height: calc(100% - 32px);
+  display: flex; flex-direction: column; gap: 12px; padding: 18px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 24px; box-shadow: var(--shadow-lg); animation: pop-in 200ms var(--ease) both;
+}
+.sheet-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.sheet-head h2 { margin: 0 0 4px; font-size: 1.3rem; }
+.sheet-head .fine { margin: 0; font-size: .88rem; }
+.ke-groups { display: flex; flex-direction: column; gap: 14px; }
+.ke-group h3 { display: flex; align-items: center; gap: 10px; margin: 0 0 8px; font: 700 .74rem/1 var(--font); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.ke-group h3 .btn { margin-left: auto; text-transform: none; letter-spacing: 0; }
+.ke-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ke-item {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--text); font: 600 .9rem/1.1 var(--font); cursor: pointer; text-align: left;
+}
+.ke-item b { font-weight: 700; }
+.ke-item span { color: var(--muted); font-weight: 500; font-size: .82rem; }
+.ke-item:hover { border-color: var(--line-strong); }
+.ke-item[aria-pressed="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
+.ke-item[aria-pressed="true"] b { color: var(--accent); }
+.ke-item[aria-pressed="true"]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ember); flex: none; }
+.ke-x { display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: -6px; border: 0; border-radius: 8px; background: transparent; color: var(--bad); cursor: pointer; }
+.ke-x:hover { background: var(--bad-soft); }
+.ke-own { border: 1px dashed var(--line-strong); border-radius: 16px; padding: 10px 12px 12px; margin: 0; min-width: 0; }
+.ke-own legend { font-weight: 700; padding: 0 6px; }
+.ke-mods { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.chip { position: relative; margin: 0; cursor: pointer; }
+.chip input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.chip span { display: grid; place-items: center; min-height: 40px; min-width: 52px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2); font-weight: 650; font-size: .9rem; }
+.chip input:checked + span { background: var(--ember); color: var(--accent-text); border-color: transparent; }
+.chip input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ke-mods select { max-width: none; }
+.ke-mods input[type=text] {
+  flex: 1; min-width: 120px; min-height: 40px; padding: 0 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface-2);
+  color: var(--text); font: inherit; font-size: 16px;
+}
+
+/* ---------- the phone keyboard button, and its invisible text box lying on top of it ---------- */
+.kbd-fab {
+  position: absolute; right: calc(var(--safe-r) + 16px); bottom: calc(var(--kb-inset, 0px) + var(--safe-b) + 16px); z-index: 5;
+  width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--glass); border: 1px solid var(--line); color: var(--text); box-shadow: var(--shadow-lg);
+  transition: background-color 180ms var(--ease);
+}
+.viewer:is(.at-bottom, .at-bottom-right):not(.dock-away):not(.dock-orb) .kbd-fab,
+.viewer.at-bottom-right.dock-orb .kbd-fab { bottom: calc(var(--kb-inset, 0px) + var(--safe-b) + 84px); }
+.viewer.deck-on .kbd-fab { bottom: calc(var(--kb-inset, 0px) + var(--keys-up, 0px) + 16px); }
+.viewer.deck-on:is(.at-bottom, .at-bottom-right):not(.dock-away) .kbd-fab { bottom: calc(var(--kb-inset, 0px) + var(--keys-up, 0px) + 84px); }
+.kbd-fab.open { background: var(--ember); color: var(--accent-text); border-color: transparent; }
+.kbd-fab .icon { width: 26px; height: 26px; pointer-events: none; }
+/* A text box on the PC was tapped but this phone won't open its keyboard by itself (iPhones need a tap on a real
+   text field): the button grows into a labelled pill that says so. */
+.kbd-fab-label { display: none; pointer-events: none; font-weight: 700; font-size: 1rem; white-space: nowrap; }
+.kbd-fab.invite {
+  width: auto; border-radius: 28px; padding: 0 22px 0 16px; grid-auto-flow: column; gap: 10px;
+  background: var(--ember); color: var(--accent-text); border-color: transparent; animation: kbd-invite 1.8s ease-in-out infinite;
+}
+.kbd-fab.invite .kbd-fab-label { display: block; }
+.kbd-fab.invite .softkbd { border-radius: 28px; }
+@keyframes kbd-invite { 50% { box-shadow: 0 0 0 10px rgba(var(--ember-glow), .22), var(--shadow-lg); } }
+@media (prefers-reduced-motion: reduce) { .kbd-fab.invite { animation: none; } }
+.softkbd {
+  position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; margin: 0; border-radius: 50%;
+  opacity: 0; resize: none; overflow: hidden; cursor: pointer;
+  /* 16px stops iPhones zooming the page in when the box gets focus. */
+  font-size: 16px; color: transparent; background: transparent; caret-color: transparent;
+  -webkit-user-select: text; user-select: text;
+}
+
+/* ---------- dialogs: the session ended, clipboard text ---------- */
+.modal { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; padding: 16px; background: rgba(5, 6, 9, .55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.modal-card {
+  width: min(440px, 100%); background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 28px; padding: 28px 24px 22px;
+  box-shadow: var(--shadow-lg); animation: rise 260ms var(--ease) both; max-height: 100%; overflow-y: auto;
+}
+.modal-card h2 { margin: 0 0 8px; font-size: 1.45rem; }
+.modal-card p { color: var(--muted); margin: 0 0 8px; }
+.modal-card .stack { margin-bottom: 0; }
+.modal-card .btn.quiet { color: var(--muted); }
+.clip-text {
+  width: 100%; min-height: 120px; max-height: 40vh; padding: 12px 14px; border-radius: var(--r-ctl); border: 1px solid var(--line-strong);
+  background: var(--surface-2); color: var(--text); font: 16px/1.45 var(--mono); resize: vertical; margin: 8px 0 4px;
+}
+
+/* ---------- demo mode's list of messages ---------- */
+.demolog {
+  position: absolute; right: 12px; bottom: 12px; z-index: 3; width: min(380px, 60vw); max-height: 34vh; overflow: auto;
+  background: rgba(11, 13, 18, .82); border: 1px solid rgba(255, 255, 255, .12); border-radius: 14px; padding: 10px 12px;
+  font: 11px/1.45 var(--mono); color: #E8E2DA; pointer-events: none;
+}
+.demolog h2 { font: 700 10.5px/1.4 var(--font); margin: 0 0 4px; color: #FFC15E; text-transform: uppercase; letter-spacing: .08em; }
+.demolog ol { margin: 0; padding-left: 0; list-style: none; }
+.demolog li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demolog li.move { color: #A39E96; }
+.viewer.deck-on .demolog { bottom: calc(var(--kb-inset, 0px) + var(--keys-up, 0px) + 12px); }
+.viewer.touch .demolog { right: 84px; }
+
+/* ---------- phones: panels come up from the bottom, in reach of a thumb ---------- */
+@media (max-width: 640px), (pointer: coarse) and (max-height: 500px) {
+  .palette, .tweaks, .sheet {
+    left: 0; right: 0; top: auto; bottom: var(--kb-inset, 0px); translate: none; width: 100%; max-width: none;
+    border-radius: 24px 24px 0 0; border-bottom: 0; animation: sheet-up 260ms var(--ease) both;
+    padding-bottom: var(--safe-b);
+  }
+  .palette { max-height: min(78dvh, calc(100% - var(--safe-t) - 24px)); }
+  .tweaks { max-height: 82dvh; height: auto; }
+  .viewer.tweaks-left .tweaks { left: 0; animation-name: sheet-up; }
+  .sheet { max-height: 86dvh; padding: 16px 16px calc(var(--safe-b) + 16px); }
+  .palette-foot { display: none; }
+  .palette-esc { display: none; }
+  .palette::before, .tweaks::before, .sheet::before { /* a grabber */
+    content: ""; display: block; flex: none; width: 40px; height: 5px; margin: 8px auto 0; border-radius: 999px; background: var(--line-strong);
+  }
+  .tweaks-head { padding-top: 4px; }
+}
+@keyframes sheet-up { from { transform: translateY(40px); opacity: 0; } }
+
+/* A Dock along the top stays in sight beside Tweaks: the panel starts under it. */
+@media (min-width: 641px) {
+  .viewer:is(.at-top, .at-top-right, .at-top-left):not(.dock-away):not(.dock-orb) .tweaks { top: calc(var(--safe-t) + 76px); }
+}

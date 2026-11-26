@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<!-- connect-src: the public message services (shared/proto.js BROKERS), Worker relays (wss://*.workers.dev, see
+     shared/wsrelay.js) and, for tests run on this computer, loopback
+     WebSockets only (the page honours ?brokers= on localhost/127.0.0.1 alone). media-src: the PC's video arrives as a
+     MediaStream. 'wasm-unsafe-eval': the backup password library is WebAssembly. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' wss://broker.emqx.io:8084 wss://broker.hivemq.com:8884 wss://test.mosquitto.org:8081 wss://public.cloud.shiftr.io wss://*.workers.dev ws://127.0.0.1:* ws://localhost:*; media-src 'self' blob: mediastream:; img-src 'self' data: blob:; style-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#FAF7F2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0B0D12" media="(prefers-color-scheme: dark)">
+<meta name="description" content="Connect to your PC with Roost: sign in with your passkey and a 6-digit code.">
+<title>Roost: connect to your PC</title>
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="css/roost.css">
+<link rel="stylesheet" href="css/connect.css">
+<link rel="stylesheet" href="css/viewer.css">
+<script type="module" src="js/connect.js"></script>
+</head>
+<body class="connect">
+<canvas class="embers" id="embers" aria-hidden="true"></canvas>
+
+<!-- Shown until the page has checked it is allowed to run here (js/connect.js). -->
+<div id="boot" class="boot" role="status" aria-live="polite">
+  <img src="img/icon.svg" alt="" width="56" height="56">
+  <p id="bootText"><span class="spinner" aria-hidden="true"></span> Starting Roost…</p>
+</div>
+<noscript><div class="boot"><p>Roost needs JavaScript to connect to your PC. Turn it on for this site and reload.</p></div></noscript>
+
+<div id="app" class="app" hidden>
+  <header class="site">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="img/icon.svg" alt="" width="34" height="34">Roost <span class="badge">BETA</span></a>
+      <nav class="site" aria-label="Main">
+        <a href="./">About Roost</a>
+        <a class="hide-sm" href="privacy.html">Privacy</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+
+    <!-- Home: your PCs, and the ways in -->
+    <section id="s-home" class="screen home" aria-labelledby="h-home" hidden>
+      <div class="home-head">
+        <h1 id="h-home" tabindex="-1">Connect to your PC</h1>
+        <p id="homeLead" class="lead">Sign in with the passkey you made when you paired this device, then type the code
+          from your authenticator app.</p>
+      </div>
+      <div id="macsBlock" hidden>
+        <ul id="macList" class="pcs" aria-labelledby="h-home"></ul>
+      </div>
+      <div class="ways" id="ways">
+        <span class="ways-ico" data-icon="key" aria-hidden="true"></span>
+        <div class="ways-text">
+          <h2 id="waysTitle">Sign in with a passkey</h2>
+          <p id="waysBody">Face ID, Windows Hello, your fingerprint or your screen lock. Roost finds your PC from the passkey.</p>
+        </div>
+        <div class="ways-actions">
+          <button type="button" id="btnDiscover" class="btn primary big" data-icon="key">Sign in with a passkey</button>
+          <button type="button" id="btnBackup" class="btn big">Sign in another way</button>
+        </div>
+      </div>
+      <p id="homeStatus" class="msg bad" role="alert" hidden></p>
+      <p id="storageNote" class="note" hidden>This browser isn't keeping site data, so Roost won't remember your PC after
+        you close this tab.</p>
+      <div class="home-foot">
+        <p class="fine">New to Roost? <a href="./#install">Install it on your PC</a> first, then pair this device from the
+          Control Center on the PC.</p>
+        <p class="fine row">
+          <button type="button" id="btnBlank" class="btn quiet small" data-icon="blank">Open in an about:blank tab</button>
+        </p>
+        <p id="blankStatus" class="fine" role="status"></p>
+      </div>
+    </section>
+
+    <!-- Connecting -->
+    <section id="s-progress" class="screen panel" aria-labelledby="h-progress" hidden>
+      <div class="beacon" aria-hidden="true"><span></span><span></span><img src="img/icon.svg" alt="" width="44" height="44"></div>
+      <h1 id="h-progress" tabindex="-1">Connecting to your PC</h1>
+      <ol class="steps" id="steps">
+        <li data-step="finding">Finding your PC</li>
+        <li data-step="connecting">Making a direct connection</li>
+        <li data-step="checking">Checking it's really your PC</li>
+        <li data-step="verifying">Signing in</li>
+      </ol>
+      <p id="progressNote" class="fine" role="status"></p>
+      <button type="button" class="btn quiet" data-cancel>Cancel</button>
+    </section>
+
+    <!-- Passkey -->
+    <section id="s-passkey" class="screen panel" aria-labelledby="h-passkey" hidden>
+      <span class="panel-ico" data-icon="key" aria-hidden="true"></span>
+      <h1 id="h-passkey" tabindex="-1">Confirm it's you</h1>
+      <p class="lead">Use your passkey for <b data-macname>your PC</b>: Face ID, Windows Hello, your fingerprint, your
+        screen lock or a phone nearby.</p>
+      <p id="passkeyError" class="msg bad" role="alert" hidden></p>
+      <div class="stack">
+        <button type="button" id="btnPasskeyGo" class="btn primary big" data-icon="key">Continue with passkey</button>
+        <button type="button" class="btn quiet" data-cancel>Cancel</button>
+      </div>
+    </section>
+
+    <!-- Pairing: make a passkey -->
+    <section id="s-pair" class="screen panel" aria-labelledby="h-pair" hidden>
+      <span class="panel-ico" data-icon="phone" aria-hidden="true"></span>
+      <h1 id="h-pair" tabindex="-1">Pair this device</h1>
+      <p class="lead">Your PC <b data-macname>your PC</b> is ready. Make a passkey for it on this device, then type the
+        code from your authenticator app.</p>
+      <ul class="checks">
+        <li><span data-icon="check" aria-hidden="true"></span><span>The passkey is saved in this device's password manager
+          (such as iCloud Keychain, Google Password Manager or Windows Hello).</span></li>
+        <li><span data-icon="check" aria-hidden="true"></span><span>Next time, just open Roost and pick your PC.</span></li>
+      </ul>
+      <p id="pairError" class="msg bad" role="alert" hidden></p>
+      <div class="stack">
+        <button type="button" id="btnCreate" class="btn primary big" data-icon="key">Create passkey</button>
+        <button type="button" class="btn quiet" data-cancel>Cancel</button>
+      </div>
+      <p class="note warn"><b>Only pair your own devices.</b> Roost gives full control of the PC. If someone sent you
+        this link, close this page.</p>
+    </section>
+
+    <!-- The 6-digit code -->
+    <section id="s-code" class="screen panel" aria-labelledby="h-code" hidden>
+      <span class="panel-ico" data-icon="lock" aria-hidden="true"></span>
+      <h1 id="h-code" tabindex="-1">Type your code</h1>
+      <p class="lead">Open your authenticator app and type the 6-digit code for <b>Roost · <span data-macname>your
+        PC</span></b>.</p>
+      <form id="codeForm" novalidate>
+        <label for="code" class="sr-only">6-digit code</label>
+        <div class="otp" id="otp">
+          <input id="code" name="code" class="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+            pattern="[0-9]*" maxlength="6" enterkeyhint="go" spellcheck="false" aria-describedby="codeHelp codeError">
+          <span class="otp-cells" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        </div>
+        <p id="codeHelp" class="fine">It changes every 30 seconds. Pasting works too.</p>
+        <p id="codeError" class="msg bad" role="alert" hidden></p>
+        <div class="stack">
+          <button type="submit" id="btnCode" class="btn primary big">Sign in</button>
+          <button type="button" class="btn quiet" data-cancel>Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Backup sign-in -->
+    <section id="s-backup" class="screen panel" aria-labelledby="h-backup" hidden>
+      <span class="panel-ico" data-icon="user" aria-hidden="true"></span>
+      <h1 id="h-backup" tabindex="-1">Sign in another way</h1>
+      <p class="lead">If backup sign-in is turned on for your PC, use the PC's Roost name and the backup password you
+        chose in the Control Center. You'll still need the code from your authenticator app.</p>
+      <p id="blankWarning" class="note warn" hidden>This tab doesn't show the website's address, so you can't check you're
+        really on Roost. Prefer your passkey here.</p>
+      <form id="backupForm" novalidate>
+        <label for="macName">PC name</label>
+        <input id="macName" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false"
+          placeholder="amber-otter-4821" aria-describedby="macNameHelp">
+        <p id="macNameHelp" class="fine">Three parts, like amber-otter-4821. It's shown in Roost's Control Center and when
+          you hover over the tray icon.</p>
+        <label for="password">Backup password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password">
+        <p id="backupError" class="msg bad" role="alert" hidden></p>
+        <div class="stack">
+          <button type="submit" id="btnBackupGo" class="btn primary big">Continue</button>
+          <button type="button" class="btn quiet" data-home>Back</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Something to say: an error, a refusal, a countdown -->
+    <section id="s-message" class="screen panel" aria-labelledby="msgTitle" hidden>
+      <span class="panel-ico warn" data-icon="info" aria-hidden="true"></span>
+      <h1 id="msgTitle" tabindex="-1">Something went wrong</h1>
+      <p id="msgBody" class="lead"></p>
+      <p id="msgWait" class="msg warn" role="status" hidden></p>
+      <div class="stack">
+        <button type="button" id="msgPrimary" class="btn primary big">Try again</button>
+        <button type="button" id="msgSecondary" class="btn quiet">Back to start</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site">
+    <div class="wrap">
+      <a class="brand" href="./"><img src="img/icon.svg" alt="" width="26" height="26">Roost</a>
+      <span>Free and open source. Built on <a href="https://github.com/Just-Rice/perch">Perch</a> by Just-Rice.</span>
+      <a href="https://github.com/Just-Rice/roost">Source code</a>
+      <a href="privacy.html">Privacy</a>
+      <a href="https://github.com/Just-Rice/roost/issues">Report a problem</a>
+    </div>
+  </footer>
+</div>
+
+<!-- ======================= The PC's screen ======================= -->
+<div id="viewer" class="viewer" hidden>
+  <div id="surface" class="surface" tabindex="0" role="application" aria-roledescription="remote screen"
+    aria-label="Your PC's screen. Mouse, touch and keys go to the PC.">
+    <div id="zoom" class="zoom"><video id="video" autoplay playsinline disablepictureinpicture></video></div>
+  </div>
+
+  <!-- The Dock: floating controls that snap to any edge or corner, and shrink to an orb (viewer/dock.js). -->
+  <div id="dock" class="dock" role="toolbar" aria-label="Roost Dock" aria-orientation="horizontal">
+    <button type="button" id="dockGrip" class="dock-grip" title="Drag to move the Dock to any edge or corner"
+      aria-label="Move the Dock (arrow keys)">
+      <span class="grip-dots" aria-hidden="true"></span>
+      <span id="dot" class="dot good" role="img" aria-label="Good connection"></span>
+      <span id="dockName" class="dock-name">your PC</span>
+    </button>
+    <span class="dock-sep" aria-hidden="true"></span>
+    <button type="button" id="dkPalette" class="dk" data-icon="search" title="Commands (Ctrl+Alt+Shift+K)" aria-label="Commands" aria-haspopup="dialog" aria-expanded="false" aria-controls="palette"></button>
+    <button type="button" id="dkDisplay" class="dk dk-display" data-icon="displays" title="Displays" aria-label="Displays" aria-expanded="false" aria-controls="displayMap" hidden><b id="dkDisplayNum" class="dk-badge">1</b></button>
+    <button type="button" id="dkKeyboard" class="dk" data-icon="keyboard" title="Keyboard" aria-label="Show the keyboard" hidden></button>
+    <button type="button" id="dkKeys" class="dk" data-icon="keys" title="Key deck: Win, Ctrl, Alt, shortcuts" aria-label="Key deck" aria-pressed="false"></button>
+    <button type="button" id="dkSound" class="dk" data-icon="sound" title="Sound" aria-label="Mute"></button>
+    <button type="button" id="dkFull" class="dk" data-icon="fullscreen" title="Full screen" aria-label="Full screen"></button>
+    <button type="button" id="dkCapture" class="dk" data-icon="pointer" title="Capture the mouse (Esc lets go)" aria-label="Capture the mouse" aria-pressed="false" hidden></button>
+    <button type="button" id="dkTweaks" class="dk" data-icon="sliders" title="Tweaks" aria-label="Tweaks" aria-expanded="false" aria-controls="tweaks"></button>
+    <span class="dock-sep" aria-hidden="true"></span>
+    <button type="button" id="dkOrb" class="dk" data-icon="collapse" title="Shrink the Dock to an orb" aria-label="Shrink the Dock to an orb"></button>
+    <button type="button" id="dkBye" class="dk dk-bye" data-icon="power" title="Disconnect" aria-label="Disconnect"></button>
+  </div>
+  <!-- The Dock, shrunk: one glowing orb. Tap to open, drag to move. -->
+  <button type="button" id="orb" class="orb" aria-label="Show the Dock" title="Show the Dock" hidden><span class="orb-core"></span></button>
+  <!-- A Dock tucked away past the edge, on a touch screen: a small lip to bring it back. -->
+  <button type="button" id="dockLip" class="dock-lip" aria-label="Show the Dock" hidden><span></span></button>
+
+  <!-- The PC's displays as they sit on the desk: choose one (viewer.js, displays.js) -->
+  <div id="displayMap" class="pop display-map" role="group" aria-labelledby="displayMapHead" hidden>
+    <p class="pop-head" id="displayMapHead">Displays</p>
+    <div class="display-chips" id="dkDisplays" role="group" aria-label="Which display"></div>
+    <div class="map-area" id="displayMapArea"></div>
+    <p class="fine">As arranged in Windows' display settings. Or hold the pointer at an edge of the picture to move to
+      the display beyond it.</p>
+  </div>
+
+  <!-- The edge flip: which display is beyond the edge the pointer is waiting at -->
+  <div id="edgeHint" class="edge-hint" aria-hidden="true" hidden><span id="edgeHintText"></span><i class="edge-fill"></i></div>
+
+  <div id="scrim" class="scrim" hidden></div>
+
+  <!-- The Command palette: every action and setting, searchable (viewer/palette.js) -->
+  <div id="palette" class="palette" role="dialog" aria-modal="true" aria-label="Commands" hidden>
+    <div class="palette-search">
+      <span data-icon="search" aria-hidden="true"></span>
+      <input id="paletteInput" type="text" role="combobox" aria-expanded="true" aria-controls="paletteList"
+        aria-autocomplete="list" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"
+        placeholder="Search commands, keys and settings">
+      <kbd class="palette-esc">Esc</kbd>
+    </div>
+    <ul id="paletteList" class="palette-list" role="listbox" aria-label="Commands"></ul>
+    <p id="paletteEmpty" class="palette-empty" hidden>Nothing matches. Try "paste", "display" or "task manager".</p>
+    <p class="palette-foot" aria-hidden="true"><span><kbd>↑</kbd><kbd>↓</kbd> choose</span><span><kbd>Enter</kbd> run</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>Shift</kbd><kbd>K</kbd> open</span></p>
+  </div>
+
+  <!-- Tweaks: the slide-over panel for picture, sound, keyboard, mouse, clipboard, the Dock and the connection -->
+  <aside id="tweaks" class="tweaks" role="dialog" aria-modal="false" aria-labelledby="tweaksTitle" hidden>
+    <div class="tweaks-head">
+      <h2 id="tweaksTitle">Tweaks</h2>
+      <button type="button" id="tweaksClose" class="dk" data-icon="close" aria-label="Close Tweaks"></button>
+    </div>
+    <div class="tweaks-body" id="tweaksBody">
+
+      <section class="tw" id="twPicture" aria-labelledby="twPictureHead">
+        <h3 id="twPictureHead"><span data-icon="display" aria-hidden="true"></span>Picture</h3>
+        <fieldset class="seg" id="qualityGroup">
+          <legend>Quality</legend>
+          <label><input type="radio" name="quality" value="smooth"><span>Smooth</span></label>
+          <label><input type="radio" name="quality" value="balanced"><span>Balanced</span></label>
+          <label><input type="radio" name="quality" value="sharp"><span>Sharp</span></label>
+          <label id="qFastWrap" hidden><input type="radio" name="quality" value="fast"><span>60 fps</span></label>
+        </fieldset>
+        <fieldset class="seg" id="shapeGroup">
+          <legend>Shape</legend>
+          <label><input type="radio" name="shape" value="fit"><span>Whole</span></label>
+          <label><input type="radio" name="shape" value="fill"><span>Fill</span></label>
+          <label><input type="radio" name="shape" value="stretch"><span>Stretch</span></label>
+        </fieldset>
+        <p class="fine" id="shapeHelp" hidden></p>
+        <label class="row" id="windowWrap" hidden><span>Show</span>
+          <select id="optWindow"><option value="">The whole screen</option></select></label>
+        <button type="button" id="optFit" class="btn small" data-icon="fullscreen" hidden>Fit this window to my screen</button>
+        <div class="tw-buttons">
+          <button type="button" id="optZoom" class="btn small" data-icon="zoom">Zoom back out</button>
+          <button type="button" id="optKeyframe" class="btn small" data-icon="refresh">Refresh the picture</button>
+        </div>
+      </section>
+
+      <section class="tw" id="twSound" aria-labelledby="twSoundHead">
+        <h3 id="twSoundHead"><span data-icon="sound" aria-hidden="true"></span>Sound</h3>
+        <label class="switch" id="soundWrap"><input type="checkbox" role="switch" id="optSound"><span>Sound on this device</span></label>
+        <label class="level" for="optVolume"><span>Volume here</span>
+          <input type="range" id="optVolume" min="0" max="1" step="0.05" value="1"><output id="optVolumeOut" for="optVolume">100%</output></label>
+        <div class="levels" id="levelsWrap" hidden>
+          <label class="level" for="optStream"><span>Sent from the PC</span>
+            <input type="range" id="optStream" min="0" max="150" step="5"><output id="optStreamOut" for="optStream"></output></label>
+          <label class="level" id="speakersWrap" for="optSpeakers"><span>PC's speakers</span>
+            <input type="range" id="optSpeakers" min="0" max="100" step="5"><output id="optSpeakersOut" for="optSpeakers"></output></label>
+          <p class="fine" id="speakersHelp">Only while you're connected. Silent keeps the PC quiet; you still hear it here.</p>
+          <p class="fine" id="speakersNote" hidden>Keeping the PC's speakers quiet needs Windows 10 version 2004 or later.</p>
+        </div>
+        <button type="button" id="optMic" class="btn small" data-icon="mic" aria-pressed="false" hidden>Talk through your PC</button>
+      </section>
+
+      <section class="tw" id="twKeys" aria-labelledby="twKeysHead">
+        <h3 id="twKeysHead"><span data-icon="keyboard" aria-hidden="true"></span>Keyboard</h3>
+        <label class="switch" id="swapWrap"><input type="checkbox" role="switch" id="optSwap"><span>⌘ is Ctrl</span></label>
+        <p class="fine" id="swapHelp">⌘C copies and ⌘V pastes on the PC, as on a Mac. Control becomes the Windows key.</p>
+        <button type="button" id="optEditKeys" class="btn small" data-icon="keys">Choose the Key deck's keys</button>
+        <label class="row" id="swipeWrap"><span>Swipe sideways</span>
+          <select id="optSwipe" title="What a two-finger swipe sideways on a touchpad (three fingers on a touch screen) does"></select></label>
+        <div class="tw-buttons">
+          <button type="button" id="optForceQuit" class="btn small" data-icon="warn">Task Manager</button>
+          <button type="button" id="optCloseApp" class="btn small" data-icon="close">Close the app (Alt+F4)</button>
+        </div>
+      </section>
+
+      <section class="tw" id="twMouse" aria-labelledby="twMouseHead">
+        <h3 id="twMouseHead"><span data-icon="pointer" aria-hidden="true"></span>Mouse and touch</h3>
+        <label class="switch" id="touchpadWrap" hidden><input type="checkbox" role="switch" id="optTouchpad"><span>Touchpad mode</span></label>
+        <p class="fine" id="touchpadHelp" hidden>Your finger moves the PC's pointer like a laptop's touchpad; tap to click
+          where the pointer is.</p>
+        <label class="switch" id="captureClickWrap" hidden><input type="checkbox" role="switch" id="optCaptureClick"><span>Capture the mouse when I click</span></label>
+        <label class="level" id="mouseSpeedWrap" for="optMouseSpeed" hidden><span>Captured mouse speed</span>
+          <input type="range" id="optMouseSpeed" min="0.2" max="2" step="0.05" value="1"><output id="mouseSpeedValue" for="optMouseSpeed">1×</output></label>
+        <label class="switch" id="hideCursorWrap" hidden><input type="checkbox" role="switch" id="optHideCursor"><span>Hide this computer's pointer</span></label>
+        <p class="fine" id="hideCursorHelp" hidden>Only the PC's pointer shows. Press Esc twice quickly to bring this one back.</p>
+      </section>
+
+      <section class="tw" id="twClip" aria-labelledby="twClipHead" hidden>
+        <h3 id="twClipHead"><span data-icon="clipboard" aria-hidden="true"></span>Clipboard</h3>
+        <label class="switch" id="clipSyncWrap" hidden><input type="checkbox" role="switch" id="optClipSync"><span>Share the clipboard both ways</span></label>
+        <div class="tw-buttons">
+          <button type="button" id="optPaste" class="btn small" data-icon="paste" hidden>Paste on the PC</button>
+          <button type="button" id="optCopy" class="btn small" data-icon="copy" hidden>Copy the PC's clipboard</button>
+        </div>
+      </section>
+
+      <section class="tw" id="twDock" aria-labelledby="twDockHead">
+        <h3 id="twDockHead"><span data-icon="dock" aria-hidden="true"></span>The Dock</h3>
+        <div class="dock-pos">
+          <div class="pos-grid" id="dockPos" role="radiogroup" aria-label="Where the Dock sits">
+            <button type="button" role="radio" data-at="top-left" aria-label="Top left"></button>
+            <button type="button" role="radio" data-at="top" aria-label="Top"></button>
+            <button type="button" role="radio" data-at="top-right" aria-label="Top right"></button>
+            <button type="button" role="radio" data-at="left" aria-label="Left"></button>
+            <span aria-hidden="true"></span>
+            <button type="button" role="radio" data-at="right" aria-label="Right"></button>
+            <button type="button" role="radio" data-at="bottom-left" aria-label="Bottom left"></button>
+            <button type="button" role="radio" data-at="bottom" aria-label="Bottom"></button>
+            <button type="button" role="radio" data-at="bottom-right" aria-label="Bottom right"></button>
+          </div>
+          <div class="dock-pos-opts">
+            <label class="row stacked"><span>When I'm not using it</span>
+              <select id="optDockIdle">
+                <option value="stay">Stay as it is</option>
+                <option value="orb">Shrink to an orb</option>
+                <option value="hide">Tuck away at the edge</option>
+              </select></label>
+            <label class="switch" id="dockRoomWrap"><input type="checkbox" role="switch" id="optDockRoom"><span>Keep the picture clear of it</span></label>
+          </div>
+        </div>
+        <p class="fine">Or drag the Dock by its name. Ctrl+Alt+Shift+T brings it to the keyboard.</p>
+      </section>
+
+      <section class="tw" id="twLink" aria-labelledby="twLinkHead">
+        <h3 id="twLinkHead"><span data-icon="stats" aria-hidden="true"></span>Connection</h3>
+        <label class="switch"><input type="checkbox" role="switch" id="optStats"><span>Show connection details</span></label>
+      </section>
+    </div>
+  </aside>
+
+  <div id="banners" class="banners" aria-live="polite"></div>
+
+  <button type="button" id="soundPrompt" class="sound-prompt" data-icon="sound" hidden>Tap for sound</button>
+
+  <div id="stats" class="stats" aria-live="off" hidden></div>
+
+  <!-- The Key deck: Win, Ctrl, Alt, Shift to hold for the next key, then the chosen keys and shortcuts -->
+  <div id="keysBar" class="deck" role="toolbar" aria-label="Key deck" hidden>
+    <div class="deck-mods">
+      <button type="button" class="key mod" data-mod="8" aria-pressed="false" title="Windows key: tap, then a key"><span class="win-glyph" aria-hidden="true"></span><span class="sr-only">Win</span></button>
+      <button type="button" class="key mod" data-mod="2" aria-pressed="false" title="Ctrl: tap, then a key">Ctrl</button>
+      <button type="button" class="key mod" data-mod="4" aria-pressed="false" title="Alt: tap, then a key">Alt</button>
+      <button type="button" class="key mod" data-mod="1" aria-pressed="false" title="Shift: tap, then a key">Shift</button>
+    </div>
+    <span id="keysList" class="keys-list"></span>
+    <button type="button" id="keysEdit" class="key edit" title="Choose keys" aria-label="Choose the keys on the Key deck" data-icon="plus"></button>
+  </div>
+
+  <div id="keysEditor" class="sheet keys-editor" role="dialog" aria-modal="false" aria-labelledby="keysEditorTitle" hidden>
+    <div class="sheet-head">
+      <div>
+        <h2 id="keysEditorTitle">Key deck</h2>
+        <p class="fine">Tap a key to put it on the deck or take it off. Win, Ctrl, Alt and Shift are always there: tap
+          one, then a key, for any shortcut.</p>
+      </div>
+      <button type="button" id="keysEditorDone" class="btn small primary">Done</button>
+    </div>
+    <div id="keysGroups" class="ke-groups"></div>
+    <fieldset class="ke-own">
+      <legend>Make your own</legend>
+      <div class="ke-mods">
+        <label class="chip"><input type="checkbox" value="8"><span>Win</span></label>
+        <label class="chip"><input type="checkbox" value="2" checked><span>Ctrl</span></label>
+        <label class="chip"><input type="checkbox" value="4"><span>Alt</span></label>
+        <label class="chip"><input type="checkbox" value="1"><span>Shift</span></label>
+        <select id="keOwnKey" aria-label="Key"></select>
+      </div>
+      <div class="ke-mods">
+        <input type="text" id="keOwnName" maxlength="16" placeholder="Name (optional)" aria-label="Name for the button">
+        <button type="button" id="keOwnAdd" class="btn small">Add</button>
+      </div>
+    </fieldset>
+    <button type="button" id="keysReset" class="btn small quiet">Back to the usual keys</button>
+  </div>
+
+  <!-- Phones and tablets: a keyboard button that is always on screen. The invisible text box lies right on top of it,
+       so a tap lands on a real text field, which is what iPhones need before they open their keyboard; tapping it
+       again closes the keyboard. What's typed goes to the PC (viewer/keyboard.js). -->
+  <div id="kbdFab" class="kbd-fab" hidden>
+    <span class="kbd-fab-icon" data-icon="keyboard" aria-hidden="true"></span>
+    <span class="kbd-fab-label" id="kbdFabLabel" aria-live="polite"></span>
+    <textarea id="softkbd" class="softkbd" aria-label="Type on your PC" autocapitalize="off" autocomplete="off"
+      autocorrect="off" spellcheck="false" enterkeyhint="enter" rows="1"></textarea>
+  </div>
+
+  <!-- Text to or from the PC's clipboard, when the browser won't read or write this device's clipboard itself. -->
+  <div id="clipSheet" class="modal" role="dialog" aria-modal="true" aria-labelledby="clipTitle" hidden>
+    <div class="modal-card">
+      <span class="panel-ico" data-icon="clipboard" aria-hidden="true"></span>
+      <h2 id="clipTitle" tabindex="-1">Send text to your PC</h2>
+      <p id="clipHelp">Paste or type it here.</p>
+      <textarea id="clipText" class="clip-text" rows="5" spellcheck="false" autocapitalize="off"
+        aria-labelledby="clipTitle" aria-describedby="clipHelp"></textarea>
+      <p id="clipStatus" class="msg bad" role="alert" hidden></p>
+      <div class="stack">
+        <button type="button" id="clipGo" class="btn primary big">Paste on the PC</button>
+        <button type="button" id="clipOnly" class="btn">Only put it on the PC's clipboard</button>
+        <button type="button" id="clipClose" class="btn quiet">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ended" class="modal" role="dialog" aria-modal="true" aria-labelledby="endedTitle" hidden>
+    <div class="modal-card">
+      <span class="panel-ico" data-icon="power" aria-hidden="true"></span>
+      <h2 id="endedTitle" tabindex="-1">Disconnected</h2>
+      <p id="endedBody"></p>
+      <div class="stack">
+        <button type="button" id="btnReconnect" class="btn primary big" data-icon="refresh">Reconnect</button>
+        <button type="button" id="btnEndHome" class="btn quiet">Back to start</button>
+      </div>
+    </div>
+  </div>
+
+  <aside id="demoLog" class="demolog" aria-label="Input messages (demo)" hidden>
+    <h2>Demo · messages to the PC</h2>
+    <ol id="demoList"></ol>
+  </aside>
+</div>
+</body>
+</html>

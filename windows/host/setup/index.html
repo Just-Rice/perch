@@ -1,0 +1,984 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>Roost Control Center</title>
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="setup.css">
+<!-- qrcode-generator 1.4.4 (MIT): a classic script that defines the global `qrcode`. -->
+<script src="vendor/qrcode.js"></script>
+<script type="module" src="setup.js"></script>
+</head>
+<body data-view="home">
+<!-- Icons: 20px grid, 1.75px stroke, round caps and joins. Used as <svg class="i"><use href="#i-…"/></svg>. -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-home" viewBox="0 0 20 20"><path d="M3 9.2 10 3.5l7 5.7V16a1 1 0 0 1-1 1h-3.5v-4.5h-5V17H4a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-devices" viewBox="0 0 20 20"><path d="M2.5 13.5V5.5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1V7M1.5 15.5h9"/><rect x="12" y="8.5" width="6.5" height="9" rx="1.2"/><path d="M15 15.5h.5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 20 20"><path d="M10 2.5 16 5v4.6c0 3.7-2.6 6.5-6 7.9-3.4-1.4-6-4.2-6-7.9V5z"/><path d="m7.3 10 1.9 1.9 3.5-3.7"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M2.5 10h15M10 2.5c2 2.1 3 4.6 3 7.5s-1 5.4-3 7.5c-2-2.1-3-4.6-3-7.5s1-5.4 3-7.5z"/></symbol>
+  <symbol id="i-pc" viewBox="0 0 20 20"><rect x="2.5" y="3.5" width="15" height="10.5" rx="1.5"/><path d="M7 17h6M10 14v3"/></symbol>
+  <symbol id="i-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M10 9v5M10 6.3v.2"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 20 20"><path d="M7.5 5v10M12.5 5v10"/></symbol>
+  <symbol id="i-eyeoff" viewBox="0 0 20 20"><path d="m3 3 14 14M8.3 4.7A8 8 0 0 1 10 4.5c4.3 0 7 3.7 7.5 5.5-.2.8-.9 2-1.9 3.1M5.3 6.3C3.8 7.4 2.8 8.9 2.5 10c.5 1.8 3.2 5.5 7.5 5.5 1.5 0 2.8-.4 3.9-1.1M8.3 8.4a2.4 2.4 0 0 0 3.3 3.3"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 20 20"><rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V6.5a3 3 0 0 1 6 0V9"/></symbol>
+  <symbol id="i-power" viewBox="0 0 20 20"><path d="M10 2.5V9M6 4.8a6.5 6.5 0 1 0 8 0"/></symbol>
+  <symbol id="i-cup" viewBox="0 0 20 20"><path d="M3.5 8h10.5v4a4 4 0 0 1-4 4h-2.5a4 4 0 0 1-4-4zM14 9.2h1a2 2 0 0 1 0 4h-1.3M7 2.8v2.4M10.5 2.8v2.4"/></symbol>
+  <symbol id="i-speaker" viewBox="0 0 20 20"><path d="M3.5 7.5h3l4-3.5v12l-4-3.5h-3zM13.5 7.5a3.5 3.5 0 0 1 0 5M15.5 5a7 7 0 0 1 0 10"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M10 6v4l2.5 2"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 20 20"><rect x="3" y="3" width="5" height="5" rx=".8"/><rect x="12" y="3" width="5" height="5" rx=".8"/><rect x="3" y="12" width="5" height="5" rx=".8"/><path d="M12 12h2v2h-2zM15.5 15.5H17V17h-1.5zM15.5 12H17M12 16.5v.5"/></symbol>
+  <symbol id="i-link" viewBox="0 0 20 20"><path d="M8.5 11.5a3.2 3.2 0 0 0 4.6.2l2.6-2.6a3.2 3.2 0 0 0-4.5-4.5l-1 1M11.5 8.5a3.2 3.2 0 0 0-4.6-.2l-2.6 2.6a3.2 3.2 0 0 0 4.5 4.5l1-1"/></symbol>
+  <symbol id="i-key" viewBox="0 0 20 20"><circle cx="13" cy="7" r="3.5"/><path d="M10.5 9.5 3 17M5 15l2 2M7.2 12.8l1.6 1.6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 20 20"><path d="M2.5 10S5 4.5 10 4.5 17.5 10 17.5 10 15 15.5 10 15.5 2.5 10 2.5 10z"/><circle cx="10" cy="10" r="2.5"/></symbol>
+  <symbol id="i-pulse" viewBox="0 0 20 20"><path d="M2.5 10h3l2-5 3.5 10 2-5h4.5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 20 20"><path d="M7.5 4.5 13 10l-5.5 5.5"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 20 20"><path d="m12.5 4.5 3 3L7 16H4v-3zM11 6l3 3"/></symbol>
+  <symbol id="i-check" viewBox="0 0 20 20"><path d="m4.5 10.5 3.5 3.5 7.5-8"/></symbol>
+  <symbol id="i-admin" viewBox="0 0 20 20"><path d="M10 2.5 16 5v4.6c0 3.7-2.6 6.5-6 7.9-3.4-1.4-6-4.2-6-7.9V5z"/><path d="M10 13.2V7.5M7.6 9.8 10 7.4l2.4 2.4"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 20 20"><path d="M6 15.5h8.5a3.5 3.5 0 0 0 .4-7A5 5 0 0 0 5.3 9 3.3 3.3 0 0 0 6 15.5z"/></symbol>
+  <symbol id="i-gauge" viewBox="0 0 20 20"><path d="M3.5 14.5a6.5 6.5 0 1 1 13 0M10 14.5l3-4.5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 20 20"><path d="M10 3v9.5M6 8.5l4 4 4-4M4 16.5h12"/></symbol>
+  <symbol id="i-chip" viewBox="0 0 20 20"><rect x="5" y="5" width="10" height="10" rx="1.5"/><path d="M8 2.5V5M12 2.5V5M8 15v2.5M12 15v2.5M2.5 8H5M2.5 12H5M15 8h2.5M15 12h2.5"/></symbol>
+  <symbol id="i-exit" viewBox="0 0 20 20"><path d="M8 4.5H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h3M12 6.5l3.5 3.5-3.5 3.5M15.5 10H8"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 20 20"><rect x="7.5" y="7.5" width="9" height="9" rx="1.5"/><path d="M4.5 12.5v-7a1 1 0 0 1 1-1h7"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 20 20"><path d="M10 3 18 16.5H2z"/><path d="M10 8v4M10 14.3v.2"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 20 20"><path d="M16.5 10a6.5 6.5 0 1 1-1.9-4.6M16.5 3.5V7H13"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 20 20"><circle cx="10" cy="11" r="6.5"/><path d="M10 7.5V11l2 1.5M8 2.5h4"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 20 20"><rect x="7.5" y="2.5" width="5" height="9.5" rx="2.5"/><path d="M5 9.5a5 5 0 0 0 10 0M10 14.5v3"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 20 20"><path d="M10 2.5c.6 3.6 2 5 5.5 5.5-3.5.6-4.9 2-5.5 5.5-.6-3.5-2-4.9-5.5-5.5 3.5-.5 4.9-1.9 5.5-5.5zM15.5 13.5c.3 1.5.8 2 2.2 2.3-1.4.3-1.9.8-2.2 2.2-.3-1.4-.8-1.9-2.2-2.2 1.4-.3 1.9-.8 2.2-2.3z"/></symbol>
+</svg>
+
+<canvas class="ember" id="ember" aria-hidden="true"></canvas>
+
+<div class="app">
+  <!-- The sidebar: logo, this PC, the sections, the connection state. A top bar and bottom tab bar on phones. -->
+  <aside class="side" aria-label="Roost">
+    <div class="side-brand">
+      <img src="icon.svg" alt="" width="36" height="36">
+      <span class="side-title"><b>Roost</b><span>Control Center</span></span>
+    </div>
+    <nav class="nav" aria-label="Control Center sections">
+      <a href="#home" data-view="home" aria-current="page"><svg class="i" aria-hidden="true"><use href="#i-home"/></svg><span>Home</span><span class="nav-dot" id="navHomeDot" hidden></span></a>
+      <a href="#devices" data-view="devices"><svg class="i" aria-hidden="true"><use href="#i-devices"/></svg><span>Devices</span><span class="nav-count" id="navDeviceCount"></span></a>
+      <a href="#security" data-view="security"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg><span>Sign-in</span></a>
+      <a href="#network" data-view="network"><svg class="i" aria-hidden="true"><use href="#i-globe"/></svg><span>Network</span></a>
+      <a href="#pc" data-view="pc"><svg class="i" aria-hidden="true"><use href="#i-pc"/></svg><span>This PC</span></a>
+      <a href="#about" data-view="about"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg><span>About</span><span class="nav-dot" id="navAboutDot" hidden></span></a>
+    </nav>
+    <div class="side-foot">
+      <span class="pill" id="statePill" data-tone="neutral" role="status"><span class="pill-dot" aria-hidden="true"></span><span id="statePillText">Loading…</span></span>
+      <p class="side-pc"><svg class="i" aria-hidden="true"><use href="#i-pc"/></svg><span id="sidePcName">…</span></p>
+      <p class="side-meta"><span id="headVersion"></span> <span class="badge test" id="testBadge" hidden>Test mode</span></p>
+    </div>
+  </aside>
+
+  <main class="content" id="main">
+    <div class="banner" id="banner" role="alert" hidden></div>
+
+    <!-- An update is on disk but this Roost is still the old one (sections/restart.js) -->
+    <section class="notice" id="restartNote" aria-labelledby="hRestart" hidden>
+      <span class="notice-icon" aria-hidden="true"><svg class="i"><use href="#i-refresh"/></svg></span>
+      <div class="notice-body">
+        <p id="hRestart"><b>Roost <span id="restartVersion"></span> is installed. Restart Roost to finish updating.</b></p>
+        <p class="small" id="restartDetail"></p>
+        <p class="msg bad" id="restartError" role="alert" hidden></p>
+      </div>
+      <div class="notice-side">
+        <button type="button" class="btn primary" id="restartBtn">Restart Roost</button>
+        <span class="small muted" id="restartStatus" role="status"></span>
+      </div>
+    </section>
+
+    <!-- ============================== Home ============================== -->
+    <section class="view" id="home" aria-labelledby="homeTitle">
+      <h1 class="sr-only" id="homeTitle" tabindex="-1">Home</h1>
+
+      <section class="card hero" id="hero" aria-labelledby="pcName" data-tone="neutral">
+        <div class="hero-top">
+          <div class="ring-wrap" aria-hidden="true">
+            <div class="ring" id="heroRing"></div>
+            <div class="ring-core"><svg class="i"><use href="#i-pc"/></svg><span class="ring-dot"></span></div>
+          </div>
+          <div class="hero-main">
+            <p class="eyebrow">Your PC</p>
+            <div class="name-line">
+              <h2 class="pc-name" id="pcName" tabindex="-1">…</h2>
+              <details id="nameBox" class="name-box">
+                <summary class="btn quiet small"><svg class="i" aria-hidden="true"><use href="#i-pencil"/></svg>Rename</summary>
+                <form id="nameForm" class="name-form" novalidate>
+                  <label for="nameNew">New name for your PC</label>
+                  <div class="inline">
+                    <input id="nameNew" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="40"
+                      placeholder="like jordan-desktop" aria-describedby="nameHelp">
+                    <button type="submit" class="btn primary" id="nameSaveBtn">Use this name</button>
+                  </div>
+                  <p class="small muted" id="nameHelp">4 to 40 letters or numbers, with hyphens between words. Your devices
+                    keep working; a backup password is removed with the old name. A name you choose is easier to guess than
+                    one Roost makes up, which only matters for the backup sign-in.</p>
+                  <button type="button" class="btn small" id="nameRandomBtn"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>Make one up for me</button>
+                  <p class="msg bad" id="nameError" role="alert" hidden></p>
+                </form>
+              </details>
+            </div>
+            <p class="hero-state"><span class="state-word" id="heroState">Loading…</span> <span id="stateText"></span></p>
+
+            <div class="session" id="sessionCard">
+              <p id="sessionNone" class="muted session-none">Nobody is connected right now.</p>
+              <div id="sessionActive" class="session-active" hidden>
+                <span class="live" aria-hidden="true"></span>
+                <div class="session-text">
+                  <p><b id="sessionViewer"></b> is connected <span id="sessionRoute"></span>, since <span id="sessionSince"></span>.</p>
+                  <p class="small muted" id="sessionPath" hidden></p>
+                </div>
+                <button type="button" class="btn" id="disconnectBtn"><svg class="i" aria-hidden="true"><use href="#i-exit"/></svg>Disconnect</button>
+              </div>
+              <p class="msg bad" id="sessionError" role="alert" hidden></p>
+            </div>
+          </div>
+        </div>
+
+        <div class="quick" role="group" aria-label="Quick settings">
+          <label class="qt" for="setPaused">
+            <span class="qt-icon" aria-hidden="true"><svg class="i"><use href="#i-pause"/></svg></span>
+            <span class="qt-text"><b>Pause Roost</b><span>Nobody can connect</span></span>
+            <input type="checkbox" role="switch" id="setPaused" data-setting="paused">
+          </label>
+          <label class="qt" for="quickCurtain">
+            <span class="qt-icon" aria-hidden="true"><svg class="i"><use href="#i-eyeoff"/></svg></span>
+            <span class="qt-text"><b>Privacy curtain</b><span id="quickCurtainHint">Black out the PC's screen</span></span>
+            <input type="checkbox" role="switch" id="quickCurtain" data-setting="curtain" aria-describedby="quickCurtainHint">
+          </label>
+          <label class="qt" for="quickLock">
+            <span class="qt-icon" aria-hidden="true"><svg class="i"><use href="#i-lock"/></svg></span>
+            <span class="qt-text"><b>Lock when done</b><span>When a session ends</span></span>
+            <input type="checkbox" role="switch" id="quickLock" data-setting="lockOnDisconnect">
+          </label>
+        </div>
+        <div class="card-foot hero-foot">
+          <button type="button" class="btn quiet small" id="stepsShowBtn" aria-controls="setupCard" aria-expanded="false" hidden>Show the setup steps</button>
+          <span class="small muted saved" id="heroSaved" role="status"></span>
+        </div>
+        <p class="msg bad" id="heroError" role="alert" hidden></p>
+      </section>
+
+      <!-- Getting started: a progress stepper, shown until everything is done (sections/home.js) -->
+      <section class="card setup" id="setupCard" aria-labelledby="hSetup">
+        <div class="setup-head">
+          <div>
+            <h2 id="hSetup">Get set up</h2>
+            <p class="muted small" id="stepsProgress">0 of 4 done</p>
+          </div>
+          <button type="button" class="btn quiet small" id="stepsHideBtn" aria-controls="setupCard" hidden>Hide</button>
+        </div>
+        <div class="bar" aria-hidden="true"><i id="stepsBar"></i></div>
+        <ol class="stepper">
+          <li class="step" id="stepTotp" data-state="todo">
+            <span class="marker" id="numTotp" aria-hidden="true">1</span>
+            <div class="step-text">
+              <h3>Add Roost to your authenticator app</h3>
+              <p class="muted small" id="stepTotpText">A 6-digit code from your phone on top of your passkey, so a lost device is never enough.</p>
+            </div>
+            <button type="button" class="btn" id="stepTotpBtn">Set up</button>
+          </li>
+          <li class="step" id="stepPair" data-state="todo">
+            <span class="marker" id="numPair" aria-hidden="true">2</span>
+            <div class="step-text">
+              <h3>Pair your first device</h3>
+              <p class="muted small" id="stepPairText">Your phone, tablet or another computer: scan a code once and it can connect.</p>
+            </div>
+            <button type="button" class="btn" id="stepPairBtn">Pair a device</button>
+          </li>
+          <li class="step" id="stepRelay" data-state="todo" data-optional="true">
+            <span class="marker" id="numRelay" aria-hidden="true">3</span>
+            <div class="step-text">
+              <h3>Get through strict Wi-Fi <span class="chip">Optional</span></h3>
+              <p class="muted small">A relay, for school or office networks that block direct connections.</p>
+            </div>
+            <button type="button" class="btn" id="stepRelayBtn">Set up a relay</button>
+          </li>
+          <li class="step" id="stepAdmin" data-state="todo" data-optional="true">
+            <span class="marker" id="numAdmin" aria-hidden="true">4</span>
+            <div class="step-text">
+              <h3>Control admin apps <span class="chip">Optional</span></h3>
+              <p class="muted small">Use Task Manager, installers and Windows' permission prompts from afar.</p>
+            </div>
+            <button type="button" class="btn" id="stepAdminBtn">Turn on</button>
+          </li>
+        </ol>
+      </section>
+
+      <!-- At a glance: one tile per section -->
+      <section class="tiles" aria-label="At a glance">
+        <a class="tile" href="#devices" id="tileDevices">
+          <span class="tile-icon" aria-hidden="true"><svg class="i"><use href="#i-devices"/></svg></span>
+          <span class="tile-label">Devices</span>
+          <span class="tile-value" id="tileDevicesValue">—</span>
+          <span class="tile-sub" id="tileDevicesSub"></span>
+        </a>
+        <a class="tile" href="#security" id="tileSecurity">
+          <span class="tile-icon" aria-hidden="true"><svg class="i"><use href="#i-shield"/></svg></span>
+          <span class="tile-label">Sign-in</span>
+          <span class="tile-value" id="tileSecurityValue">—</span>
+          <span class="tile-sub" id="tileSecuritySub"></span>
+        </a>
+        <a class="tile" href="#network" id="tileNetwork">
+          <span class="tile-icon" aria-hidden="true"><svg class="i"><use href="#i-globe"/></svg></span>
+          <span class="tile-label">Network</span>
+          <span class="tile-value" id="tileNetworkValue">—</span>
+          <span class="tile-sub" id="tileNetworkSub"></span>
+        </a>
+        <a class="tile" href="#about" id="tileUpdates">
+          <span class="tile-icon" aria-hidden="true"><svg class="i"><use href="#i-download"/></svg></span>
+          <span class="tile-label">Updates</span>
+          <span class="tile-value" id="tileUpdatesValue">—</span>
+          <span class="tile-sub" id="tileUpdatesSub"></span>
+        </a>
+      </section>
+
+      <!-- Activity -->
+      <section class="card" id="activityCard" aria-labelledby="hActivity">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-pulse"/></svg></span>
+          <div>
+            <h2 id="hActivity">Recent activity</h2>
+            <p class="muted">Sign-ins, failed attempts and pairing, newest first. Something you don't recognise? Remove that
+              device, or <a href="#zoneCard">start over</a>.</p>
+          </div>
+        </div>
+        <ol class="activity" id="activityList"></ol>
+        <p class="empty" id="activityEmpty">Nothing yet.</p>
+        <button type="button" class="btn quiet" id="activityMoreBtn" hidden>Show more</button>
+      </section>
+    </section>
+
+    <!-- ============================== Devices ============================== -->
+    <section class="view" id="devices" aria-labelledby="devicesTitle" hidden>
+      <header class="view-head">
+        <h1 id="devicesTitle" tabindex="-1">Devices</h1>
+        <p class="muted">The phones, tablets and computers that can connect to your PC, and a watch-only link for anyone else.</p>
+      </header>
+
+      <!-- Pairing -->
+      <section class="card pair" id="pairCard" aria-labelledby="hPair">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-qr"/></svg></span>
+          <div>
+            <h2 id="hPair">Pair a device</h2>
+            <p class="muted">Do it once for each phone, tablet or computer you want to use. It scans a code, and from then on
+              it can connect to your PC.</p>
+          </div>
+        </div>
+
+        <p class="note" id="pairLocked"><svg class="i" aria-hidden="true"><use href="#i-lock"/></svg><span>Set up the
+          authenticator app first: every sign-in needs a code from it. <a href="#totpCard">Set it up</a></span></p>
+
+        <div id="pairIdle" class="pair-idle">
+          <label for="pairSite" id="pairSiteLabel" class="field-inline" hidden><span>Pair it for</span>
+            <select id="pairSite"></select></label>
+          <button type="button" class="btn primary" id="pairStartBtn"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>Pair a device</button>
+        </div>
+
+        <div id="pairActive" class="pair-active" hidden>
+          <div class="qr-wrap">
+            <div class="qr big" id="pairQr"></div>
+            <div class="qr-side">
+              <ol class="how">
+                <li>On your device, scan this code with the camera, or open the link below in its browser.</li>
+                <li>It asks for Face ID, Touch ID, Windows Hello or its screen lock, to make a passkey for your PC.</li>
+                <li>Then it asks for the 6-digit code from your authenticator app.</li>
+              </ol>
+              <p class="countdown"><svg class="i" aria-hidden="true"><use href="#i-timer"/></svg>
+                <span id="pairCountdown">This code works for 10:00 more.</span></p>
+            </div>
+          </div>
+          <div class="note warn"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><span><b>Only scan this with
+            your own device.</b> Never send this code or link to anyone — whoever uses it can control your PC.</span></div>
+          <label for="pairLink">Pairing link</label>
+          <div class="inline">
+            <input id="pairLink" type="text" readonly spellcheck="false">
+            <button type="button" class="btn" id="pairCopyBtn"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Copy</button>
+          </div>
+          <p class="small muted" id="pairCopyStatus" role="status"></p>
+          <button type="button" class="btn quiet" id="pairCancelBtn">Cancel pairing</button>
+        </div>
+        <p class="msg ok" id="pairOk" role="status" hidden></p>
+        <p class="msg warn" id="pairExpired" role="status" hidden>That pairing code ran out. Press <b>Pair a device</b> to
+          make a new one.</p>
+        <p class="msg warn" id="pairGone" role="status" hidden>That pairing code stopped working, so nobody can use it now.
+          Press <b>Pair a device</b> to make a new one.</p>
+        <p class="msg bad" id="pairError" role="alert" hidden></p>
+      </section>
+
+      <!-- Devices -->
+      <section class="card" id="devicesCard" aria-labelledby="hDevices">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-devices"/></svg></span>
+          <div>
+            <h2 id="hDevices">Your devices</h2>
+            <p class="muted">These can connect to your PC. Remove any you no longer use or don't recognise.</p>
+          </div>
+        </div>
+        <ul class="devices" id="deviceList"></ul>
+        <p class="empty" id="devicesEmpty">No devices yet. Pair one above.</p>
+        <div class="confirm-host card-foot" id="removeAllHost">
+          <button type="button" class="btn danger-quiet" id="removeAllBtn">Remove all devices</button>
+        </div>
+        <p class="msg bad" id="devicesError" role="alert" hidden></p>
+      </section>
+
+      <!-- Guest link -->
+      <section class="card" id="guestCard" aria-labelledby="hGuest">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-eye"/></svg></span>
+          <div>
+            <h2 id="hGuest">Show your screen to someone</h2>
+            <p class="muted">A link that lets someone watch your PC's screen in their browser, with its sound. They can only
+              watch: no clicking, typing or changing anything. It stops when its time is up or when you stop it.</p>
+          </div>
+        </div>
+        <div id="guestIdle" class="row-form">
+          <label for="guestMinutes" class="field-inline"><span>The link works for</span>
+            <select id="guestMinutes">
+              <option value="15">15 minutes</option>
+              <option value="30" selected>30 minutes</option>
+              <option value="60">1 hour</option>
+              <option value="240">4 hours</option>
+            </select></label>
+          <button type="button" class="btn primary" id="guestStartBtn"><svg class="i" aria-hidden="true"><use href="#i-link"/></svg>Make a guest link</button>
+        </div>
+        <div id="guestActive" hidden>
+          <div class="note warn"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><span><b>Anyone with this
+            link can watch your screen</b> until it stops working. Send it only to the person you mean to show, and close
+            anything private first.</span></div>
+          <label for="guestLink">Guest link</label>
+          <div class="inline">
+            <input id="guestLink" type="text" readonly spellcheck="false">
+            <button type="button" class="btn" id="guestCopyBtn"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>Copy</button>
+          </div>
+          <p class="small muted" id="guestCopyStatus" role="status"></p>
+          <div class="guest-status">
+            <p class="countdown"><svg class="i" aria-hidden="true"><use href="#i-timer"/></svg><span id="guestCountdown"></span></p>
+            <p class="small" id="guestWatching" role="status"></p>
+          </div>
+          <button type="button" class="btn danger-quiet" id="guestStopBtn">Stop sharing now</button>
+        </div>
+        <p class="msg bad" id="guestError" role="alert" hidden></p>
+      </section>
+    </section>
+
+    <!-- ============================== Sign-in & security ============================== -->
+    <section class="view" id="security" aria-labelledby="securityTitle" hidden>
+      <header class="view-head">
+        <h1 id="securityTitle" tabindex="-1">Sign-in &amp; security</h1>
+        <p class="muted">How your devices prove it's you: a passkey, a 6-digit code, and a backup password if you need one.</p>
+      </header>
+
+      <!-- Authenticator app -->
+      <section class="card" id="totpCard" aria-labelledby="hTotp">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-clock"/></svg></span>
+          <div>
+            <h2 id="hTotp">Authenticator app</h2>
+            <p class="muted">Each time you connect, Roost asks for a 6-digit code from this app as well as your passkey, so a
+              lost phone or a guessed password is never enough on its own.</p>
+            <p class="small muted" id="totpOptional" hidden>Optional now: no 6-digit code is asked for anywhere (see
+              <a href="#codesCard">When to ask for the 6-digit code</a>). Set it up if you want codes back.</p>
+          </div>
+        </div>
+
+        <div id="totpIdle" class="row-form">
+          <button type="button" class="btn primary" id="totpStartBtn">Set up the authenticator app</button>
+          <p class="small muted">Any authenticator app works: Microsoft Authenticator, Google Authenticator, Apple
+            Passwords, 1Password and others.</p>
+        </div>
+
+        <div id="totpDone" class="setting" hidden>
+          <span class="setting-icon good" aria-hidden="true"><svg class="i"><use href="#i-check"/></svg></span>
+          <div class="setting-text"><b>Set up<span id="totpSetAt"></span></b>
+            <span class="muted">New phone or new app? Replace it. The old codes keep working until the new one is confirmed.</span></div>
+          <button type="button" class="btn" id="totpReplaceBtn">Replace it</button>
+        </div>
+
+        <div id="totpPending" hidden>
+          <div class="qr-wrap">
+            <div class="qr" id="totpQr"></div>
+            <div class="qr-side">
+              <ol class="how">
+                <li>Open your authenticator app and add a new account (often a <b>+</b> button).</li>
+                <li>Scan this code with it.</li>
+                <li>Type the 6-digit code the app shows, then press <b>Confirm</b>.</li>
+              </ol>
+              <p class="small">Can't scan it? Choose to enter a setup key in the app and type this:</p>
+              <p class="secret" id="totpSecret" aria-label="Setup key"></p>
+              <p class="small muted">Account: <span id="totpAccount"></span> · Time-based</p>
+            </div>
+          </div>
+          <form id="totpForm" class="code-form" novalidate>
+            <label for="totpCode">6-digit code from the app</label>
+            <div class="inline">
+              <input id="totpCode" class="code" type="text" inputmode="numeric" autocomplete="one-time-code"
+                maxlength="7" spellcheck="false" aria-describedby="totpError">
+              <button type="submit" class="btn primary" id="totpConfirmBtn">Confirm</button>
+              <button type="button" class="btn quiet" id="totpCancelBtn">Cancel</button>
+            </div>
+          </form>
+        </div>
+        <p class="msg bad" id="totpError" role="alert" hidden></p>
+        <p class="msg ok" id="totpOk" role="status" hidden></p>
+      </section>
+
+      <!-- When to ask for the 6-digit code -->
+      <section class="card" id="codesCard" aria-labelledby="hCodes">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-key"/></svg></span>
+          <div>
+            <h2 id="hCodes">When to ask for the 6-digit code</h2>
+            <p class="muted">Each switch adds the code to that way in. Off is quicker and less safe: whoever has the passkey,
+              the backup password or a pairing link gets in with nothing else. Wrong tries still lock sign-in for a while.</p>
+          </div>
+          <span class="small muted saved" role="status"></span>
+        </div>
+        <div class="settings">
+          <label class="setting" for="setCodePasskey">
+            <span class="setting-text"><b>After a passkey</b>
+              <span class="muted">Off: a passkey alone signs in (Face ID, Touch ID or Windows Hello on your device).</span></span>
+            <input type="checkbox" role="switch" id="setCodePasskey" data-setting="codeWithPasskey">
+          </label>
+          <label class="setting" for="setCodeBackup">
+            <span class="setting-text"><b>With the backup password</b>
+              <span class="muted">Off: your PC's name and the backup password are enough. Not recommended: a password can be
+                watched or guessed.</span></span>
+            <input type="checkbox" role="switch" id="setCodeBackup" data-setting="codeWithBackup">
+          </label>
+          <label class="setting" for="setCodePairing">
+            <span class="setting-text"><b>When pairing a device</b>
+              <span class="muted">Off: a pairing link alone pairs a device (it still works once, for 10 minutes).</span></span>
+            <input type="checkbox" role="switch" id="setCodePairing" data-setting="codeWithPairing">
+          </label>
+        </div>
+        <p class="msg bad" role="alert" hidden></p>
+      </section>
+
+      <!-- Backup sign-in -->
+      <section class="card" id="backupCard" aria-labelledby="hBackup">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-lock"/></svg></span>
+          <div>
+            <h2 id="hBackup">Backup sign-in <span class="chip">Optional</span></h2>
+            <p class="muted">For a device that can't use a passkey, such as an old computer: your PC's name, a password and
+              the 6-digit code. It's not as strong as a passkey, so only turn it on if you need it.</p>
+          </div>
+        </div>
+        <dl class="facts">
+          <div><dt>Username</dt><dd><code id="backupUser"></code></dd></div>
+          <div><dt>Password</dt><dd id="backupStatus">Not set</dd></div>
+        </dl>
+        <div class="settings">
+          <label class="setting" for="backupOn" id="backupToggleRow">
+            <span class="setting-text"><b>Allow backup sign-in</b>
+              <span class="muted" id="backupOnHint">Set a password below to turn this on.</span></span>
+            <input type="checkbox" role="switch" id="backupOn">
+          </label>
+        </div>
+
+        <form id="backupForm" class="subform" novalidate>
+          <h3 id="backupFormTitle">Choose a password</h3>
+          <!-- Lets password managers save the password under the right username (the PC's name). -->
+          <input type="text" id="backupUsername" autocomplete="username" readonly hidden tabindex="-1" aria-hidden="true">
+          <label for="backupPw">Password</label>
+          <div class="inline">
+            <input id="backupPw" type="password" autocomplete="new-password" spellcheck="false" autocapitalize="off"
+              aria-describedby="backupHint">
+            <button type="button" class="btn quiet" id="backupShowBtn" aria-pressed="false" aria-controls="backupPw">Show</button>
+          </div>
+          <p class="hint strength" id="backupHint" data-level="empty" aria-live="polite"></p>
+          <div class="actions">
+            <button type="button" class="btn" id="backupSuggestBtn"><svg class="i" aria-hidden="true"><use href="#i-sparkle"/></svg>Suggest a strong password</button>
+            <button type="submit" class="btn primary" id="backupSaveBtn">Save password</button>
+          </div>
+          <p class="small muted">Your password never leaves this page: Roost keeps only a scrambled check of it that can't be
+            turned back into the password. So Roost can't show it to you again: save it in your password manager or write
+            it down.</p>
+        </form>
+        <p class="msg ok" id="backupOk" role="status" hidden></p>
+        <p class="msg bad" id="backupError" role="alert" hidden></p>
+        <div class="confirm-host card-foot" id="backupRemoveHost" hidden>
+          <button type="button" class="btn danger-quiet" id="backupRemoveBtn">Remove backup sign-in</button>
+        </div>
+      </section>
+
+      <!-- Sites that can sign in -->
+      <section class="card" id="sitesCard" aria-labelledby="hSites">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-globe"/></svg></span>
+          <div>
+            <h2 id="hSites">Sites that can sign in <span class="chip">Advanced</span></h2>
+            <p class="muted">Your PC only accepts sign-ins made on these sites. The official Roost site is always on the list.
+              Add another only if you run your own copy of the Roost website.</p>
+          </div>
+        </div>
+        <ul class="plain-list" id="sitesList"></ul>
+        <details id="sitesAdd" class="disclosure">
+          <summary>Add a site</summary>
+          <div class="note warn"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><span><b>Only add a site you
+            run yourself or trust completely.</b> Whoever controls that site can see what you type there, including your
+            codes and backup password, and can control your PC while you are signed in. Never add a site because someone
+            asked you to.</span></div>
+          <form id="siteForm" novalidate>
+            <label for="siteUrl">Address of the Roost page on that site</label>
+            <div class="inline">
+              <input id="siteUrl" type="text" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off"
+                placeholder="https://example.com/roost/connect.html">
+              <button type="submit" class="btn primary" id="siteAddBtn">Add site</button>
+            </div>
+            <p class="small muted">Passkeys belong to one site each, so pair your devices again on the new site (under
+              Devices, choosing that site).</p>
+          </form>
+        </details>
+        <p class="msg ok" id="sitesOk" role="status" hidden></p>
+        <p class="msg bad" id="sitesError" role="alert" hidden></p>
+      </section>
+    </section>
+
+    <!-- ============================== Network ============================== -->
+    <section class="view" id="network" aria-labelledby="networkTitle" hidden>
+      <header class="view-head">
+        <h1 id="networkTitle" tabindex="-1">Network</h1>
+        <p class="muted">Picture quality, and relays for networks that block the direct connection Roost normally uses.</p>
+      </header>
+
+      <!-- Video quality -->
+      <section class="card" id="qualityCard" aria-labelledby="hQuality">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-gauge"/></svg></span>
+          <div>
+            <h2 id="hQuality">Video quality</h2>
+            <p class="muted">What new sessions start with. You can change it during a session too.</p>
+          </div>
+          <span class="small muted saved" role="status"></span>
+        </div>
+        <fieldset class="choices" id="setQuality">
+          <legend class="sr-only">Video quality</legend>
+          <label class="choice"><input type="radio" name="quality" value="smooth">
+            <span><b>Smooth</b><span class="muted">Best on slow connections</span></span></label>
+          <label class="choice"><input type="radio" name="quality" value="balanced">
+            <span><b>Balanced</b><span class="muted">Good for most connections</span></span></label>
+          <label class="choice"><input type="radio" name="quality" value="sharp">
+            <span><b>Sharp</b><span class="muted">Clearest text; on a slow connection it moves less smoothly rather than blurring</span></span></label>
+          <label class="choice"><input type="radio" name="quality" value="fast">
+            <span><b>Fast</b><span class="muted">60 frames a second, for video and games; needs a fast connection</span></span></label>
+        </fieldset>
+        <p class="msg bad" role="alert" hidden></p>
+      </section>
+
+      <div class="group-head">
+        <h2>School or office Wi-Fi</h2>
+        <p class="muted">Some networks block direct connections. A relay passes the connection through Cloudflare instead,
+          over the same route as ordinary websites. It only carries encrypted data: it can't see your screen. Set up either
+          one, or both: the TURN relay is tried first.</p>
+      </div>
+
+      <!-- TURN relay -->
+      <section class="card" id="relayCard" aria-labelledby="hRelay">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-cloud"/></svg></span>
+          <div>
+            <h2 id="hRelay">Cloudflare TURN relay <span class="chip">Optional</span></h2>
+            <p class="muted">Set up once in your own Cloudflare account: free for the first 1,000 GB each month, which is
+              hundreds of hours. Cloudflare may ask for a payment card for this one; the Worker relay below doesn't.</p>
+          </div>
+          <span class="chip status" id="relayChip" data-tone="neutral">Not set up</span>
+        </div>
+        <p class="small status-line"><b>Status:</b> <span id="relayStatus">Not set up</span></p>
+        <details id="relayHow" class="disclosure">
+          <summary>How to get a relay key (about 5 minutes)</summary>
+          <ol class="small how">
+            <li>Sign up or sign in at <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com</a> (a free account is enough).</li>
+            <li>In the menu, open <b>Realtime</b> (it may be called <b>Calls</b>), then <b>TURN Server</b>.</li>
+            <li>Choose <b>Create</b>, give it a name such as <i>Roost</i>, and create it.</li>
+            <li>Cloudflare shows a <b>Turn Token ID</b> and an <b>API Token</b>. Copy both into the boxes below. The API
+              token is shown only once; if you lose it, create a new key.</li>
+          </ol>
+        </details>
+        <form id="relayForm" class="subform" novalidate>
+          <div class="two">
+            <div><label for="relayKeyId">Turn Token ID</label>
+              <input id="relayKeyId" type="text" autocomplete="off" spellcheck="false" autocapitalize="off"></div>
+            <div><label for="relayToken">API Token</label>
+              <input id="relayToken" type="password" autocomplete="off" spellcheck="false" autocapitalize="off"></div>
+          </div>
+          <div class="actions">
+            <button type="submit" class="btn primary" id="relaySaveBtn">Check and save</button>
+          </div>
+          <p class="small muted">Roost keeps the token on your PC, encrypted with your Windows account, and only uses it to
+            ask Cloudflare for short-lived relay logins for each connection.</p>
+        </form>
+        <p class="msg ok" id="relayOk" role="status" hidden></p>
+        <p class="msg bad" id="relayError" role="alert" hidden></p>
+        <div class="confirm-host card-foot" id="relayRemoveHost" hidden>
+          <button type="button" class="btn danger-quiet" id="relayRemoveBtn">Remove the relay</button>
+        </div>
+      </section>
+
+      <!-- Worker relay -->
+      <section class="card" id="workerRelayCard" aria-labelledby="hWorkerRelay">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-cloud"/></svg></span>
+          <div>
+            <h2 id="hWorkerRelay">Worker relay, no card needed <span class="chip">Optional</span></h2>
+            <p class="muted">A small relay you run in your own free Cloudflare account, as a Worker. No payment details, no
+              monthly data allowance to use up.</p>
+          </div>
+          <span class="chip status" id="workerRelayChip" data-tone="neutral">Not set up</span>
+        </div>
+        <p class="small status-line"><b>Status:</b> <span id="workerRelayStatus">Not set up</span></p>
+        <details id="workerRelayHow" class="disclosure">
+          <summary>How to set up the relay (about 5 minutes, needs Node.js)</summary>
+          <ol class="small how">
+            <li>Sign up or sign in at <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">dash.cloudflare.com</a> (a free account is enough).</li>
+            <li>On any computer with <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>, open a terminal
+              (PowerShell on Windows) and run:
+              <pre class="code">git clone https://github.com/Just-Rice/roost
+cd roost/relay
+npx wrangler login
+npx wrangler deploy</pre></li>
+            <li>Wrangler prints the relay's address, such as <i>https://roost-relay.your-name.workers.dev</i>. Paste it below.</li>
+          </ol>
+          <p class="small muted">The first PC to save a relay becomes its owner; no other PC can use it. For a second PC,
+            deploy another copy under a different name (change <i>name</i> in <i>relay/wrangler.toml</i>).</p>
+          <p class="small muted">If the Roost website or the public message services are blocked where you are, the relay
+            stands in for both: add its address under <a href="#sitesCard">Sites that can sign in</a>, pair your device on
+            that site once, and sign in at the relay's address from then on.</p>
+        </details>
+        <form id="workerRelayForm" class="subform" novalidate>
+          <label for="workerRelayUrl">Relay address</label>
+          <div class="inline">
+            <input id="workerRelayUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off"
+              placeholder="https://roost-relay.your-name.workers.dev">
+            <button type="submit" class="btn primary" id="workerRelaySaveBtn">Check and save</button>
+          </div>
+          <p class="small muted">Roost keeps the relay's secret on your PC, encrypted with your Windows account.</p>
+        </form>
+        <p class="msg ok" id="workerRelayOk" role="status" hidden></p>
+        <p class="msg bad" id="workerRelayError" role="alert" hidden></p>
+        <div class="confirm-host card-foot" id="workerRelayRemoveHost" hidden>
+          <button type="button" class="btn danger-quiet" id="workerRelayRemoveBtn">Remove the relay</button>
+        </div>
+
+        <!-- Backups for the Worker relay: shown once it is set up -->
+        <div class="backups" id="relayBackups" hidden>
+          <h3>If the Worker relay is down</h3>
+          <p class="small muted">A copy of the relay running on a computer that stays on (relay/node in Roost's source),
+            started with the Worker relay's secret. Your PC uses it only when the Worker can't be reached, for example after
+            a day's free allowance is used up.</p>
+          <div class="backup-item" id="backupRelayItem">
+            <div class="backup-text"><b>Backup relay</b>
+              <span class="small muted" id="backupRelayStatus">Not set up</span></div>
+            <form id="backupRelayForm" class="inline" novalidate>
+              <label for="backupRelayUrl" class="sr-only">Backup relay address</label>
+              <input id="backupRelayUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off"
+                placeholder="https://your-name.share.zrok.io">
+              <button type="submit" class="btn" id="backupRelaySaveBtn">Check and save</button>
+            </form>
+            <div class="confirm-host" id="backupRelayRemoveHost" hidden>
+              <button type="button" class="btn danger-quiet small" id="backupRelayRemoveBtn">Remove</button>
+            </div>
+          </div>
+          <div class="backup-item" id="tunnelItem">
+            <div class="backup-text"><b>Quick Tunnel on this PC</b>
+              <span class="small muted" id="tunnelStatus">Not set up</span></div>
+            <form id="tunnelForm" class="inline" novalidate>
+              <label for="tunnelUrl" class="sr-only">The relay's address on this PC</label>
+              <input id="tunnelUrl" type="url" inputmode="url" autocomplete="off" spellcheck="false" autocapitalize="off"
+                placeholder="http://127.0.0.1:8788">
+              <button type="submit" class="btn" id="tunnelSaveBtn">Check and save</button>
+            </form>
+            <div class="confirm-host" id="tunnelRemoveHost" hidden>
+              <button type="button" class="btn danger-quiet small" id="tunnelRemoveBtn">Remove</button>
+            </div>
+          </div>
+          <p class="small muted">A Quick Tunnel needs no account (start the relay with <code>QUICK_TUNNEL=1</code>), but its
+            public address changes each time, so Roost asks the relay on this PC for it. A tunnel with a fixed address is
+            the steadier backup.</p>
+          <p class="msg ok" id="relayBackupsOk" role="status" hidden></p>
+          <p class="msg bad" id="relayBackupsError" role="alert" hidden></p>
+        </div>
+      </section>
+    </section>
+
+    <!-- ============================== This PC ============================== -->
+    <section class="view" id="pc" aria-labelledby="pcTitle" hidden>
+      <header class="view-head">
+        <h1 id="pcTitle" tabindex="-1">This PC</h1>
+        <p class="muted">How Roost behaves on your PC: what it can control, when it runs, privacy while you're connected,
+          and sound.</p>
+      </header>
+
+      <!-- Control admin apps (Windows' UIPI and the secure desktop) -->
+      <section class="card" id="adminCard" aria-labelledby="hAdmin">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-admin"/></svg></span>
+          <div>
+            <h2 id="hAdmin">Control admin apps</h2>
+            <p class="muted">Windows keeps ordinary apps away from apps that run as administrator. Without this, Roost
+              can't click or type into Task Manager, installers or admin tools, and can't show Windows' "Do you want to
+              allow…" prompts (UAC).</p>
+          </div>
+          <span class="chip status" id="adminChip" data-tone="neutral">Off</span>
+        </div>
+        <div class="settings">
+          <label class="setting" for="setElevation">
+            <span class="setting-text"><b>Let Roost control admin apps</b>
+              <span class="muted" id="adminHint">Roost starts with administrator rights when you log on. Windows asks you
+                once to allow it.</span></span>
+            <input type="checkbox" role="switch" id="setElevation" aria-describedby="adminHint">
+          </label>
+        </div>
+        <p class="small muted" id="adminStatus" role="status"></p>
+        <p class="msg ok" id="adminOk" role="status" hidden></p>
+        <p class="msg bad" id="adminError" role="alert" hidden></p>
+      </section>
+
+      <!-- Startup and power -->
+      <section class="card" id="settingsCard" aria-labelledby="hSettings">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-power"/></svg></span>
+          <div>
+            <h2 id="hSettings">Startup and power</h2>
+            <p class="muted">So your PC can be reached whenever you need it.</p>
+          </div>
+          <span class="small muted saved" id="settingsSaved" role="status"></span>
+        </div>
+        <div class="settings">
+          <label class="setting" for="setLoginItem">
+            <span class="setting-icon" aria-hidden="true"><svg class="i"><use href="#i-power"/></svg></span>
+            <span class="setting-text"><b>Start Roost with Windows</b>
+              <span class="muted">So you can still connect after your PC restarts.</span></span>
+            <input type="checkbox" role="switch" id="setLoginItem" data-setting="loginItem">
+          </label>
+          <p class="hint" id="loginItemHint" hidden></p>
+          <label class="setting" for="setKeepAwake">
+            <span class="setting-icon" aria-hidden="true"><svg class="i"><use href="#i-cup"/></svg></span>
+            <span class="setting-text"><b>Keep your PC awake while Roost is on</b>
+              <span class="muted">A sleeping PC can't be reached. The screen can still turn off.</span></span>
+            <input type="checkbox" role="switch" id="setKeepAwake" data-setting="keepAwake">
+          </label>
+        </div>
+        <p class="msg bad" id="settingsError" role="alert" hidden></p>
+      </section>
+
+      <!-- While you're connected -->
+      <section class="card" id="privacyCard" aria-labelledby="hPrivacy">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-eyeoff"/></svg></span>
+          <div>
+            <h2 id="hPrivacy">While you're connected</h2>
+            <p class="muted">Privacy at your PC, and what happens when a session ends.</p>
+          </div>
+          <span class="small muted saved" role="status"></span>
+        </div>
+        <div class="settings">
+          <label class="setting" for="setCurtain">
+            <span class="setting-icon" aria-hidden="true"><svg class="i"><use href="#i-eyeoff"/></svg></span>
+            <span class="setting-text"><b>Hide your PC's screen while someone is connected</b>
+              <span class="muted">Its own display goes black so nobody nearby can watch. Pressing Esc three times at the PC
+                shows it again.</span>
+              <span class="why" id="curtainHint" hidden>Needs Windows 10 version 2004 or later.</span></span>
+            <input type="checkbox" role="switch" id="setCurtain" data-setting="curtain">
+          </label>
+          <label class="setting" for="setLock">
+            <span class="setting-icon" aria-hidden="true"><svg class="i"><use href="#i-lock"/></svg></span>
+            <span class="setting-text"><b>Lock your PC when a session ends</b>
+              <span class="muted">When you disconnect, Windows goes to its lock screen, so nobody can use what you left open.</span></span>
+            <input type="checkbox" role="switch" id="setLock" data-setting="lockOnDisconnect">
+          </label>
+          <div class="setting">
+            <span class="setting-icon" aria-hidden="true"><svg class="i"><use href="#i-timer"/></svg></span>
+            <span class="setting-text"><label for="setIdle"><b>End a session after this long without use</b></label>
+              <span class="muted" id="idleHelp">If nobody moves the mouse or types for this long, Roost ends the session.</span></span>
+            <select id="setIdle" aria-describedby="idleHelp">
+              <option value="15">15 minutes</option>
+              <option value="30">30 minutes</option>
+              <option value="60">1 hour</option>
+              <option value="120">2 hours</option>
+              <option value="0">Never</option>
+            </select>
+          </div>
+        </div>
+        <p class="msg bad" role="alert" hidden></p>
+      </section>
+
+      <!-- Sound -->
+      <section class="card" id="soundCard" aria-labelledby="hSound">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-speaker"/></svg></span>
+          <div>
+            <h2 id="hSound">Sound while someone is connected</h2>
+            <p class="muted" id="soundHint"></p>
+          </div>
+          <span class="small muted saved" role="status"></span>
+        </div>
+        <fieldset class="levels" id="soundLevels">
+          <legend class="sr-only">Sound levels</legend>
+          <div class="level">
+            <label for="setSpeakers"><svg class="i" aria-hidden="true"><use href="#i-speaker"/></svg>Played on your PC's speakers</label>
+            <input type="range" id="setSpeakers" min="0" max="100" step="5" data-level="macSpeakers" aria-describedby="soundHint">
+            <output id="setSpeakersOut" for="setSpeakers"></output>
+          </div>
+          <div class="level">
+            <label for="setStream"><svg class="i" aria-hidden="true"><use href="#i-devices"/></svg>Sent to the device you're using</label>
+            <input type="range" id="setStream" min="0" max="150" step="5" data-level="streamVolume">
+            <output id="setStreamOut" for="setStream"></output>
+          </div>
+        </fieldset>
+        <div class="setting field-row" id="micOutputRow" hidden>
+          <span class="setting-icon" aria-hidden="true"><svg class="i"><use href="#i-mic"/></svg></span>
+          <span class="setting-text"><label for="setMicOutput"><b>When you talk through your PC, play your voice on</b></label>
+            <span class="muted" id="micHelp">While connected, the website's "Talk through your PC" plays your microphone
+              here. To be heard in a call on the PC, install a free virtual audio cable such as VB-CABLE, choose it here,
+              and pick it as the microphone in the calling app.</span></span>
+          <select id="setMicOutput" aria-describedby="micHelp">
+            <option value="">Whatever your PC is playing sound on</option>
+          </select>
+        </div>
+        <p class="msg bad" role="alert" hidden></p>
+      </section>
+    </section>
+
+    <!-- ============================== About ============================== -->
+    <section class="view" id="about" aria-labelledby="aboutTitle" hidden>
+      <header class="view-head">
+        <h1 id="aboutTitle" tabindex="-1">About</h1>
+        <p class="muted">Version, updates, your PC's details, and starting over.</p>
+      </header>
+
+      <section class="card about-card" id="aboutCard" aria-labelledby="hAbout">
+        <div class="about-brand">
+          <img src="icon.svg" alt="" width="64" height="64">
+          <div>
+            <h2 id="hAbout">Roost</h2>
+            <p class="muted">Your PC, from anywhere. Free and open source.</p>
+          </div>
+        </div>
+        <dl class="facts" id="aboutFacts">
+          <div><dt>Version</dt><dd id="aboutVersion"></dd></div>
+          <div><dt>Windows</dt><dd id="aboutWindows">—</dd></div>
+          <div><dt>Processor</dt><dd id="aboutArch">—</dd></div>
+          <div><dt>Video encoder</dt><dd id="aboutEncoder">—</dd></div>
+          <div><dt>Internet</dt><dd id="aboutOnline"></dd></div>
+        </dl>
+        <p class="links">
+          <a href="https://just-rice.github.io/roost/" target="_blank" rel="noopener noreferrer">Roost website</a>
+          <a href="https://github.com/Just-Rice/roost" target="_blank" rel="noopener noreferrer">Source code on GitHub</a>
+        </p>
+        <p class="muted" id="aboutCredit">Roost is built on <a href="https://github.com/Just-Rice/perch" target="_blank" rel="noopener noreferrer">Perch</a>
+          by Just-Rice, who designed and built the original for the Mac: its sign-in, its security and the way your
+          device finds your computer all come from there.</p>
+      </section>
+
+      <section class="card" id="updatesCard" aria-labelledby="hUpdates">
+        <div class="card-head">
+          <span class="card-icon" aria-hidden="true"><svg class="i"><use href="#i-download"/></svg></span>
+          <div>
+            <h2 id="hUpdates">Updates</h2>
+            <p class="muted">Updates install in a minute and keep all your settings.</p>
+          </div>
+          <span class="small muted saved" role="status"></span>
+        </div>
+        <div class="settings">
+          <label class="setting" for="setAutoUpdate">
+            <span class="setting-text"><b>Update automatically</b>
+              <span class="muted">When a new version is out, Roost installs it and restarts once nobody has been connected
+                for 2 minutes. Off: the Control Center and the tray icon tell you, and you choose when.</span></span>
+            <input type="checkbox" role="switch" id="setAutoUpdate" data-setting="autoUpdate">
+          </label>
+        </div>
+        <div class="update" id="updateBox" hidden>
+          <span class="notice-icon" aria-hidden="true"><svg class="i"><use href="#i-sparkle"/></svg></span>
+          <div class="notice-body">
+            <p><b>Roost <span id="updateVersion"></span> is available.</b></p>
+            <p class="notes small" id="updateNotes"></p>
+            <div class="actions">
+              <button type="button" class="btn primary" id="installUpdateBtn">Install update</button>
+              <a id="updateLink" class="btn quiet" href="https://github.com/Just-Rice/roost/releases" target="_blank" rel="noopener noreferrer">What's new</a>
+            </div>
+          </div>
+        </div>
+        <div class="actions">
+          <button type="button" class="btn" id="checkUpdatesBtn"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>Check for updates</button>
+          <span class="small muted" id="updateStatus" role="status"></span>
+        </div>
+        <p class="msg bad" id="aboutError" role="alert" hidden></p>
+      </section>
+
+      <section class="card zone" id="zoneCard" aria-labelledby="hZone">
+        <div class="card-head">
+          <span class="card-icon bad" aria-hidden="true"><svg class="i"><use href="#i-alert"/></svg></span>
+          <div>
+            <h2 id="hZone">Rename, start over or uninstall</h2>
+            <p class="muted">Bigger changes. Each one asks you to confirm first.</p>
+          </div>
+        </div>
+        <div class="zone-item">
+          <div class="zone-text">
+            <h3>Give your PC a new name</h3>
+            <p class="small muted">Your devices keep working. The backup password is removed, because it goes with the name.</p>
+            <details id="customNameBox" class="disclosure">
+              <summary class="small">Choose your own name (not recommended)</summary>
+              <p class="small muted">A name Roost makes up is one of about 590 million, so nobody can guess it. One you choose
+                is much easier to guess. Anyone who guesses it can try the backup sign-in (they still need the backup
+                password and a 6-digit code, and wrong tries are slowed down), and your PC answers them. Passkey sign-ins
+                don't use the name.</p>
+              <form id="customNameForm" novalidate>
+                <label for="customName">New name</label>
+                <input id="customName" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="40"
+                  placeholder="like jordan-desktop">
+                <div class="confirm-host" id="customNameHost">
+                  <button type="submit" class="btn" id="customNameBtn">Use this name</button>
+                </div>
+              </form>
+              <p class="msg bad" id="customNameError" role="alert" hidden></p>
+            </details>
+          </div>
+          <div class="confirm-host zone-side" id="renamePcHost">
+            <button type="button" class="btn" id="renamePcBtn">Get a new name</button>
+          </div>
+        </div>
+        <div class="zone-item">
+          <div class="zone-text">
+            <h3>Start over</h3>
+            <p class="small muted">Forget everything: your PC gets a new name and new keys, every device is removed and you
+              set Roost up again from the start.</p>
+          </div>
+          <div class="confirm-host zone-side" id="resetHost">
+            <button type="button" class="btn danger-quiet" id="resetBtn">Start over</button>
+          </div>
+        </div>
+        <div class="zone-item">
+          <div class="zone-text">
+            <h3>Uninstall Roost</h3>
+            <p class="small muted">Removes Roost, its settings and its keys from your PC.</p>
+          </div>
+          <div class="confirm-host zone-side" id="uninstallHost">
+            <button type="button" class="btn danger-quiet" id="uninstallBtn">Uninstall Roost</button>
+          </div>
+        </div>
+      </section>
+    </section>
+
+    <section class="card farewell" id="farewell" aria-labelledby="hBye" hidden>
+      <img src="icon.svg" alt="" width="64" height="64">
+      <h2 id="hBye">Roost is being removed</h2>
+      <p class="muted">Its settings and keys are gone and Roost is closing. You can close this tab.</p>
+    </section>
+
+    <footer class="foot">
+      <p>Roost is free and open source. This page only works on this PC.</p>
+    </footer>
+  </main>
+</div>
+</body>
+</html>

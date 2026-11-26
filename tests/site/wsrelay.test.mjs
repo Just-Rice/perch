@@ -31,7 +31,8 @@ async function signedOffer(cert, eph, over = {}) {
 test('relay addresses: workers.dev over https only (loopback only in tests)', () => {
   assert.equal(W.relayBase('https://perch-relay.someone.workers.dev/'), 'https://perch-relay.someone.workers.dev');
   assert.equal(W.relayBase('https://a.b.workers.dev'), 'https://a.b.workers.dev');
-  for (const bad of ['http://perch-relay.someone.workers.dev', 'https://example.com', 'https://workers.dev',
+  assert.equal(W.relayBase('https://perchrelay.shares.zrok.io/'), 'https://perchrelay.shares.zrok.io', 'a zrok share');
+  for (const bad of ['https://zrok.io', 'http://x.shares.zrok.io', 'https://x.zrok.io.evil.com', 'http://perch-relay.someone.workers.dev', 'https://example.com', 'https://workers.dev',
     'https://x.workers.dev/path', 'https://x.workers.dev?q=1', 'https://u:p@x.workers.dev', 'https://x.workers.dev:8443',
     'https://x.workers.dev.evil.com', 'http://localhost:8787', 'not a url', '']) {
     assert.equal(W.relayBase(bad), null, bad);

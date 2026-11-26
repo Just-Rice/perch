@@ -1,0 +1,10 @@
+{
+  "name": "perch-relay-node",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Perch's relay as a plain Node.js server, for running behind a tunnel such as zrok.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "scripts": { "start": "node server.mjs" },
+  "dependencies": { "ws": "8.18.3" }
+}

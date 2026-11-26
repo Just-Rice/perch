@@ -3,7 +3,7 @@
 // other by accident.
 export const APP_ORIGIN = 'https://just-rice.github.io';
 export const RP_ID = 'just-rice.github.io';
-export const SITE_URL = 'https://just-rice.github.io/roost/';
-export const CONNECT_URL = 'https://just-rice.github.io/roost/connect.html';
+export const SITE_URL = 'https://just-rice.github.io/perch/windows/';
+export const CONNECT_URL = 'https://just-rice.github.io/perch/windows/connect.html';
 export const TOPIC_PREFIX = 'roost/v1/';
 export const CLIENT_PREFIX = 'roost-';

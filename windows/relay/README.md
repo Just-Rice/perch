@@ -14,8 +14,8 @@ You need a free [Cloudflare account](https://dash.cloudflare.com/sign-up), [Git]
 and [Node.js](https://nodejs.org) (the LTS installer) on any computer. On Windows, open **PowerShell** and run:
 
 ```powershell
-git clone https://github.com/Just-Rice/roost
-cd roost\relay
+git clone https://github.com/Just-Rice/perch
+cd perch\windows\relay
 npx wrangler login
 npx wrangler deploy
 ```

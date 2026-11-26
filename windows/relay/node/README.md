@@ -10,7 +10,7 @@ offers whenever the Worker can't be reached (for example after a day's free allo
 In PowerShell:
 
 ```powershell
-cd roost\relay\node
+cd perch\windows\relay\node
 npm ci
 $env:RELAY_SECRET = "<the Worker relay's secret>"
 $env:PORT = "8788"

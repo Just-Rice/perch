@@ -34,7 +34,7 @@ const AUTO_UPDATE_RETRY_MS = 6 * 60 * 60 * 1000;
 const UPDATE_CHECK_EVERY_MS = 24 * 60 * 60 * 1000;
 const AUTO_UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
-// The website's address as people type it, for the "Ready" line: just-rice.github.io/roost.
+// The website's address as people type it, for the "Ready" line: just-rice.github.io/perch/windows.
 const SITE_SHORT = SITE_URL.replace(/^https:\/\//, '').replace(/\/$/, '');
 
 const str = (v, max = 80) => (typeof v === 'string' ? v.slice(0, max) : null);

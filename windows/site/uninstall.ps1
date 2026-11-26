@@ -1,6 +1,6 @@
 # Removes Roost from this PC.
 #
-#   irm https://just-rice.github.io/roost/uninstall.ps1 | iex
+#   irm https://just-rice.github.io/perch/windows/uninstall.ps1 | iex
 #
 # What it does, in order:
 #   1. closes Roost if it's running from its install folder;
@@ -18,7 +18,7 @@
 # Options: -KeepData (keep %LOCALAPPDATA%\Roost without asking), -Yes (delete it without asking), -Dir <folder>
 # (Roost was installed with install.ps1 -Dir). To pass them, run it as a script block:
 #
-#   & ([scriptblock]::Create((irm https://just-rice.github.io/roost/uninstall.ps1))) -Yes
+#   & ([scriptblock]::Create((irm https://just-rice.github.io/perch/windows/uninstall.ps1))) -Yes
 #
 # This file is plain ASCII on purpose: Windows PowerShell 5.1 reads a .ps1 without a byte-order mark in the
 # computer's ANSI code page, so any other character would come out garbled.

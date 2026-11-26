@@ -4,7 +4,9 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore: ['windows/**', '.github/workflows/windows-*.yml']
   pull_request:
+    paths-ignore: ['windows/**', '.github/workflows/windows-*.yml']
 
 jobs:
   test:

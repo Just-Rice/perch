@@ -1,11 +1,17 @@
-# Checks every push and pull request: the app on Windows (x64 and ARM64), the host's and the website's tests, and
-# everything together end to end.
-name: CI
+# Roost, the Windows version (windows/): checks every push and pull request that touches it. The app on Windows
+# (x64 and ARM64), the host's and the website's tests, and everything together end to end.
+name: Windows CI
 
 on:
   push:
     branches: [main]
+    paths: ['windows/**', '.github/workflows/windows-ci.yml']
   pull_request:
+    paths: ['windows/**', '.github/workflows/windows-ci.yml']
+
+defaults:
+  run:
+    working-directory: windows
 
 jobs:
   app:
@@ -25,22 +31,22 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: app
+          workspaces: windows/app
       - name: Unit tests
-        working-directory: app
+        working-directory: windows/app
         run: cargo test --target ${{ matrix.target }}
       - name: Build
-        working-directory: app
+        working-directory: windows/app
         run: cargo build --release --target ${{ matrix.target }}
       - name: Self-test (screen and sound checks are reported only; CI machines have neither)
-        working-directory: app
+        working-directory: windows/app
         env:
           ROOST_SELFTEST_LENIENT: '1'
         run: target/${{ matrix.target }}/release/roost.exe --selftest
       - uses: actions/upload-artifact@v4
         with:
           name: roost-${{ matrix.arch }}
-          path: app/target/${{ matrix.target }}/release/roost.exe
+          path: windows/app/target/${{ matrix.target }}/release/roost.exe
 
   host-and-website:
     runs-on: windows-latest
@@ -51,10 +57,10 @@ jobs:
         with:
           node-version: '24'
       - name: Install the host's packages
-        working-directory: host
+        working-directory: windows/host
         run: npm ci
       - name: Host tests
-        working-directory: host
+        working-directory: windows/host
         shell: bash
         run: node --test --test-concurrency=1 --test-timeout=180000 $(ls test/*.test.mjs | grep -v -e browser -e chrome-smoke)
       - name: Website tests
@@ -78,9 +84,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: roost-x64
-          path: app/target/release
+          path: windows/app/target/release
       - run: npm ci
-        working-directory: host
+        working-directory: windows/host
       - name: Website, host and the real roost.exe end to end
         shell: bash
         run: |

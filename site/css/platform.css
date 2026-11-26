@@ -1,0 +1,43 @@
+/* The "Mac · Windows" switch and the home-screen offer (js/platform.js). The same file is in both sites
+   (site/css/ and windows/site/css/): it uses each site's own colours (--accent, --surface, --line, ...). */
+.platform {
+  display: inline-flex; align-items: center; gap: 2px; padding: 3px; margin: 0 auto 0 14px;
+  border: 1px solid var(--line); border-radius: 999px; background: var(--surface);
+  font-size: .85rem; font-weight: 600; line-height: 1; white-space: nowrap;
+}
+.platform a {
+  display: inline-block; padding: 6px 12px; border-radius: 999px; color: var(--muted); text-decoration: none;
+  transition: background-color .15s, color .15s;
+}
+.platform a:hover { color: var(--text); }
+.platform a[aria-current="page"] { background: var(--accent); color: var(--accent-text); }
+/* On a phone, the switch takes a row of its own under the header, the full width. */
+@media (max-width: 600px) {
+  :has(> .platform) { flex-wrap: wrap; row-gap: 10px; }
+  .platform { order: 3; flex: 1 0 100%; margin: 0; }
+  .platform a { flex: 1; text-align: center; padding: 8px 10px; }
+}
+
+.install {
+  display: flex; align-items: center; gap: 12px; box-sizing: border-box; width: calc(100% - 32px); max-width: 640px;
+  margin: 8px auto 4px; padding: 10px 10px 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, .08);
+}
+.install img { flex: none; border-radius: 10px; }
+.install div { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.install b { font-size: .95rem; }
+.install span { color: var(--muted); font-size: .85rem; }
+.install .btn { flex: none; }
+.install .close {
+  flex: none; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; color: var(--muted);
+  font-size: 1.3rem; line-height: 1; cursor: pointer;
+}
+.install .close:hover { color: var(--text); }
+@media (prefers-reduced-motion: reduce) { .platform a { transition: none; } }
+
+/* app.html: the home-screen app's first page, when it doesn't yet know which computer you use. */
+.chooser { padding: 14vh 0 8vh; text-align: center; }
+.chooser h1 { font-size: clamp(1.8rem, 6vw, 2.6rem); margin: 0 0 10px; }
+.chooser .lead { color: var(--muted); margin: 0 auto 28px; max-width: 28em; }
+.chooser .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+.chooser .btn { min-width: 11em; }

@@ -169,7 +169,7 @@ test('Apple keyboards and touch-first devices', () => {
 const loc = url => { const u = new URL(url); return { hostname: u.hostname, search: u.search }; };
 
 test('pageEnv: the real site ignores every test switch', () => {
-  const e = pageEnv(loc('https://just-rice.github.io/roost/connect.html?brokers=ws://127.0.0.1:1/mqtt&test=1&demo=1'));
+  const e = pageEnv(loc('https://just-rice.github.io/perch/windows/connect.html?brokers=ws://127.0.0.1:1/mqtt&test=1&demo=1'));
   assert.equal(e.local, false);
   assert.equal(e.test, false);
   assert.equal(e.demo, false);
@@ -205,7 +205,7 @@ test('no Mac or Perch words in anything a person reads', async () => {
   for (const c of ['no-screen-permission', 'capture-failed', 'odd']) all.push(errorMessage(c));
   for (const k of ['timeout', 'brokers', 'webrtc', 'lost', 'old-mac', 'no-webauthn', 'not-roost-passkey', 'no-passkey', 'bad-link',
     'wrong-mac', 'wrong-password', 'protocol', 'odd']) all.push(failureMessage(k));
-  for (const m of all) assert.doesNotMatch(`${m.title} ${m.body}`, /\bMacs?\b|Perch|macOS|menu bar|Setup|github\.io\/perch/, m.title);
+  for (const m of all) assert.doesNotMatch(`${m.title} ${m.body}`, /\bMacs?\b|Perch|macOS|menu bar|Setup|github\.io\/perch(?!\/windows)/, m.title);
 });
 
 test('stats: readStats, summarize, linkQuality and the panel lines', () => {

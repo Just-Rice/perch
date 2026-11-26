@@ -13,7 +13,15 @@
 <meta property="og:title" content="Roost: your PC, from anywhere">
 <meta property="og:description" content="Your Windows PC in any browser. Free, open source, no account, no servers in between.">
 <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<meta name="perch-platform" content="windows">
+<link rel="manifest" href="app.webmanifest">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Perch">
 <link rel="stylesheet" href="css/roost.css">
+<link rel="stylesheet" href="css/platform.css">
+<script src="js/platform.js"></script>
 </head>
 <body class="front">
 <canvas class="embers" id="embers" aria-hidden="true"></canvas>
@@ -137,7 +145,7 @@
         <div class="term">
           <div class="term-bar"><span class="ps" aria-hidden="true">&gt;_</span>Windows PowerShell<span class="controls" aria-hidden="true">— ▢ ✕</span></div>
           <div class="term-body">
-            <div class="term-line"><span class="prompt" aria-hidden="true">PS&gt;</span><code id="installCmd">irm https://just-rice.github.io/roost/install.ps1 | iex</code></div>
+            <div class="term-line"><span class="prompt" aria-hidden="true">PS&gt;</span><code id="installCmd">irm https://just-rice.github.io/perch/windows/install.ps1 | iex</code></div>
             <div class="term-actions">
               <button type="button" class="btn primary small" id="copyCmd"><span data-icon="copy" aria-hidden="true"></span>Copy</button>
               <span class="term-status" id="copyStatus" role="status"></span>
@@ -153,7 +161,7 @@
       </div>
       <div>
         <p>The line downloads the latest Roost for your PC's processor from
-          <a href="https://github.com/Just-Rice/roost/releases">GitHub</a>, checks it against the checksum published
+          <a href="https://github.com/Just-Rice/perch/releases">GitHub</a>, checks it against the checksum published
           with it, installs it just for you (in <code>%LOCALAPPDATA%\Programs\Roost</code>), sets it to start when you
           sign in, and opens the Control Center, which walks you through the rest.</p>
         <details>
@@ -167,7 +175,7 @@
             <div class="ss-body"><u>More info</u> › Run anyway</div>
           </div>
           <p>Rather download it yourself? Get the zip for your PC from the
-            <a href="https://github.com/Just-Rice/roost/releases/latest">latest release</a>, unzip it and open
+            <a href="https://github.com/Just-Rice/perch/releases?q=windows-v&amp;expanded=true">latest Windows release</a>, unzip it and open
             <code>roost.exe</code>. If SmartScreen appears, choose <b>More info</b>, then <b>Run anyway</b>.</p>
         </details>
         <details>
@@ -184,7 +192,7 @@
         <details>
           <summary>Update or uninstall</summary>
           <p>The Control Center tells you when an update is out. To remove Roost, run this in PowerShell:</p>
-          <p><code>irm https://just-rice.github.io/roost/uninstall.ps1 | iex</code></p>
+          <p><code>irm https://just-rice.github.io/perch/windows/uninstall.ps1 | iex</code></p>
           <p>It stops Roost, stops it starting with Windows and deletes the app, and asks before deleting your settings.
             Read it first: <a href="uninstall.ps1">uninstall.ps1</a>.</p>
         </details>
@@ -213,7 +221,7 @@
         Roost gives full control of a PC. Nobody genuine will ever ask you to install it or to send them a pairing code;
         anyone who does is trying to scam you.</div></div>
       <p class="fine">More in the <a href="privacy.html">privacy page</a> and the
-        <a href="https://github.com/Just-Rice/roost/blob/main/SECURITY.md">security notes</a>.</p>
+        <a href="https://github.com/Just-Rice/perch/blob/main/SECURITY.md">security notes</a>.</p>
     </div>
   </section>
 
@@ -222,7 +230,7 @@
       <p class="kicker">Good to know</p>
       <h2 id="h-limits">The small print, in plain words.</h2>
       <ul class="list">
-        <li><b>It's a beta.</b> Please <a href="https://github.com/Just-Rice/roost/issues">report problems</a>.</li>
+        <li><b>It's a beta.</b> Please <a href="https://github.com/Just-Rice/perch/issues">report problems</a>.</li>
         <li>To click on apps that run as administrator (Task Manager, installers) and to see Windows' own permission
           prompts, turn on <b>Control admin apps</b> in the Control Center. Windows asks you once.</li>
         <li>Windows never lets another program press <b>Ctrl+Alt+Del</b> or <b>Win+L</b>. Open Task Manager
@@ -253,9 +261,9 @@
   <div class="wrap">
     <a class="brand" href="./"><img src="img/icon.svg" alt="" width="26" height="26">Roost</a>
     <span>Free and open source (Apache 2.0). Built on <a href="https://github.com/Just-Rice/perch">Perch</a> by <a href="https://github.com/Just-Rice">Just-Rice</a>, the Mac original.</span>
-    <a href="https://github.com/Just-Rice/roost">Source code</a>
+    <a href="https://github.com/Just-Rice/perch">Source code</a>
     <a href="privacy.html">Privacy</a>
-    <a href="https://github.com/Just-Rice/roost/blob/main/SECURITY.md">Security</a>
+    <a href="https://github.com/Just-Rice/perch/blob/main/SECURITY.md">Security</a>
   </div>
 </footer>
 <script type="module" src="js/front.js"></script>

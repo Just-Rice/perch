@@ -1,6 +1,6 @@
 # Roost installer for Windows.
 #
-#   irm https://just-rice.github.io/roost/install.ps1 | iex
+#   irm https://just-rice.github.io/perch/windows/install.ps1 | iex
 #
 # What it does, in order:
 #   1. checks this PC runs Windows 10 version 1903 (build 18362) or later, or Windows 11, and whether it has an
@@ -23,7 +23,7 @@
 # Options: -Update (quiet; used by Roost's own "Update" menu item), -NoStart, -Dir <folder>.
 # Piped into iex there is nowhere to put options, so to pass them, run it as a script block:
 #
-#   & ([scriptblock]::Create((irm https://just-rice.github.io/roost/install.ps1))) -NoStart
+#   & ([scriptblock]::Create((irm https://just-rice.github.io/perch/windows/install.ps1))) -NoStart
 #
 # or save it and run: powershell -ExecutionPolicy Bypass -File install.ps1 -Update
 #
@@ -53,7 +53,8 @@ function Install-Roost {
     [Net.ServicePointManager]::SecurityProtocol = $oldProtocols -bor [Net.SecurityProtocolType]::Tls12
   } catch { }
 
-  $Repo = 'Just-Rice/roost'
+  # Roost lives in Perch's repository: its releases are the ones tagged windows-v<version> (the others are Perch's).
+  $Repo = 'Just-Rice/perch'
   $TaskPath = '\Roost\'
   $TaskName = 'Roost'
   $RunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -155,12 +156,12 @@ function Install-Roost {
     $wanted = $env:ROOST_VERSION
     if ($wanted) {
       $wanted = $wanted.TrimStart('v')
-      try { $json = Get-Web ($api + '/tags/v' + $wanted) } catch {
+      try { $json = Get-Web ($api + '/tags/windows-v' + $wanted) } catch {
         if ((Get-HttpStatus $_) -eq 404) { Fail "couldn't find Roost version $wanted." }
         Fail "couldn't reach GitHub to find Roost $wanted. Check your internet connection and try again."
       }
     } else {
-      try { $json = Get-Web ($api + '/latest') } catch {
+      try { $json = Get-Web ($api + '?per_page=50') } catch {
         $status = Get-HttpStatus $_
         if ($status -eq 403 -or $status -eq 429) {
           Fail 'GitHub is limiting how often it can be asked from this network. Try again in an hour.'
@@ -168,7 +169,20 @@ function Install-Roost {
         Fail "couldn't reach GitHub to find the latest Roost. Check your internet connection and try again."
       }
     }
-    try { $release = $json | ConvertFrom-Json } catch { Fail "GitHub's answer didn't make sense. Try again later." }
+    try { $release = ConvertFrom-Json $json } catch { Fail "GitHub's answer didn't make sense. Try again later." }
+    if (-not $wanted) {
+      # A list, newest first: the first of Roost's own releases that isn't a draft or a pre-release.
+      $list = $release
+      $release = $null
+      foreach ($r in $list) {
+        if ($r -and $r.PSObject.Properties['tag_name'] -and ([string]$r.tag_name).StartsWith('windows-v') -and
+            -not ($r.PSObject.Properties['draft'] -and $r.draft) -and -not ($r.PSObject.Properties['prerelease'] -and $r.prerelease)) {
+          $release = $r
+          break
+        }
+      }
+      if (-not $release) { Fail "couldn't find a Roost release yet. Try again later." }
+    }
 
     $tag = ''
     if ($release.PSObject.Properties['tag_name'] -and $release.tag_name) { $tag = [string]$release.tag_name }
@@ -192,7 +206,7 @@ function Install-Roost {
       elseif (-not $sumUrl -and $u -match $sumRe) { $sumUrl = $u }
     }
     if ($tag -and -not $zipUrl -and $arch -eq 'arm64') {
-      Fail ('Roost ' + $tag.TrimStart('v') + ' has no version for ARM64 PCs yet.')
+      Fail ('Roost ' + ($tag -replace '^windows-v', '') + ' has no version for ARM64 PCs yet.')
     }
     if (-not $tag -or -not $zipUrl -or -not $sumUrl) {
       Fail "the latest release doesn't have the files this installer expects."

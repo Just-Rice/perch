@@ -876,7 +876,7 @@ test('Control Center: every flow in a real browser', { skip: !existsSync(CHROME)
     await click(page, '#checkUpdatesBtn');
     await waitFor(page, `/Couldn't check/.test(document.getElementById('updateStatus').textContent)`, 'offline update check');
     mock.setOffline(false);
-    const url = 'https://github.com/Just-Rice/roost/releases/tag/v0.2.0';
+    const url = 'https://github.com/Just-Rice/perch/releases/tag/v0.2.0';
     mock.setAvailableUpdate({ version: '0.2.0', url, notes: 'Smoother video on slow networks.' });
     await click(page, '#checkUpdatesBtn');
     await waitFor(page, `!document.getElementById('updateBox').hidden`);
@@ -889,7 +889,7 @@ test('Control Center: every flow in a real browser', { skip: !existsSync(CHROME)
     // A link anywhere else is never offered.
     mock.raw.update = { ...mock.raw.update, url: 'https://evil.example/release' };
     mock.changed();
-    await waitFor(page, `document.getElementById('updateLink').href === 'https://github.com/Just-Rice/roost/releases'`);
+    await waitFor(page, `document.getElementById('updateLink').href === 'https://github.com/Just-Rice/perch/releases'`);
     await click(page, '#installUpdateBtn');
     await until(() => mock.callsOf('installUpdate').length === 1, 'install requested');
     await waitFor(page, `/Updating/.test(document.getElementById('updateStatus').textContent)`);

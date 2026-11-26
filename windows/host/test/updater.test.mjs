@@ -7,12 +7,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   checkForUpdate, installUpdate, installCommand, installedVersion, powershellPath, parseVersion, compareVersions,
-  LATEST_RELEASE_API, INSTALL_SCRIPT_URL,
+  RELEASES_API, INSTALL_SCRIPT_URL,
 } from '../src/updater.mjs';
 
 const release = (over = {}) => ({
-  tag_name: 'v0.2.0',
-  html_url: 'https://github.com/Just-Rice/roost/releases/tag/v0.2.0',
+  tag_name: 'windows-v0.2.0',
+  html_url: 'https://github.com/Just-Rice/perch/releases/tag/windows-v0.2.0',
   draft: false,
   prerelease: false,
   body: 'Smoother video on slow networks.\r\n\r\nFixes a crash when a display is unplugged.',
@@ -37,6 +37,8 @@ function fakeFetch(answer, status = 200) {
 }
 
 const quiet = () => {};
+// GitHub's answer: a list of releases, newest first (Perch's and Roost's mixed).
+const one = (over) => [release(over)];
 
 test('versions compare the SemVer way', () => {
   // The ordering example from semver.org §11, plus some of our own.
@@ -58,50 +60,58 @@ test('versions compare the SemVer way', () => {
 });
 
 test('a newer release is offered, with its page and short notes', async () => {
-  const f = fakeFetch(release());
+  const f = fakeFetch(one());
   const u = await checkForUpdate('0.1.0', { fetchImpl: f, log: quiet });
   assert.deepEqual(u, {
     version: '0.2.0',
-    url: 'https://github.com/Just-Rice/roost/releases/tag/v0.2.0',
+    url: 'https://github.com/Just-Rice/perch/releases/tag/windows-v0.2.0',
     notes: 'Smoother video on slow networks.\n\nFixes a crash when a display is unplugged.',
   });
   assert.equal(f.calls.length, 1);
-  assert.equal(f.calls[0].url, LATEST_RELEASE_API);
-  assert.equal(LATEST_RELEASE_API, 'https://api.github.com/repos/Just-Rice/roost/releases/latest');
+  assert.equal(f.calls[0].url, RELEASES_API);
+  assert.equal(RELEASES_API, 'https://api.github.com/repos/Just-Rice/perch/releases?per_page=50');
   const headers = f.calls[0].opts.headers;
   assert.match(headers['User-Agent'], /^Roost\/0\.1\.0 /);
   assert.equal(headers.Accept, 'application/vnd.github+json');
   assert.ok(f.calls[0].opts.signal instanceof AbortSignal, 'has a timeout');
   // A release after a pre-release of the same version counts as newer.
-  assert.equal((await checkForUpdate('0.2.0-beta.3', { fetchImpl: fakeFetch(release()), log: quiet }))?.version, '0.2.0');
+  assert.equal((await checkForUpdate('0.2.0-beta.3', { fetchImpl: fakeFetch(one()), log: quiet }))?.version, '0.2.0');
   // Two-digit parts compare as numbers, not text.
-  assert.equal((await checkForUpdate('0.9.0', { fetchImpl: fakeFetch(release({ tag_name: 'v0.10.0' })), log: quiet }))?.version, '0.10.0');
+  assert.equal((await checkForUpdate('0.9.0', { fetchImpl: fakeFetch(one({ tag_name: 'windows-v0.10.0' })), log: quiet }))?.version, '0.10.0');
   // A tag without the v, and with build metadata.
-  assert.equal((await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ tag_name: '0.3.1+win' })), log: quiet }))?.version, '0.3.1');
+  assert.equal((await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(one({ tag_name: 'windows-0.3.1+win' })), log: quiet }))?.version, '0.3.1');
 });
 
 test('the same or an older release is no update', async () => {
-  assert.equal(await checkForUpdate('0.2.0', { fetchImpl: fakeFetch(release()), log: quiet }), null);
-  assert.equal(await checkForUpdate('v0.2.0', { fetchImpl: fakeFetch(release()), log: quiet }), null);
-  assert.equal(await checkForUpdate('0.3.0', { fetchImpl: fakeFetch(release()), log: quiet }), null);
-  assert.equal(await checkForUpdate('1.0.0', { fetchImpl: fakeFetch(release({ tag_name: 'v0.10.0' })), log: quiet }), null);
+  assert.equal(await checkForUpdate('0.2.0', { fetchImpl: fakeFetch(one()), log: quiet }), null);
+  assert.equal(await checkForUpdate('v0.2.0', { fetchImpl: fakeFetch(one()), log: quiet }), null);
+  assert.equal(await checkForUpdate('0.3.0', { fetchImpl: fakeFetch(one()), log: quiet }), null);
+  assert.equal(await checkForUpdate('1.0.0', { fetchImpl: fakeFetch(one({ tag_name: 'windows-v0.10.0' })), log: quiet }), null);
+});
+
+test('Perch\'s releases are passed over for the newest of Roost\'s own', async () => {
+  const mixed = [release({ tag_name: 'v0.6.0', html_url: 'https://github.com/Just-Rice/perch/releases/tag/v0.6.0' }),
+    release({ tag_name: 'windows-v0.4.0-beta.1', prerelease: true }), release({ tag_name: 'windows-v0.3.0' }), release()];
+  assert.equal((await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(mixed), log: quiet }))?.version, '0.3.0');
+  assert.equal(await checkForUpdate('0.1.0', { fetchImpl: fakeFetch([release({ tag_name: 'v0.6.0' })]), log: quiet }), null);
+  assert.equal(await checkForUpdate('0.1.0', { fetchImpl: fakeFetch([]), log: quiet }), null);
 });
 
 test('drafts and pre-releases are ignored', async () => {
-  assert.equal(await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ prerelease: true })), log: quiet }), null);
-  assert.equal(await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ draft: true })), log: quiet }), null);
+  assert.equal(await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(one({ prerelease: true })), log: quiet }), null);
+  assert.equal(await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(one({ draft: true })), log: quiet }), null);
 });
 
 test('strange answers and network trouble are "no update", never an error', async () => {
   const logs = [];
   const log = (m) => logs.push(m);
   const cases = {
-    'no tag': release({ tag_name: undefined }),
-    'tag not a version': release({ tag_name: 'nightly' }),
-    'tag a number': release({ tag_name: 3 }),
-    'an array': [release()],
+    'no tag': one({ tag_name: undefined }),
+    'tag not a version': one({ tag_name: 'windows-nightly' }),
+    'tag a number': one({ tag_name: 3 }),
+    'one release, not a list': release(),
     'null': null,
-    'a string': 'v0.2.0',
+    'a string': 'windows-v0.2.0',
   };
   for (const [what, answer] of Object.entries(cases)) {
     assert.equal(await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(answer), log }), null, what);
@@ -118,7 +128,7 @@ test('strange answers and network trouble are "no update", never an error', asyn
   // fetch itself missing or throwing synchronously.
   assert.equal(await checkForUpdate('0.1.0', { fetchImpl: () => { throw new Error('boom'); }, log }), null);
   // Our own version unreadable: don't even ask.
-  const f = fakeFetch(release());
+  const f = fakeFetch(one());
   assert.equal(await checkForUpdate('dev', { fetchImpl: f, log }), null);
   assert.equal(f.calls.length, 0);
   assert.ok(logs.length >= 10, 'each problem was logged');
@@ -146,16 +156,16 @@ test('a slow GitHub times out instead of hanging', async () => {
 
 test('notes are cut to about 500 characters and links stay on our release pages', async () => {
   const words = Array.from({ length: 300 }, (_, i) => `word${i}`).join(' ');
-  const u = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ body: words })), log: quiet });
+  const u = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(one({ body: words })), log: quiet });
   assert.ok(u.notes.length <= 501, `${u.notes.length} characters`);
   assert.ok(u.notes.length > 300);
   assert.ok(u.notes.endsWith('…'));
   assert.match(u.notes, /word\d+…$/, 'cut between words');
-  const empty = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ body: null })), log: quiet });
+  const empty = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(one({ body: null })), log: quiet });
   assert.equal(empty.notes, '');
-  for (const html_url of ['https://evil.example/roost', 'javascript:alert(1)', 'https://github.com/Someone-Else/roost/releases/tag/v0.2.0', undefined]) {
-    const r = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(release({ html_url })), log: quiet });
-    assert.equal(r.url, 'https://github.com/Just-Rice/roost/releases/tag/v0.2.0', String(html_url));
+  for (const html_url of ['https://evil.example/roost', 'javascript:alert(1)', 'https://github.com/Someone-Else/perch/releases/tag/windows-v0.2.0', undefined]) {
+    const r = await checkForUpdate('0.1.0', { fetchImpl: fakeFetch(one({ html_url })), log: quiet });
+    assert.equal(r.url, 'https://github.com/Just-Rice/perch/releases/tag/windows-v0.2.0', String(html_url));
   }
 });
 
@@ -185,7 +195,7 @@ test('the install script: install.ps1 from the installed copy, or else from the 
     assert.ok(args[5].includes(`DownloadString('${INSTALL_SCRIPT_URL}')`));
     assert.match(args[5], /\) -Update$/, 'run with -Update');
   }
-  assert.equal(INSTALL_SCRIPT_URL, 'https://just-rice.github.io/roost/install.ps1');
+  assert.equal(INSTALL_SCRIPT_URL, 'https://just-rice.github.io/perch/windows/install.ps1');
 });
 
 test('installUpdate starts the install script detached and lets go of it', () => {

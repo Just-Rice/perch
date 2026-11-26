@@ -1,11 +1,17 @@
-# Builds and publishes a release when a version tag is pushed (git tag v0.2.0 && git push origin v0.2.0):
-# Roost-<version>-win-x64.zip and -win-arm64.zip with their checksums, which install.ps1 and the update check use.
-# Tags with a suffix (v0.2.0-alpha.1) become pre-releases, installed only by name.
-name: Release
+# Roost, the Windows version: builds and publishes a release when a windows- version tag is pushed
+# (git tag windows-v0.2.0 && git push origin windows-v0.2.0): Roost-<version>-win-x64.zip and -win-arm64.zip with
+# their checksums, which install.ps1 and the update check use. Tags with a suffix (windows-v0.2.0-alpha.1) become
+# pre-releases, installed only by name. A Roost release is never marked "latest": that stays Perch's (the Mac's
+# updater and install.sh use it), and Roost finds its own releases by their windows- tag.
+name: Windows release
 
 on:
   push:
-    tags: ['v*']
+    tags: ['windows-v*']
+
+defaults:
+  run:
+    working-directory: windows
 
 permissions:
   contents: write
@@ -30,11 +36,11 @@ jobs:
         shell: pwsh
         run: |
           $v = (Get-Content host/package.json -Raw | ConvertFrom-Json).version
-          if ("v$v" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} but host/package.json says $v (run scripts/set-version.mjs)" }
+          if ("windows-v$v" -ne "${{ github.ref_name }}") { throw "tag ${{ github.ref_name }} but host/package.json says $v (run scripts/set-version.mjs)" }
       - run: npm ci
-        working-directory: host
+        working-directory: windows/host
       - name: Build roost.exe
-        working-directory: app
+        working-directory: windows/app
         run: cargo build --release --target ${{ matrix.target }}
       - name: Package
         shell: pwsh
@@ -42,11 +48,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: release-${{ matrix.arch }}
-          path: dist/Roost-*
+          path: windows/dist/Roost-*
 
   publish:
     needs: build
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -58,6 +67,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="${{ github.ref_name }}"
+          v="${tag#windows-v}"
           pre=""
-          case "$tag" in *-*) pre="--prerelease";; esac
-          gh release create "$tag" dist/Roost-* --repo "${{ github.repository }}" --title "Roost ${tag#v}" --generate-notes $pre
+          case "$v" in *-*) pre="--prerelease";; esac
+          gh release create "$tag" dist/Roost-* --repo "${{ github.repository }}" --title "Roost $v (Windows)" --latest=false $pre \
+            --notes "Install or update, in PowerShell: \`irm https://just-rice.github.io/perch/windows/install.ps1 | iex\`"

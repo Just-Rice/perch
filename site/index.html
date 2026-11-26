@@ -11,7 +11,15 @@
 <meta property="og:description" content="See and use your Mac from any browser. Free, open source, no account, no servers in between.">
 <meta property="og:image" content="https://just-rice.github.io/perch/img/og.png">
 <link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<meta name="perch-platform" content="mac">
+<link rel="manifest" href="app.webmanifest">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Perch">
 <link rel="stylesheet" href="css/perch.css">
+<link rel="stylesheet" href="css/platform.css">
+<script src="js/platform.js"></script>
 </head>
 <body>
 <canvas class="cipher" id="cipher" aria-hidden="true"></canvas>
@@ -38,6 +46,7 @@
         <a class="btn primary" href="connect.html">Connect to my Mac</a>
         <a class="btn" href="#install">Install on a Mac</a>
       </div>
+      <p class="fine">Have a Windows PC? <a href="windows/">Roost</a> is Perch for Windows: the same, for your PC.</p>
       <p class="fine">Prefer a tab that doesn't show this address?
         <button type="button" class="btn quiet" id="openBlank">Open in an about:blank tab</button></p>
       <p class="fine" id="blankStatus" role="status"></p>

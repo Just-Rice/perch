@@ -494,7 +494,7 @@ if (import.meta.main) {
   const port = args.includes('--port') ? Number(args[args.indexOf('--port') + 1]) : 0;
   const { controller, mock } = await createMockController();
   if (args.includes('--full')) fillMock(mock);
-  mock.setAvailableUpdate({ version: '0.2.0', url: 'https://github.com/Just-Rice/roost/releases/tag/v0.2.0', notes: 'Smoother video on slow networks.' });
+  mock.setAvailableUpdate({ version: '0.2.0', url: 'https://github.com/Just-Rice/perch/releases/tag/v0.2.0', notes: 'Smoother video on slow networks.' });
   const srv = await startSetupServer({ controller, port, log: (m) => console.error(m) });
   console.log(`Control Center (mock PC) at ${srv.url}`);
   console.log('Ctrl-C to stop.');

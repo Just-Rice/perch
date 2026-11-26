@@ -8,7 +8,7 @@
 
 This is the contract between the three parts of Perch:
 
-- **the website** (`site/`, served from `https://just-rice.github.io/roost/`): the viewer;
+- **the website** (`site/`, served from `https://just-rice.github.io/perch/windows/`): the viewer;
 - **the Mac app** (`host/app/`, Swift): screen and sound capture, video encoding, input, menu bar, login item;
 - **the Mac host** (`host/`, Node.js, a child process of the app): rendezvous, WebRTC, sign-in, Setup page.
 
@@ -448,7 +448,7 @@ the host restarts Perch itself, only into a copy signed like the running one (it
 Accessibility). With `autoUpdate` on, a new release is installed the same way, while idle. Neither is tried again
 for the same version for 30 minutes (restart) or 6 hours (update).
 
-Pairing links look like `https://just-rice.github.io/roost/connect.html#pair=<b64url(hostId ‖ sigKey ‖ pairId ‖ pairSecret ‖ pin)>`
+Pairing links look like `https://just-rice.github.io/perch/windows/connect.html#pair=<b64url(hostId ‖ sigKey ‖ pairId ‖ pairSecret ‖ pin)>`
 (the pin is missing from links made by Perch 0.1) and expire after 10 minutes.
 
 ## Test mode

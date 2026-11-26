@@ -5,7 +5,7 @@ import { confirmInline } from '../lib/confirm.js';
 import { normalizeMacName, CUSTOM_MAC_NAME_RE } from '../lib/names.js';
 
 // "What's new" only ever links to a release page of Roost (or of Perch, which it grew out of).
-const REPOS = ['https://github.com/Just-Rice/roost/releases', 'https://github.com/Just-Rice/perch/releases'];
+const REPOS = ['https://github.com/Just-Rice/perch/releases', 'https://github.com/Just-Rice/perch/releases'];
 const safeReleaseUrl = (url) => (typeof url === 'string' && REPOS.some(r => url.startsWith(`${r}/`)) ? url : REPOS[0]);
 
 // "10.0.22631" -> "Windows 11 (build 22631)"; builds from 22000 on are Windows 11.

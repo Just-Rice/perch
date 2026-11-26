@@ -1,4 +1,5 @@
-// Updates: asks GitHub whether a newer Roost has been released, and installs it with the same PowerShell script people
+// Updates: asks GitHub whether a newer Roost has been released (Roost lives in Perch's repository, under windows/, and
+// its releases are the ones tagged windows-v<version>; the others are Perch's, for the Mac), and installs it with the same PowerShell script people
 // used to install Roost in the first place (install.ps1: it downloads the release zip for this PC's processor
 // (Roost-<version>-win-x64.zip or -win-arm64.zip), checks it against its .sha256, quits Roost, replaces it and starts
 // it again).
@@ -9,10 +10,12 @@ import { existsSync, readFile } from 'node:fs';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 
-export const REPO = 'Just-Rice/roost';
-export const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
+export const REPO = 'Just-Rice/perch';
+// The newest releases first. Perch's and Roost's are mixed, and "latest" is always Perch's, so Roost picks out its own.
+export const RELEASES_API = `https://api.github.com/repos/${REPO}/releases?per_page=50`;
 export const RELEASES_PAGE = `https://github.com/${REPO}/releases`;
-export const SITE = 'https://just-rice.github.io/roost/';
+export const TAG_PREFIX = 'windows-';
+export const SITE = 'https://just-rice.github.io/perch/windows/';
 // Used when the installed copy has no install.ps1 beside it (an older or hand-made install).
 export const INSTALL_SCRIPT_URL = `${SITE}install.ps1`;
 const TIMEOUT_MS = 10_000;
@@ -73,16 +76,16 @@ function releasePage(release, tag) {
   return `${RELEASES_PAGE}/tag/${encodeURIComponent(tag)}`;
 }
 
-// Resolves to {version, url, notes} when GitHub's latest release is newer than `currentVersion`, otherwise null.
+// Resolves to {version, url, notes} when Roost's newest release is newer than `currentVersion`, otherwise null.
 export async function checkForUpdate(currentVersion, { fetchImpl = globalThis.fetch, log = defaultLog, timeoutMs = TIMEOUT_MS } = {}) {
   const current = parseVersion(currentVersion);
   if (!current) {
     log(`updater: this copy's version "${currentVersion}" isn't a version number; not checking`);
     return null;
   }
-  let release;
+  let releases;
   try {
-    const res = await fetchImpl(LATEST_RELEASE_API, {
+    const res = await fetchImpl(RELEASES_API, {
       headers: {
         'User-Agent': `Roost/${currentVersion} (+${SITE})`,
         Accept: 'application/vnd.github+json',
@@ -96,25 +99,31 @@ export async function checkForUpdate(currentVersion, { fetchImpl = globalThis.fe
       log(`updater: GitHub answered ${res.status}`);
       return null;
     }
-    release = await res.json();
+    releases = await res.json();
   } catch (e) {
     log(`updater: couldn't check for updates (${e?.name === 'TimeoutError' ? 'timed out' : e?.message || e})`);
     return null;
   }
-  if (!release || typeof release !== 'object' || Array.isArray(release)) {
-    log('updater: GitHub sent something that isn\'t a release');
+  if (!Array.isArray(releases)) {
+    log('updater: GitHub sent something that isn\'t a list of releases');
     return null;
   }
-  if (release.draft || release.prerelease) return null;
-  const tag = typeof release.tag_name === 'string' ? release.tag_name.trim() : '';
-  const latest = parseVersion(tag);
+  // The newest of Roost's own releases (drafts and pre-releases aside).
+  const release = releases.find(r => r && typeof r === 'object' && !r.draft && !r.prerelease
+    && typeof r.tag_name === 'string' && r.tag_name.trim().startsWith(TAG_PREFIX));
+  if (!release) {
+    log('updater: no Roost release yet');
+    return null;
+  }
+  const tag = release.tag_name.trim();
+  const latest = parseVersion(tag.slice(TAG_PREFIX.length));
   if (!latest) {
     log(`updater: the latest release's tag "${tag.slice(0, 40)}" isn't a version number`);
     return null;
   }
   if (compareVersions(latest, current) <= 0) return null;
   return {
-    version: tag.replace(/^v/, '').replace(/\+.*$/, ''),
+    version: tag.slice(TAG_PREFIX.length).replace(/^v/, '').replace(/\+.*$/, ''),
     url: releasePage(release, tag),
     notes: shortNotes(release.body),
   };

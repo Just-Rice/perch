@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0d1015">
+<meta name="perch-platform" content="mac">
+<title>Perch</title>
+<link rel="manifest" href="app.webmanifest">
+<link rel="icon" href="img/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="img/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Perch">
+<link rel="stylesheet" href="css/perch.css">
+<link rel="stylesheet" href="css/platform.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="site">
+    <a class="brand" href="./">
+      <img src="img/icon.svg" alt="" width="30" height="30">
+      Perch
+    </a>
+  </header>
+  <main id="choose" class="chooser" hidden>
+    <h1>Which computer?</h1>
+    <p class="lead">Pick the one you want to reach. You can change it any time with the switch at the top.</p>
+    <div class="actions">
+      <a class="btn primary" href="connect.html" data-choose="mac">My Mac</a>
+      <a class="btn" href="windows/connect.html" data-choose="windows">My Windows PC</a>
+    </div>
+  </main>
+</div>
+</body>
+</html>

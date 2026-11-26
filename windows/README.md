@@ -4,8 +4,8 @@
 browser: the screen, the sound, the mouse and the keyboard. Free and open source, with no account and no servers in
 between.
 
-**[just-rice.github.io/roost](https://just-rice.github.io/roost/)** ·
-[Connect](https://just-rice.github.io/roost/connect.html) · [Security](SECURITY.md)
+**[just-rice.github.io/perch/windows](https://just-rice.github.io/perch/windows/)** ·
+[Connect](https://just-rice.github.io/perch/windows/connect.html) · [Security](SECURITY.md)
 
 - **Phones, tablets and computers:** touch, touchpad mode, mouse, keyboard and sound, with a Key deck for the keys a
   phone doesn't have (Win, Alt+Tab, Ctrl+Shift+Esc, F-keys…).
@@ -21,14 +21,15 @@ between.
 - **Windows 10 (1903 or later) and Windows 11, on x64 and ARM64.** No administrator rights needed to install.
 
 > Roost is built on **[Perch](https://github.com/Just-Rice/perch) by [Just-Rice](https://github.com/Just-Rice)**,
-> the Mac original, and shares its protocol and security model. It is a **beta**. See [Credits](#credits).
+> the Mac original, and shares its protocol and security model. It lives in Perch's repository, in `windows/`, and
+> on Perch's website; its releases are the ones tagged `windows-v…`. It is a **beta**. See [Credits](#credits).
 
 ## Install
 
 Open **PowerShell** (Start › type "PowerShell"), paste this line and press Enter:
 
 ```
-irm https://just-rice.github.io/roost/install.ps1 | iex
+irm https://just-rice.github.io/perch/windows/install.ps1 | iex
 ```
 
 It downloads the latest release for your PC's processor from this repository, checks it against its published
@@ -40,24 +41,24 @@ through the rest:
 2. **Pairing your first device.** Scan the code the Control Center shows. Your device makes a passkey, then asks for
    a 6-digit code.
 
-After that, open [the website](https://just-rice.github.io/roost/connect.html) on that device to sign in.
+After that, open [the website](https://just-rice.github.io/perch/windows/connect.html) on that device to sign in.
 
 **Why PowerShell?** Roost isn't signed with a paid code-signing certificate, so Windows SmartScreen warns about it
 when it's downloaded in a browser. Prefer the zip? Download `Roost-x.y.z-win-x64.zip` (or `-arm64`) from the
-[latest release](https://github.com/Just-Rice/roost/releases/latest), unzip it and run `install.ps1`, or
+[latest Windows release](https://github.com/Just-Rice/perch/releases?q=windows-v&expanded=true), unzip it and run `install.ps1`, or
 choose **More info › Run anyway** when SmartScreen asks.
 
 **Needs:** Windows 10 version 1903 or later (2004 or later for the privacy curtain and for sound without echo), a
 recent Safari, Chrome, Edge or Firefox on the viewing device, and the PC on, awake and signed in.
 
 **Uninstall:** the Control Center's **Uninstall Roost** button, or
-`irm https://just-rice.github.io/roost/uninstall.ps1 | iex`.
+`irm https://just-rice.github.io/perch/windows/uninstall.ps1 | iex`.
 
 ## How it works
 
 ```
  your browser                       public message services                  your PC
- (just-rice.github.io/roost)     (MQTT, sealed notes only)                (Roost, in the tray)
+ (just-rice.github.io/perch/windows)     (MQTT, sealed notes only)                (Roost, in the tray)
         │   "here's how to reach me"  ──────────────►  ◄────────────────────────  │
         │                                                                        │
         └──────────── direct, encrypted WebRTC connection (screen, sound, input) ┘
@@ -80,7 +81,7 @@ the Windows app's side of it, [docs/BRAND.md](docs/BRAND.md) Roost's look and wo
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md). In short, on Windows with Rust and Node.js 22+:
 
 ```
-git clone https://github.com/Just-Rice/roost && cd roost
+git clone https://github.com/Just-Rice/perch && cd perch/windows
 (cd host && npm ci)
 cd app && cargo build --release
 target\release\roost.exe --node node --host ..\host\src\main.mjs

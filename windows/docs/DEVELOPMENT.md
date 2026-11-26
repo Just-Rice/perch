@@ -58,15 +58,18 @@ node --test --test-concurrency=1 tests/e2e/full.test.mjs               # website
 node --test --test-concurrency=1 tests/e2e/app.test.mjs                # + the real roost.exe (--synthetic)
 ```
 
-CI (`.github/workflows/ci.yml`) runs all of these on GitHub's Windows runners, x64 and ARM64.
+CI (`.github/workflows/windows-ci.yml`, at the top of Perch's repository) runs all of these on GitHub's Windows runners, x64 and ARM64.
 
 ## Releases
 
-1. `node scripts/set-version.mjs 0.2.0`, commit.
-2. `git tag v0.2.0 && git push origin main v0.2.0`.
-3. `.github/workflows/release.yml` builds roost.exe for x64 and ARM64, bundles the host and the official Node.js
+Roost's releases live beside Perch's, in Perch's repository, tagged `windows-v<version>` (Perch's are `v<version>`).
+
+1. In `windows/`: `node scripts/set-version.mjs 0.2.0`, commit.
+2. `git tag windows-v0.2.0 && git push origin main windows-v0.2.0`.
+3. `.github/workflows/windows-release.yml` builds roost.exe for x64 and ARM64, bundles the host and the official Node.js
    (checksum-checked), and publishes `Roost-0.2.0-win-x64.zip` / `-win-arm64.zip` with `.sha256` files. `install.ps1`
-   and the update check pick them up. A tag with a suffix (`v0.2.0-alpha.1`) is a pre-release.
+   and the update check pick them up. A tag with a suffix (`windows-v0.2.0-alpha.1`) is a pre-release.
+   Roost's releases are never marked "latest": that is Perch's, which the Mac's updater and `install.sh` use.
 
 Code signing: Roost is unsigned for now. A code-signing certificate would remove SmartScreen's warning; add it as a
-signing step in release.yml (`signtool sign`) before packaging.
+signing step in windows-release.yml (`signtool sign`) before packaging.

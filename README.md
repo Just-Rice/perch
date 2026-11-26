@@ -15,6 +15,12 @@ sound, the mouse and keyboard. Free and open source, with no account and no serv
 - **Strict Wi-Fi:** an optional relay in a free Cloudflare account of your own, for school and office networks: either
   Cloudflare's TURN service, or a small Worker you deploy ([relay/](relay/README.md)) that needs no payment details.
 - **Apple silicon and Intel Macs.**
+- **On your home screen:** add the website to a phone's or tablet's home screen (Android: Install; iPhone and iPad:
+  Share › Add to Home Screen) and it opens full screen, like an app.
+
+**Have a Windows PC?** [Roost](windows/README.md), in [windows/](windows/), is Perch for Windows: the same website
+(at [just-rice.github.io/perch/windows](https://just-rice.github.io/perch/windows/)), the same sign-in and protocol,
+with a native Windows app. The switch at the top of every page goes between the two.
 
 > Perch is a **beta**, so far tested on one Mac. Please [report problems](https://github.com/Just-Rice/perch/issues).
 

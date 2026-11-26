@@ -1,10 +1,11 @@
-# Publishes the website (the site/ folder) to https://just-rice.github.io/perch/ whenever it changes on main.
+# Publishes the website to https://just-rice.github.io/perch/ whenever it changes on main: Perch's (site/) at /perch/
+# and Roost's, for Windows (windows/site/), at /perch/windows/.
 name: Pages
 
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    paths: ['site/**', 'windows/site/**', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
@@ -25,8 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: actions/configure-pages@v5
+      - name: Put the two websites together
+        run: |
+          mkdir -p _site/windows
+          cp -R site/. _site/
+          cp -R windows/site/. _site/windows/
       - uses: actions/upload-pages-artifact@v4
         with:
-          path: site
+          path: _site
       - id: deploy
         uses: actions/deploy-pages@v4

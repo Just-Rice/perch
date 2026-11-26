@@ -270,13 +270,13 @@ export class Store {
     this.save();
   }
 
-  // A second relay holding the same secret (relay/node behind a tunnel), used while the first can't be reached.
+  // A second relay holding the same secret (core/relay/node behind a tunnel), used while the first can't be reached.
   get workerRelayBackup() { return this.config.workerRelayBackup ?? null; }
   setWorkerRelayBackup(url) {
     this.config.workerRelayBackup = url ?? null;
     this.save();
   }
-  // A relay on this PC (relay/node with QUICK_TUNNEL=1) whose public address changes; asked for it when needed.
+  // A relay on this PC (core/relay/node with QUICK_TUNNEL=1) whose public address changes; asked for it when needed.
   get workerRelayTunnel() { return this.config.workerRelayTunnel ?? null; }
   setWorkerRelayTunnel(url) {
     this.config.workerRelayTunnel = url ?? null;

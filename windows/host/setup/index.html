@@ -642,7 +642,7 @@
             <li>On any computer with <a href="https://nodejs.org" target="_blank" rel="noopener">Node.js</a>, open a terminal
               (PowerShell on Windows) and run:
               <pre class="code">git clone https://github.com/Just-Rice/perch
-cd perch/windows/relay
+cd perch/core/relay
 npx wrangler login
 npx wrangler deploy</pre></li>
             <li>Wrangler prints the relay's address, such as <i>https://roost-relay.your-name.workers.dev</i>. Paste it below.</li>
@@ -671,7 +671,7 @@ npx wrangler deploy</pre></li>
         <!-- Backups for the Worker relay: shown once it is set up -->
         <div class="backups" id="relayBackups" hidden>
           <h3>If the Worker relay is down</h3>
-          <p class="small muted">A copy of the relay running on a computer that stays on (relay/node in Roost's source),
+          <p class="small muted">A copy of the relay running on a computer that stays on (core/relay/node in the source),
             started with the Worker relay's secret. Your PC uses it only when the Worker can't be reached, for example after
             a day's free allowance is used up.</p>
           <div class="backup-item" id="backupRelayItem">

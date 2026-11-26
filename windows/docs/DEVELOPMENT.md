@@ -8,7 +8,7 @@
 | `host/` | The host (Node.js): `src/` rendezvous, WebRTC, sign-in, Control Center server; `setup/` the Control Center page; `test/` |
 | `site/` | The website (GitHub Pages): front page, `connect.html` sign-in and viewer, `install.ps1`, `uninstall.ps1` |
 | `site/js/shared/` | Code shared by the website and the host: MQTT, sealed rendezvous, channel binding, constants |
-| `relay/` | The optional Cloudflare Worker relay, and `relay/node/` its Node.js backup |
+| `relay/` | The optional Cloudflare Worker relay, and `core/relay/node/` its Node.js backup |
 | `scripts/` | `set-version.mjs`, `package.ps1` (the release zip) |
 | `tests/site/`, `tests/e2e/` | Website tests; end to end (website + host + stand-in app, or + the real roost.exe) |
 | `docs/` | `PROTOCOL.md` (the contract between the parts), `WINDOWS-APP.md` (roost.exe's side), `BRAND.md` |

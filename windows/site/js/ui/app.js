@@ -47,7 +47,7 @@ export function start() {
   const forced = env.test ? env.params.get('device') : null;
   app.passkeyFriendly = forced === 'chromebook' ? Promise.resolve(false) : forced === 'passkey' ? Promise.resolve(true)
     : platformAuthenticatorAvailable().then(platformAuthenticator => passkeyFriendly(ua, { platformAuthenticator }));
-  // Asked once, straight away: is this copy of the site served by a PC owner's own relay (relay/)?
+  // Asked once, straight away: is this copy of the site served by a PC owner's own relay (core/relay/)?
   app.ownBroker = ownRelayBroker(env);
   // Tests and the demo look inside through this; the real site never sets it.
   if (env.test || env.demo) window.__roost = app;

@@ -2,15 +2,22 @@
 
 ## Layout
 
+The repository holds Perch (for a Mac) in `mac/`, Roost (for Windows) in `windows/` (see
+[windows/docs/DEVELOPMENT.md](../windows/docs/DEVELOPMENT.md)), and what the two share in `core/`.
+
 | Path | What |
 |---|---|
-| `site/` | The website (GitHub Pages): `index.html` front page, `connect.html` sign-in and viewer, `install.sh`, `uninstall.sh` |
-| `site/js/shared/` | Code shared by the website and the host: MQTT client, sealed rendezvous, channel binding, constants |
-| `host/app/` | The Swift menu bar app (SwiftPM; Command Line Tools only) |
-| `host/node/` | The host: `src/` (rendezvous, WebRTC, sign-in, Setup server), `setup/` (the Setup page), `test/` |
-| `host/scripts/` | `make-app.sh` (assemble Perch.app), `set-version.sh`, signing helpers |
-| `tests/site/` | Website tests (unit and headless Chrome) |
-| `tests/e2e/` | End to end: `full.test.mjs` (website + host + stand-in app), `app.test.mjs` (website + host + real app) |
+| `core/protocol/` | The protocol, the same for Perch and Roost: MQTT client, sealed rendezvous, channel binding, constants |
+| `core/site/` | The parts of the two websites that are the same: the "Mac · Windows" switch and the home-screen offer |
+| `core/relay/` | The Worker relay (and `node/`, its Node.js backup), one for Perch and Roost alike |
+| `core/sync.mjs` | Copies `core/protocol/` and `core/site/` into both projects; `--check` (in CI) makes sure they match |
+| `mac/site/` | The website (GitHub Pages): `index.html` front page, `connect.html` sign-in and viewer, `install.sh`, `uninstall.sh` |
+| `mac/site/js/shared/` | Perch's copy of `core/protocol/` (change it there, then `node core/sync.mjs`), and `product.js`: Perch's own website address and meeting points |
+| `mac/host/app/` | The Swift menu bar app (SwiftPM; Command Line Tools only) |
+| `mac/host/node/` | The host: `src/` (rendezvous, WebRTC, sign-in, Setup server), `setup/` (the Setup page), `test/` |
+| `mac/host/scripts/` | `make-app.sh` (assemble Perch.app), `set-version.sh`, signing helpers |
+| `mac/tests/site/` | Website tests (unit and headless Chrome) |
+| `mac/tests/e2e/` | End to end: `full.test.mjs` (website + host + stand-in app), `app.test.mjs` (website + host + real app) |
 | `docs/PROTOCOL.md` | The contract between the parts — change it first, then the code |
 
 ## Running the parts
@@ -43,7 +50,7 @@ no network) **only** on `localhost` / `127.0.0.1`. The host honours its test var
 ## Tests
 
 Nothing in the tests uses the public brokers, a real passkey or real input: there is a local MQTT broker
-(`tests/e2e/broker.mjs`), every Chrome tab gets a CDP virtual authenticator (`tests/e2e/cdp.mjs`), and the app runs
+(`mac/tests/e2e/broker.mjs`), every Chrome tab gets a CDP virtual authenticator (`mac/tests/e2e/cdp.mjs`), and the app runs
 with `--echo-input`.
 
 ```
@@ -54,18 +61,18 @@ swift build -c release --package-path host/app && node --test tests/e2e/app.test
 host/app/test/run.sh                                                      # the app: self-test, IPC, real capture, bundle
 ```
 
-`PERCH_E2E_APP=/path/to/Perch.app node --test tests/e2e/app.test.mjs` runs the last end-to-end test against a
+`PERCH_E2E_APP=/path/to/Perch.app node --test mac/tests/e2e/app.test.mjs` runs the last end-to-end test against a
 packaged app (its bundled Node and host). Long browser runs: prefix with `caffeinate -i` so the Mac doesn't sleep.
 
 ## Releases
 
-1. `host/scripts/set-version.sh 0.2.0` (updates Info.plist, the app's fallback version and host/node/package.json).
+1. `mac/host/scripts/set-version.sh 0.2.0` (updates Info.plist, the app's fallback version and host/node/package.json).
 2. Commit, then `git tag v0.2.0 && git push origin main v0.2.0`.
 3. `.github/workflows/release.yml` builds Perch.app on GitHub's Mac, signs it with Perch's certificate
    (`PERCH_SIGNING_P12`, `PERCH_SIGNING_P12_PASSWORD` secrets), and publishes `Perch-0.2.0.zip` with its checksum.
    `install.sh` and the app's update check pick it up.
 
-**Test builds.** `host/scripts/alpha.sh` tags what is committed as the next version's test build (`v0.3.4-alpha.1`,
+**Test builds.** `mac/host/scripts/alpha.sh` tags what is committed as the next version's test build (`v0.3.4-alpha.1`,
 then `.2`, …), waits for the Release workflow to build and sign it and publish it as a pre-release, and installs it on
 this Mac once nobody is connected (`--now` doesn't wait, `--no-install` only publishes). Signed with Perch's
 certificate, a test build keeps Perch's permissions, unlike a local `make-app.sh` build. Pre-releases are installed
@@ -73,6 +80,6 @@ only by name (`PERCH_VERSION=0.3.4-alpha.1` before `bash` in the install command
 check; the next full release (0.3.4) counts as newer, so a Mac on a test build is offered it as usual. Website changes
 in a test build go live only when `main` is pushed.
 
-**The signing certificate** is a long-lived self-signed code-signing certificate (`host/scripts/signing-cert.sh`).
+**The signing certificate** is a long-lived self-signed code-signing certificate (`mac/host/scripts/signing-cert.sh`).
 macOS ties Perch's permissions to it, so it must never change: a new certificate means every user grants the two
 permissions again. Keep the `.p12` and its password backed up somewhere safe, and never commit them.

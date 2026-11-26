@@ -1,7 +1,7 @@
 // Perch and Roost on one website: Perch (for a Mac) at /perch/, Roost (for a Windows PC) at /perch/windows/.
 //
-// This file is in both sites (site/js/ and windows/site/js/, the same file) and is loaded at the top of every page,
-// before the page is drawn. It:
+// Written once in core/site/js/ and copied into both sites (mac/site/js/, windows/site/js/) by core/sync.mjs. Loaded
+// at the top of every page, before the page is drawn, it:
 //   - remembers which of the two you use, so /perch/ takes someone who uses Roost straight to it;
 //   - puts a "Mac · Windows" switch in the page's header, to change at any time;
 //   - offers to add the website to a phone's or tablet's home screen, where it opens full screen like an app

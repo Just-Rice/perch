@@ -1,5 +1,5 @@
 # Builds Perch.app from the code in this repository and publishes it as a GitHub release, on GitHub's own Mac.
-# Run it by pushing a tag: host/scripts/set-version.sh 0.2.0, commit, `git tag v0.2.0`, `git push origin v0.2.0`.
+# Run it by pushing a tag: mac/host/scripts/set-version.sh 0.2.0, commit, `git tag v0.2.0`, `git push origin v0.2.0`.
 #
 # The release holds Perch-<version>.zip and Perch-<version>.zip.sha256, which install.sh downloads and checks.
 # With the PERCH_SIGNING_P12 / PERCH_SIGNING_P12_PASSWORD secrets set, the app is signed with Perch's own
@@ -20,6 +20,11 @@ permissions:
 
 env:
   NODE_FOR_APP: v24.22.0   # the official Node.js build shipped inside Perch.app
+
+
+defaults:
+  run:
+    working-directory: mac
 
 jobs:
   release:
@@ -45,13 +50,13 @@ jobs:
           echo "VERSION=$V" >> "$GITHUB_ENV"
 
       - name: Host tests (no browser)
-        working-directory: host/node
+        working-directory: mac/host/node
         run: |
           npm ci
           node --test --test-concurrency=1 $(ls test/*.test.mjs | grep -v -e browser -e chrome-smoke)
 
       - name: Bundle the host
-        working-directory: host/node
+        working-directory: mac/host/node
         run: node scripts/bundle.mjs
 
       - name: Build the app and run its self-test

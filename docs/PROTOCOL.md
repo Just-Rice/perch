@@ -2,12 +2,13 @@
 
 This is the contract between the three parts of Perch:
 
-- **the website** (`site/`, served from `https://just-rice.github.io/perch/`): the viewer;
-- **the Mac app** (`host/app/`, Swift): screen and sound capture, video encoding, input, menu bar, login item;
-- **the Mac host** (`host/node/`, Node.js, a child process of the app): rendezvous, WebRTC, sign-in, Setup page.
+- **the website** (`mac/site/`, served from `https://just-rice.github.io/perch/`): the viewer;
+- **the Mac app** (`mac/host/app/`, Swift): screen and sound capture, video encoding, input, menu bar, login item;
+- **the Mac host** (`mac/host/node/`, Node.js, a child process of the app): rendezvous, WebRTC, sign-in, Setup page.
 
-Protocol version: **1** (`PROTO` in `site/js/shared/proto.js`). Shared code for both website and host lives in
-`site/js/shared/` and must stay plain ES modules that run in browsers and in Node 22+.
+Protocol version: **1** (`PROTO` in `core/protocol/proto.js`). Shared code for both website and host lives in
+`core/protocol/` (shared with Roost, and copied into `mac/site/js/shared/` by `core/sync.mjs`) and must stay plain ES
+modules that run in browsers and in Node 22+.
 
 ## Identities and secrets (per Mac)
 
@@ -38,7 +39,7 @@ doesn't match the pin, so someone else holding `sigKey` (an old pairing link, a 
 
 Viewer and Mac meet through every broker in `BROKERS` (public MQTT 3.1.1 over secure WebSocket, QoS 0) at once.
 
-Topics (`site/js/shared/rendezvous.js`):
+Topics (`core/protocol/rendezvous.js`):
 
 - host topic `perch/v1/h/<b64url(SHA-256("perch topic v1" ‖ hostId))[0..22]>` — passkey sign-ins and pairing;
 - name topic `perch/v1/n/<b64url(SHA-256("perch name v1" ‖ utf8(normalized macName)))[0..22]>` — backup sign-in,
@@ -86,7 +87,7 @@ With the owner's own key (Turn Token ID and API token, kept with the secrets), t
 logins from
 `POST https://rtc.live.cloudflare.com/v1/turn/keys/<id>/credentials/generate-ice-servers` (cached until 12 h remain)
 and puts the TURN entries in the offer's `iceServers`. Both sides pass relay settings through
-`site/js/shared/relay.js` `cleanIceServers` (stun/turn/turns URLs only, no port 53, TURN entries need a login). The
+`core/protocol/relay.js` `cleanIceServers` (stun/turn/turns URLs only, no port 53, TURN entries need a login). The
 viewer adds them to its own STUN servers, so on a network that blocks direct connections its browser reaches the Mac
 through `turns:turn.cloudflare.com:443`. The Mac itself does not use the relay. If Cloudflare can't be reached the
 offer simply has no relay. The logins travel inside the sealed envelope; anyone able to open it (a holder of the
@@ -95,10 +96,10 @@ owner relay traffic.
 
 ## Worker relay
 
-Optional, per Mac, and needing no payment details: the owner's own Cloudflare Worker (`relay/`, deployed with
+Optional, per Mac, and needing no payment details: the owner's own Cloudflare Worker (`core/relay/`, deployed with
 `wrangler deploy`; Durable Objects on the Workers free plan). When WebRTC can't get through, the two ends talk over
-WebSockets to it instead, and it passes bytes between them. Shared code: `site/js/shared/wsrelay.js`; Mac side
-`host/node/src/wsrelay.mjs`; viewer side `site/js/ui/connection.js` and `site/js/ui/relaymedia.js`.
+WebSockets to it instead, and it passes bytes between them. Shared code: `core/protocol/wsrelay.js`; Mac side
+`mac/host/node/src/wsrelay.mjs`; viewer side `mac/site/js/ui/connection.js` and `mac/site/js/ui/relaymedia.js`.
 
 **Setting it up.** Setup saves the Worker's address (`https://<name>.workers.dev` only: the website's CSP allows
 `wss://*.workers.dev` and nothing else). The Mac reads `GET /v1/info` (`{perch: "relay", v: 1, claimed}`); if the
@@ -143,7 +144,7 @@ client uses (CONNECT, QoS 0 PUBLISH and SUBSCRIBE, UNSUBSCRIBE, PINGREQ, DISCONN
 adds it to its brokers while a relay is set up, and names the relay to signed-in viewers in `ready` (`relay`, its
 https address), which remember it with the Mac (`perch.macs.v1`, `relay`) and add its broker the next time.
 
-**The website from the relay.** The relay Worker also serves `site/` (Workers static assets) from its own address. A
+**The website from the relay.** The relay Worker also serves `mac/site/` (Workers static assets) from its own address. A
 page whose origin is a `workers.dev` relay (`GET /v1/info` answers `{perch: "relay"}`) puts that relay's broker first,
 so it can find the Mac even on a first visit where only `*.workers.dev` gets through. Passkeys belong to that address,
 so it is one of the Mac's sites (Setup, "Sites that can sign in"), and devices pair there once.
@@ -181,7 +182,7 @@ makes keyframes on its own, so the Mac makes one when the session starts, on eve
 once a second when no new one arrived. werift has no H.264 packetizer; the host has its own (RFC 6184 single NAL,
 STAP-A, FU-A at 1200-byte payloads). NACK retransmission and RTCP sender reports are werift's.
 
-Picture size and bitrate (`host/node/src/media.mjs`). The bitrate target follows the browser's receiver reports
+Picture size and bitrate (`mac/host/node/src/media.mjs`). The bitrate target follows the browser's receiver reports
 (loss) and its bandwidth estimate (REMB); a low estimate is ignored while little is being sent (a still screen),
 because the estimate can't exceed about 1.5 times what the browser receives. The picture's longest edge is the
 smallest of: the preset's `maxEdge`, the viewer's screen (`view`), and what the link carries at full frame rate
@@ -203,7 +204,7 @@ After the `control` channel opens, the Mac sends `hi` with a fresh 32-byte `nonc
 bind = SHA-256("perch bind v1" ‖ nonce ‖ SHA-256(offerSdpText) ‖ SHA-256(answerSdpText))
 ```
 
-over the SDP texts **exactly as each side sent or received them** (`site/js/shared/bind.js`). The SDPs carry the DTLS
+over the SDP texts **exactly as each side sent or received them** (`core/protocol/bind.js`). The SDPs carry the DTLS
 certificate fingerprints WebRTC verifies in its handshake, so a party that substituted either SDP to sit in the middle
 makes the two sides compute different values. Every sign-in proof is made over `bind`:
 
@@ -260,7 +261,7 @@ Mac → viewer first: `{t:"hi", pv, hv, nonce, name, route}`.
 4. Mac verifies the registration over `bind`, then `{t:"totp"}` → `{t:"code"}`; on success it saves the device and
    sends `{t:"paired", name, credentialId}` followed by `ready`. A pairing link works once; three bad proofs burn it.
 
-**One-tap sign-in** (`caps: ["quick"]` in the offer; `site/js/shared/bind.js`). When a browser doesn't know which Mac
+**One-tap sign-in** (`caps: ["quick"]` in the offer; `core/protocol/bind.js`). When a browser doesn't know which Mac
 a passkey is for, asking for it twice (once to read the user handle, once to sign the nonce) is avoided: the browser
 makes its WebRTC certificate first and the passkey signs `SHA-256("perch quick v1" ‖ r ‖ ts ‖ fingerprint)` with a fresh
 16-byte `r`, the time `ts` (ms) and the browser's own certificate fingerprint. The user handle names the Mac and its
@@ -430,10 +431,10 @@ the app starts its sound tap, which then runs until capture stops), `relaunch {}
 The host serves Setup on `http://127.0.0.1:<random port>/` and only answers requests that carry its random key
 (`?k=` on the first load, then the `X-Perch-Key` header), whose `Host` is `127.0.0.1:<port>` or `localhost:<port>`,
 and — for POSTs — whose `Origin` matches. The app's "Open Setup…" menu item opens that URL. The API is under `/api/`;
-see `host/node/src/setup-server.mjs`.
+see `mac/host/node/src/setup-server.mjs`.
 
 **Updates.** The host asks GitHub for the latest release a minute after starting, then daily (every six hours with
-the `autoUpdate` setting on). Installing runs `site/install.sh --update`, which quits Perch (`pgrep`/`pkill -a`: the
+the `autoUpdate` setting on). Installing runs `mac/site/install.sh --update`, which quits Perch (`pgrep`/`pkill -a`: the
 script runs from inside Perch, and without `-a` they skip their own ancestors), replaces the app only once it has
 exited, and opens it again. Every half minute the host also reads the version of the Perch.app on disk: a different
 one from the version running means an update that couldn't restart Perch, so Setup and the menu bar offer "Restart

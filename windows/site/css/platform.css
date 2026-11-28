@@ -1,5 +1,5 @@
-/* The "Mac · Windows" switch and the home-screen offer (js/platform.js). The same file is in both sites
-   (site/css/ and windows/site/css/): it uses each site's own colours (--accent, --surface, --line, ...). */
+/* The "Mac · Windows" switch and the home-screen offer (js/platform.js). Written once in core/site/css/ and copied
+   into both sites by core/sync.mjs: it uses each site's own colours (--accent, --surface, --line, ...). */
 .platform {
   display: inline-flex; align-items: center; gap: 2px; padding: 3px; margin: 0 auto 0 14px;
   border: 1px solid var(--line); border-radius: 999px; background: var(--surface);

@@ -16,7 +16,7 @@ between.
 - **Clipboard both ways**, pictures too. **Talk through your PC:** your microphone, played on its speakers.
 - **Guest links:** let someone watch your screen for a while, without being able to touch anything.
 - **Strict Wi-Fi:** an optional relay in a free Cloudflare account of your own (TURN, or a small Worker that needs
-  no payment details, with a Node.js / Cloudflare Quick Tunnel backup): [relay/](relay/README.md).
+  no payment details, with a Node.js / Cloudflare Quick Tunnel backup): [core/relay/](../core/relay/README.md).
 - **Control admin apps:** optionally, Roost can click and type into apps that run as administrator.
 - **Windows 10 (1903 or later) and Windows 11, on x64 and ARM64.** No administrator rights needed to install.
 

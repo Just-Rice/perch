@@ -16,6 +16,9 @@ import { roomUrl, roomAuth, relayBroker } from '../../site/js/shared/wsrelay.js'
 import { Signaling } from './signaling.mjs';
 import { silentLog } from './log.mjs';
 
+// Where a relay (core/relay, shared with Perch) serves Roost's sign-in page: Perch's website is at its root.
+const RELAY_SITE_PATH = '/windows/connect';
+
 const ACTIVITY_SHOWN = 50;
 const ECHO_KEEP = 500;
 const BYE_TEXT = {
@@ -878,7 +881,7 @@ export class Controller {
     if (this.workerRelay.backup) this.rendezvous.addBroker?.(relayBroker(this.workerRelay.backup));
   }
 
-  // A backup relay (relay/node behind a tunnel, holding the main relay's secret): its own site and broker too.
+  // A backup relay (core/relay/node behind a tunnel, holding the main relay's secret): its own site and broker too.
   async workerRelayBackupSet(url) {
     const before = this.workerRelay.backup;
     await this.workerRelay.saveBackup(url);
@@ -886,7 +889,7 @@ export class Controller {
     if (before && before !== base) this.rendezvous.removeBroker?.(relayBroker(before));
     this._useRelayBroker();
     if (!this.auth.siteFor(base)) {
-      this.store.addSite({ origin: base, url: `${base}/connect` });
+      this.store.addSite({ origin: base, url: `${base}${RELAY_SITE_PATH}` });
       this.store.activity('settings', `Sign-ins are now accepted from ${base} (this PC's backup relay)`);
     }
     this.store.activity('settings', 'Backup relay set up');
@@ -924,11 +927,11 @@ export class Controller {
     const previous = this.workerRelay.base;
     await this.workerRelay.save(url);
     this._useRelayBroker(previous !== this.workerRelay.base ? previous : null);
-    // The relay serves the Roost site too: devices can sign in there (and new pairing links point there), on this
+    // The relay serves the Roost site too (at /windows/, beside Perch's): devices can sign in there (and new pairing links point there), on this
     // PC only. Nobody else's PC uses it.
     const base = this.workerRelay.base;
     if (base && !this.auth.siteFor(base)) {
-      this.store.addSite({ origin: base, url: `${base}/connect` });
+      this.store.addSite({ origin: base, url: `${base}${RELAY_SITE_PATH}` });
       this.store.activity('settings', `Sign-ins are now accepted from ${base} (this PC's relay)`);
     }
     this.store.activity('settings', replacing ? 'Worker relay replaced' : 'Worker relay for strict networks set up');
@@ -1241,7 +1244,7 @@ export class Controller {
     if (s.config.ownRelaySiteChecked) return;
     const base = this.workerRelay.base;
     if (base && !this.auth.siteFor(base)) {
-      s.addSite({ origin: base, url: `${base}/connect` });
+      s.addSite({ origin: base, url: `${base}${RELAY_SITE_PATH}` });
       s.activity('settings', `Sign-ins are still accepted from ${base} (this PC's relay)`);
     }
     s.config.ownRelaySiteChecked = true;

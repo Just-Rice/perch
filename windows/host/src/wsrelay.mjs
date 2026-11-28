@@ -1,4 +1,4 @@
-// The PC's side of the Worker relay (docs/PROTOCOL.md, "Worker relay"): the owner's own Cloudflare Worker (relay/),
+// The PC's side of the Worker relay (docs/PROTOCOL.md, "Worker relay"): the owner's own Cloudflare Worker (core/relay/),
 // used when a network blocks WebRTC. Unlike the TURN relay (relay.mjs) it needs no payment details and has no data
 // allowance to use up: Workers don't charge for bandwidth.
 //
@@ -88,7 +88,7 @@ export class WorkerRelay {
       e => { this.lastError = e.message; this.log?.warn(`worker relay: ${e.message}`); });
   }
 
-  // A backup relay: another copy (relay/node) that already holds this PC's secret (its RELAY_SECRET). Offers name it
+  // A backup relay: another copy (core/relay/node) that already holds this PC's secret (its RELAY_SECRET). Offers name it
   // while the main relay can't be reached, say when it has used up its day on Cloudflare's free plan.
   async saveBackup(url) {
     if (!this.configured) throw new Error('Set up the main relay first.');
@@ -105,7 +105,7 @@ export class WorkerRelay {
     this._picked = null;
   }
 
-  // A relay on this PC behind a Cloudflare Quick Tunnel (relay/node, QUICK_TUNNEL=1): `local` is its loopback address.
+  // A relay on this PC behind a Cloudflare Quick Tunnel (core/relay/node, QUICK_TUNNEL=1): `local` is its loopback address.
   // Its public https://….trycloudflare.com address is new each time the tunnel starts, so it is asked for whenever an
   // offer needs a backup, rather than saved.
   async saveTunnel(local) {

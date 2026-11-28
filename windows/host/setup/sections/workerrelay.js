@@ -1,4 +1,4 @@
-// The Worker relay: the owner's own Cloudflare Worker (relay/), for strict networks, with no payment details needed
+// The Worker relay: the owner's own Cloudflare Worker (core/relay/), for strict networks, with no payment details needed
 // (host/src/wsrelay.mjs). Roost checks the address really is a Roost relay, and claims it, before saving.
 // Once it is set up, two backups for it can be added: a copy of the relay elsewhere behind a tunnel with a fixed
 // address (workerRelayBackupSet), or one on this PC behind a Cloudflare Quick Tunnel whose address changes, which Roost

@@ -4,7 +4,8 @@
 export const PROTO = 1;
 export const MIN_PEER_PROTO = 1;
 
-// Where Roost's website lives, and its own meeting points, are in product.js. Re-exported here, so nothing that
+// Where each project's website lives, and its own meeting points, are in its own product.js (mac/site/js/shared/,
+// windows/site/js/shared/), the one file there that doesn't come from core/protocol. Re-exported here, so nothing that
 // imported them from proto.js changes.
 export { APP_ORIGIN, RP_ID, SITE_URL, CONNECT_URL, TOPIC_PREFIX, CLIENT_PREFIX } from './product.js';
 

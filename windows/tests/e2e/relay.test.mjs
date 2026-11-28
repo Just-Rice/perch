@@ -1,4 +1,4 @@
-// The Worker relay end to end: the real relay Worker (relay/, run by `wrangler dev`), the real Mac host (test mode,
+// The Worker relay end to end: the real relay Worker (core/relay/, run by `wrangler dev`), the real Mac host (test mode,
 // with the stand-in app's test video and sound) and the real website in headless Chrome, told to use the relay
 // (?transport=relay stands in for a network that blocks WebRTC). Covers setting the relay up from Setup's API, pairing
 // and signing in over it (the pinned Mac's signed relay offer), the picture and sound arriving, and input reaching the Mac.
@@ -21,14 +21,15 @@ import { MqttClient } from '../../site/js/shared/mqtt.js';
 import { relayBroker } from '../../site/js/shared/wsrelay.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
+const RELAY = join(ROOT, '..', 'core', 'relay'); // the relay both projects share
 // wrangler's own entry point, run with this Node.js: the .bin shim is a shell script, which Windows can't spawn.
-const WRANGLER = join(ROOT, 'relay/node_modules/wrangler/bin/wrangler.js');
+const WRANGLER = join(RELAY, 'node_modules/wrangler/bin/wrangler.js');
 // ROOST_E2E_RELAY=https://<a fresh, unclaimed deploy>.workers.dev runs these against a relay on Cloudflare itself.
 const DEPLOYED = process.env.ROOST_E2E_RELAY || null;
 // ROOST_E2E_RELAY_NODE=1 runs them against the plain Node.js relay (relay/node) instead of `wrangler dev`.
 const NODE_RELAY = !!process.env.ROOST_E2E_RELAY_NODE;
-const skip = DEPLOYED || (NODE_RELAY ? existsSync(join(ROOT, 'relay/node/node_modules/ws')) : existsSync(WRANGLER)) ? false
-  : `${NODE_RELAY ? 'relay/node' : 'relay'}/node_modules is missing: run \`npm ci\` there first`;
+const skip = DEPLOYED || (NODE_RELAY ? existsSync(join(RELAY, 'node/node_modules/ws')) : existsSync(WRANGLER)) ? false
+  : `${NODE_RELAY ? 'core/relay/node' : 'core/relay'}/node_modules is missing: run \`npm ci\` there first`;
 
 let stack, app, relay, relayUrl;
 
@@ -45,10 +46,10 @@ async function startRelay() {
   const port = await freePort();
   const state = mkdtempSync(join(tmpdir(), 'roost-relay-'));
   const proc = NODE_RELAY
-    ? spawn(process.execPath, [join(ROOT, 'relay/node/server.mjs')], { stdio: ['ignore', 'pipe', 'pipe'],
+    ? spawn(process.execPath, [join(RELAY, 'node/server.mjs')], { stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PORT: String(port), HOST: '127.0.0.1', RELAY_DATA: state, RELAY_SECRET: '' } })
     : spawn(process.execPath, [WRANGLER, 'dev', '--port', String(port), '--ip', '127.0.0.1', '--persist-to', state, '--log-level', 'warn'],
-    { cwd: join(ROOT, 'relay'), stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
+    { cwd: RELAY, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CI: '1' } });
   let output = '';
   proc.stdout.on('data', d => { output += d; });
   proc.stderr.on('data', d => { output += d; });
@@ -243,15 +244,15 @@ test('where only the relay gets through: a page it serves pairs and signs in, fi
     { what: 'the Mac on the relay’s broker' });
   // The website as the relay serves it, from the relay's own address (localhost: passkeys need a name, not an IP).
   const origin = DEPLOYED ? relayUrl : relayUrl.replace('127.0.0.1', 'localhost');
-  const page0 = await fetch(`${origin}/connect.html`);
+  const page0 = await fetch(`${origin}/windows/connect.html`);
   assert.equal(page0.status, 200);
   assert.match(await page0.text(), /Roost/);
   // Locally both sites are on localhost, so the passkey from the tests above would count as this site's too ("already
   // paired"). On the real thing they are different addresses; forget the earlier device to model that.
   if (!DEPLOYED) await app.call('devicesRemoveAll');
-  await app.call('siteAdd', `${origin}/`);
+  await app.call('siteAdd', `${origin}/windows/`);
   const { link } = await app.call('pairStart', origin);
-  assert.ok(link.startsWith(`${origin}/connect.html#pair=`), link);
+  assert.ok(link.startsWith(`${origin}/windows/connect.html#pair=`), link);
   // Locally, the only public broker the page may use is a dead one: it can only find the Mac through the relay.
   const local = DEPLOYED ? '' : `test=1&relaysite=1&transport=relay&brokers=${encodeURIComponent('ws://127.0.0.1:9/')}`;
   const page = await openPage(stack, local ? link.replace('connect.html#', `connect.html?${local}#`) : link, { name: 'relay-site' });
@@ -272,6 +273,6 @@ test('saving the relay made its address one of this PC\u2019s sign-in sites, and
   const own = st.sites.find(x => x.origin === relayUrl);
   assert.ok(own && !own.builtIn && own.primary, JSON.stringify(st.sites));
   const { link } = await app.call('pairStart');
-  assert.ok(link.startsWith(`${relayUrl}/connect#pair=`), link);
+  assert.ok(link.startsWith(`${relayUrl}/windows/connect#pair=`), link);
   await app.call('pairCancel');
 });

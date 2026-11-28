@@ -13,7 +13,7 @@ sound, the mouse and keyboard. Free and open source, with no account and no serv
 - **Talk through your Mac:** your microphone, played on the Mac's speakers or (with a loopback device) into a call.
 - **Guest links:** let someone watch your screen for a while, without being able to touch anything.
 - **Strict Wi-Fi:** an optional relay in a free Cloudflare account of your own, for school and office networks: either
-  Cloudflare's TURN service, or a small Worker you deploy ([relay/](relay/README.md)) that needs no payment details.
+  Cloudflare's TURN service, or a small Worker you deploy ([core/relay/](core/relay/README.md)) that needs no payment details.
 - **Apple silicon and Intel Macs.**
 - **On your home screen:** add the website to a phone's or tablet's home screen (Android: Install; iPhone and iPad:
   Share › Add to Home Screen) and it opens full screen, like an app.
@@ -21,6 +21,9 @@ sound, the mouse and keyboard. Free and open source, with no account and no serv
 **Have a Windows PC?** [Roost](windows/README.md), in [windows/](windows/), is Perch for Windows: the same website
 (at [just-rice.github.io/perch/windows](https://just-rice.github.io/perch/windows/)), the same sign-in and protocol,
 with a native Windows app. The switch at the top of every page goes between the two.
+
+The repository: [`mac/`](mac/) is Perch, [`windows/`](windows/) is Roost, and [`core/`](core/README.md) is what they
+share (the protocol, the relay and the parts of the website that are the same), written once.
 
 > Perch is a **beta**, so far tested on one Mac. Please [report problems](https://github.com/Just-Rice/perch/issues).
 
@@ -70,13 +73,13 @@ Applications and open it. When macOS refuses, go to System Settings › Privacy 
         └──────────── direct, encrypted WebRTC connection (screen, sound, input) ┘
 ```
 
-- **The website** is the screen and the remote: plain HTML and JavaScript on GitHub Pages (`site/`).
-- **The Mac app** (`host/app/`, Swift, Command Line Tools only) records the screen and sound with ScreenCaptureKit,
+- **The website** is the screen and the remote: plain HTML and JavaScript on GitHub Pages (`mac/site/`).
+- **The Mac app** (`mac/host/app/`, Swift, Command Line Tools only) records the screen and sound with ScreenCaptureKit,
   compresses them with the Mac's hardware (VideoToolbox H.264, AudioToolbox Opus) and performs clicks and keys with
   Quartz events. It runs the host as a child process with a bundled Node.js.
-- **The relay** (`relay/`, optional) is a Cloudflare Worker the owner deploys for networks that block WebRTC: it passes
+- **The relay** (`core/relay/`, optional) is a Cloudflare Worker the owner deploys for networks that block WebRTC: it passes
   the end-to-end encrypted connection along over WebSockets.
-- **The host** (`host/node/`) finds viewers through public MQTT brokers, connects with WebRTC
+- **The host** (`mac/host/node/`) finds viewers through public MQTT brokers, connects with WebRTC
   ([werift](https://github.com/shinyoshiaki/werift-webrtc)), checks every sign-in, and serves the local Setup page.
 - **Signing in** takes a passkey plus a 6-digit code, both checked by the Mac. Every proof is tied to that exact
   connection. An optional backup sign-in uses the Mac's name, a password (checked with OPAQUE, so the password

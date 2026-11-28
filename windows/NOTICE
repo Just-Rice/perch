@@ -6,7 +6,7 @@ Roost is built on Perch, created by Just-Rice (https://github.com/Just-Rice/perc
 same licence, the Apache License, Version 2.0 (see LICENSE).
 
 The protocol (docs/PROTOCOL.md), the host (host/), the code shared by the website and the host (site/js/shared/), the
-relays (relay/), the website's connection, sign-in and viewer logic, and the tests come from Perch. Roost has modified
+relays (core/relay/), the website's connection, sign-in and viewer logic, and the tests come from Perch. Roost has modified
 them: ported to Windows, renamed, and given a new design. roost.exe (app/) is new in Roost; parts of its design follow
 Perch's Mac app.
 

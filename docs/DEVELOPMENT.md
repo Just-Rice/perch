@@ -22,6 +22,8 @@ The repository holds Perch (for a Mac) in `mac/`, Roost (for Windows) in `window
 
 ## Running the parts
 
+The commands below run from `mac/`.
+
 The app runs the host itself. For development, point it at the source and at Homebrew's Node:
 
 ```
@@ -61,7 +63,7 @@ swift build -c release --package-path host/app && node --test tests/e2e/app.test
 host/app/test/run.sh                                                      # the app: self-test, IPC, real capture, bundle
 ```
 
-`PERCH_E2E_APP=/path/to/Perch.app node --test mac/tests/e2e/app.test.mjs` runs the last end-to-end test against a
+`PERCH_E2E_APP=/path/to/Perch.app node --test tests/e2e/app.test.mjs` runs the last end-to-end test against a
 packaged app (its bundled Node and host). Long browser runs: prefix with `caffeinate -i` so the Mac doesn't sleep.
 
 ## Releases

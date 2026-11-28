@@ -4,8 +4,8 @@ node_modules/
 build/
 dist/
 *.xcodeproj/xcuserdata/
-host/app/.swiftpm/
-tests/e2e/out/
+mac/host/app/.swiftpm/
+mac/tests/e2e/out/
 *.log
 .reference/
 .build-intel/

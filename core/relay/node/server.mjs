@@ -380,7 +380,7 @@ server.on('upgrade', async (req, socket, head) => {
     if (role === 'mac') {
       const secret = await ownerSecret();
       if (!secret || !sameHex(url.searchParams.get('auth'), hmacHex(secret, 'perch relay room v1', name))) {
-        return refuse(socket, 403, 'not this relay’s PC');
+        return refuse(socket, 403, 'not this relay’s computer');
       }
     } else if (role !== 'viewer') {
       return refuse(socket, 400, 'bad role');

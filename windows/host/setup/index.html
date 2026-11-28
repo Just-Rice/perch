@@ -644,11 +644,11 @@
               <pre class="code">git clone https://github.com/Just-Rice/perch
 cd perch/core/relay
 npx wrangler login
-npx wrangler deploy</pre></li>
+npx wrangler deploy --name roost-relay</pre></li>
             <li>Wrangler prints the relay's address, such as <i>https://roost-relay.your-name.workers.dev</i>. Paste it below.</li>
           </ol>
           <p class="small muted">The first PC to save a relay becomes its owner; no other PC can use it. For a second PC,
-            deploy another copy under a different name (change <i>name</i> in <i>relay/wrangler.toml</i>).</p>
+            deploy another copy under a different name (<i>npx wrangler deploy --name roost-relay-2</i>).</p>
           <p class="small muted">If the Roost website or the public message services are blocked where you are, the relay
             stands in for both: add its address under <a href="#sitesCard">Sites that can sign in</a>, pair your device on
             that site once, and sign in at the relay's address from then on.</p>

@@ -311,7 +311,7 @@ export default {
       if (role === 'mac') {
         const secret = await ownerSecret(env);
         if (!secret || !sameHex(url.searchParams.get('auth'), await hmacHex(secret, 'perch relay room v1', room))) {
-          return new Response('not this relay’s PC', { status: 403 });
+          return new Response('not this relay’s computer', { status: 403 });
         }
       } else if (role !== 'viewer') {
         return new Response('bad role', { status: 400 });

@@ -70,7 +70,7 @@ recent Safari, Chrome, Edge or Firefox on the viewing device, and the PC on, awa
   viewer's mouse and keyboard with SendInput. It runs the host with a bundled Node.js.
 - **The host** (`host/`) finds viewers through public MQTT brokers, connects with WebRTC, checks every sign-in, and
   serves the local Control Center (`host/setup/`).
-- **The relay** (`relay/`, optional) is a Cloudflare Worker you deploy for networks that block WebRTC.
+- **The relay** (`../core/relay/`, shared with Perch, optional) is a Cloudflare Worker you deploy for networks that block WebRTC.
 
 [docs/PROTOCOL.md](docs/PROTOCOL.md) is the contract between the parts, [docs/WINDOWS-APP.md](docs/WINDOWS-APP.md)
 the Windows app's side of it, [docs/BRAND.md](docs/BRAND.md) Roost's look and words, and

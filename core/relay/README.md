@@ -1,7 +1,7 @@
 # The Worker relay (Perch and Roost)
 
 A tiny Cloudflare Worker for networks that block the direct connection Perch normally uses (school or office Wi-Fi).
-One relay serves Perch and Roost alike: the same deploy works for your Macs and your Windows PCs.
+The same relay code serves Perch and Roost alike: deploy one copy for each Mac or Windows PC.
 You run it in **your own** free Cloudflare account: no payment details, and no monthly data allowance to use up
 (Workers don't charge for bandwidth).
 
@@ -18,12 +18,16 @@ computer.
 git clone https://github.com/Just-Rice/perch
 cd perch/core/relay
 npx wrangler login
-npx wrangler deploy
+npx wrangler deploy                      # for a Mac
+npx wrangler deploy --name roost-relay   # for a Windows PC
 ```
 
 Wrangler prints the relay's address, like `https://perch-relay.your-name.workers.dev`. On your Mac, open Perch's
 **Setup**, go to **Relay without a card**, paste the address and choose **Check and save**. On a Windows PC, the same
 in Roost's **Control Center**.
+
+Each relay belongs to the first computer that saves it, so a Mac and a PC each need their own. Deploying twice under
+the same name in one Cloudflare account replaces the first deploy, so give each one its own name, as above.
 
 ### Where only `*.workers.dev` gets through
 
@@ -35,7 +39,7 @@ are, use your relay's address instead:
 2. In **Pair a device**, choose that site under **Pair it for**, make the link and open it on your device, once.
 3. From then on, sign in at `https://perch-relay.your-name.workers.dev/connect.html`.
 
-The first Mac to save a relay becomes its owner, and only that Mac can use it. For a second Mac, deploy another copy
+The first computer to save a relay becomes its owner, and only that computer can use it. For a second one, deploy another copy
 under a different name: change `name` in `wrangler.toml` (or run `npx wrangler deploy --name perch-relay-2`).
 
 ## How much it can carry
@@ -57,5 +61,5 @@ npm ci
 npx wrangler dev          # http://localhost:8787
 ```
 
-`tests/e2e/relay.test.mjs` runs the real relay under `wrangler dev` with the real host and website. Set
+`mac/tests/e2e/relay.test.mjs` (and `windows/tests/e2e/relay.test.mjs`) run the real relay under `wrangler dev` with the real host and website. Set
 `PERCH_E2E_RELAY=https://<a fresh deploy>.workers.dev` to run it against Cloudflare itself.

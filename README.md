@@ -94,7 +94,7 @@ You need a Mac with Apple silicon, Xcode's Command Line Tools (`xcode-select --i
 for the tests, Google Chrome and ffmpeg.
 
 ```
-git clone https://github.com/Just-Rice/perch && cd perch
+git clone https://github.com/Just-Rice/perch && cd perch/mac
 (cd host/node && npm ci && node scripts/bundle.mjs)
 NODE_BIN="$(host/app/test/fetch-node.sh .build/node v24.22.0)"     # the official Node.js, checksum-checked
 host/scripts/make-app.sh --host-bundle host/node/dist --node "$NODE_BIN"   # -> build/Perch.app
